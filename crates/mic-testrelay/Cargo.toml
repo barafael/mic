@@ -10,7 +10,7 @@ publish.workspace = true
 anyhow = "1.0.104"
 moq-auth = "=0.2.2"
 moq-relay = { version = "=0.17.8", default-features = false, features = ["noq"] }
-moq-tokio = "=0.19.29"
+moq-tokio = { version = "=0.19.29", default-features = false, features = ["noq", "aws-lc-rs"] }
 tokio = { version = "1.54.1", features = ["rt", "macros", "time"] }
 url = "2"
 

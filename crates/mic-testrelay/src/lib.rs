@@ -42,9 +42,10 @@ impl TestRelay {
         })
     }
 
-    /// Where clients dial it.
+    /// Where clients dial it: its address, not `localhost`, which resolves to `::1` first, where
+    /// nothing listens, and an attempt there waits out its timeout.
     pub fn url(&self) -> url::Url {
-        format!("https://localhost:{}/", self.quic.port())
+        format!("https://{}/", self.quic)
             .parse()
             .expect("a URL of a port is valid")
     }

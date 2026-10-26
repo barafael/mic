@@ -314,9 +314,12 @@ Each numbered item below is about one commit. Box phases are in **bold**.
     box's pin, with one TLS identity for its life, so a restart comes back on the same port with
     the same certificate. Its first test publishes and subscribes a track through it, before and
     after a restart. A test holds mic's moq crates to the box relay's versions.
-13. `mic-core: an async client and session`. `Client::new(config, handle)` and
-    `join(invite).await`; `moq-tokio` connect with the relay URL and CA from configuration (D8).
-    Tests: join and leave against `mic-testrelay`.
+13. `mic-core: an async client and session`. `Client::new(config, store, handle)` and
+    `join(invite).await`, run on the handle's runtime; `moq-tokio` connect with the relay URL and
+    its trust (system roots, a CA, or a fingerprint) from configuration (D8). A join that can't
+    reach the relay fails after the connect timeout with the last attempt's reason (no answer, a
+    fingerprint mismatch). Tests: join and leave against `mic-testrelay`; the same key across
+    joins; an absent relay and a wrong certificate, each said so.
 14. `mic-core: moq-e2ee on every track` (D17). The track layer every later commit publishes and
     subscribes through: catalogs, `profile`, and every track to come. There's no API for a
     track in the clear **⚠ unverified** that `moq-e2ee` wraps the hang catalog like any other
@@ -327,7 +330,10 @@ Each numbered item below is about one commit. Box phases are in **bold**.
     §5.2). Tests: two clients see each other arrive and leave.
 16. `mic-core: room state, commands and events`. `RoomState` behind `watch`, `Event` as a stream,
     and `Command` with `Leave` as its first variant. Tests drive two clients by commands only.
-17. `mic-core: reconnecting`. When the session drops, the client reconnects with backoff,
+17. `mic-core: reconnecting`. moq-tokio's connection already redials with backoff, but gives up
+    after its redial window, which is the join's connect timeout (10 s) today: settle how long a
+    room tries (minutes, or until left), and surface it. When the session drops, the client
+    reconnects with backoff,
     announces its broadcast again and resubscribes; `RoomState` shows `Reconnecting` meanwhile.
     It sits here because it needs the roster and the state, and before any media, so every
     track is born with it. Tests: `mic-testrelay` restarts mid-call; the roster comes back with

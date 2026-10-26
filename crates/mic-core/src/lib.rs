@@ -8,10 +8,12 @@
 pub mod invite;
 pub mod keys;
 pub mod secrets;
+pub mod session;
 
 pub use invite::{Invite, RoomId, RoomSecret};
 pub use keys::{DeviceSecret, RoomKey};
 pub use secrets::{SecretStore, device_secret};
+pub use session::{Client, Config, Room, Trust};
 
 /// `N` bytes from the operating system's random generator.
 pub(crate) fn random<const N: usize>() -> [u8; N] {

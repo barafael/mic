@@ -8,12 +8,16 @@ publish.workspace = true
 
 [dependencies]
 base64 = "0.23.1"
-derive_more = { version = "2.1.1", features = ["display", "error"] }
+derive_more = { version = "2.1.1", features = ["display", "error", "from"] }
 ed25519-dalek = "3.0.0"
 getrandom = "0.4.3"
 hkdf = "0.13.0"
 keyring-core = "1.0.1"
+moq-net = "=0.3.16"
+moq-tokio = { version = "=0.19.29", default-features = false, features = ["noq", "aws-lc-rs", "websocket"] }
 sha2 = "0.11.1"
+tokio = { version = "1.54.1", features = ["rt", "time", "sync", "macros"] }
+url = "2"
 zeroize = { version = "1.9.1", features = ["derive"] }
 
 [target.'cfg(all(unix, not(any(target_os = "macos", target_os = "ios", target_os = "android"))))'.dependencies]
@@ -24,3 +28,7 @@ apple-native-keyring-store = { version = "1.0.2", features = ["keychain"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-native-keyring-store = "1.1.0"
+
+[dev-dependencies]
+mic-testrelay = { path = "../mic-testrelay" }
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "time"] }
