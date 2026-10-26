@@ -910,7 +910,7 @@ Whether `moq-tokio` exposes that switch needs checking **(unverified)**.
   - Check whether zero-copy imports (DMA-BUF and similar) work with
     `WGPUConfiguration::Manual` **(unverified)**.
   - It lives in `spikes/video-tiles/`, excluded from the Cargo workspace
-    (`[workspace] exclude = ["spikes/*"]`), and is deleted once the app's
+    (`[workspace] exclude = ["spikes"]`), and is deleted once the app's
     own tiles are measured the same way.
 - **License (D24: MIT + Apache-2.0):** use Slint's **royalty-free license**.
   - Its condition is attribution, either:

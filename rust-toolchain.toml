@@ -1,0 +1,5 @@
+[toolchain]
+# Pinned, like every other upstream. A bump is its own commit.
+channel = "1.99.1"
+components = ["clippy", "rustfmt"]
+profile = "minimal"
