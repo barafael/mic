@@ -24,12 +24,10 @@ pub struct Record {
     checked: usize,
 }
 
-/// The screenshots: the tool, the displays as it takes them (`<name>=<socket>`), and how many
-/// were taken, which numbers them in the order of the checks.
+/// The screenshots: the tool, and the displays as it takes them (`<name>=<socket>`).
 struct Shots {
     tool: PathBuf,
     displays: Vec<String>,
-    taken: usize,
 }
 
 impl Record {
@@ -48,7 +46,6 @@ impl Record {
             Some(Shots {
                 tool: view::tool(the_box.repo(), "testbox-shot")?,
                 displays: view::displays(the_box),
-                taken: 0,
             })
         } else {
             None
@@ -74,7 +71,6 @@ impl Record {
         if let Some(shots) = &mut self.shots
             && !shots.displays.is_empty()
         {
-            shots.taken += 1;
             if let Err(error) = view::shot(&shots.tool, &self.directory, &label, &shots.displays) {
                 println!("screenshot {label}: {error}");
             }

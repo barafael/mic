@@ -1,6 +1,7 @@
 //! A harness's client, blocking and std only, as `cargo testbox` drives one: a request, then its
 //! reply; once subscribed, pushed snapshots in between.
 
+use std::collections::VecDeque;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
@@ -8,7 +9,7 @@ use std::time::Duration;
 
 use serde::de::DeserializeOwned;
 
-use crate::{Call, Outcome, Pushed, Reply, Request};
+use crate::{Call, Pushed, Reply, Request};
 
 /// A connection to a harness.
 pub struct Client {
@@ -16,7 +17,7 @@ pub struct Client {
     writer: UnixStream,
     next_id: u64,
     /// Pushes that came while a reply was awaited, oldest first.
-    pushed: Vec<Pushed>,
+    pushed: VecDeque<Pushed>,
 }
 
 impl Client {
@@ -28,7 +29,7 @@ impl Client {
             reader: BufReader::new(writer.try_clone()?),
             writer,
             next_id: 1,
-            pushed: Vec::new(),
+            pushed: VecDeque::new(),
         })
     }
 
@@ -45,7 +46,7 @@ impl Client {
         loop {
             let line = self.line()?;
             if let Ok(pushed) = serde_json::from_str::<Pushed>(&line) {
-                self.pushed.push(pushed);
+                self.pushed.push_back(pushed);
                 continue;
             }
             let reply: Reply<T> = serde_json::from_str(&line)
@@ -53,17 +54,14 @@ impl Client {
             if reply.id != id {
                 return Err(format!("the reply to {} instead of {id}: {line}", reply.id));
             }
-            return match reply.outcome {
-                Outcome::Ok(result) => Ok(result),
-                Outcome::Err(error) => Err(error),
-            };
+            return reply.outcome.into();
         }
     }
 
     /// The next pushed snapshot, once subscribed.
     pub fn next_pushed(&mut self) -> Result<Pushed, String> {
-        if !self.pushed.is_empty() {
-            return Ok(self.pushed.remove(0));
+        if let Some(pushed) = self.pushed.pop_front() {
+            return Ok(pushed);
         }
         let line = self.line()?;
         serde_json::from_str(&line).map_err(|error| format!("not a push: {error}: {line}"))

@@ -133,12 +133,17 @@ pub fn dev(the_box: &TestBox, phase: Phase) -> Result<()> {
         the_box.up()?;
     } else {
         let built = builder::build(the_box)?;
-        let mut pods: Vec<Pod> = built
+        let mut pods: Vec<Pod> = Vec::new();
+        // Each pod once, however many of its binaries changed, in whatever order.
+        for pod in built
             .updated
             .iter()
             .flat_map(|binary| builder::pods_running(binary))
-            .collect();
-        pods.dedup();
+        {
+            if !pods.contains(&pod) {
+                pods.push(pod);
+            }
+        }
         if !pods.is_empty() {
             for pod in pods {
                 the_box.play(pod)?;

@@ -69,7 +69,8 @@ pub struct Room {
     shared: Arc<Shared>,
     requests: mpsc::UnboundedSender<Request>,
     state: watch::Receiver<RoomState>,
-    events: broadcast::Sender<Event>,
+    /// Weak, so the events end once the room's task does, while handles remain.
+    events: broadcast::WeakSender<Event>,
 }
 
 /// What every handle reads without asking the room's task.
@@ -123,6 +124,7 @@ impl Room {
             connection: Connection::Connected,
         });
         let (events, _) = broadcast::channel(EVENTS);
+        let weak_events = events.downgrade();
         let (requests, received) = mpsc::unbounded_channel();
         let shared = Arc::new(Shared {
             invite: joined.invite,
@@ -147,14 +149,14 @@ impl Room {
             following,
             roster: followed,
             state,
-            events: events.clone(),
+            events,
         };
         joined.runtime.spawn(task.run(received));
         Self {
             shared,
             requests,
             state: watched,
-            events,
+            events: weak_events,
         }
     }
 
@@ -165,7 +167,11 @@ impl Room {
 
     /// What happens from now on.
     pub fn events(&self) -> Events {
-        Events(self.events.subscribe())
+        match self.events.upgrade() {
+            Some(events) => Events(events.subscribe()),
+            // Left: events that are over already.
+            None => Events(broadcast::channel(1).1),
+        }
     }
 
     /// Does what `command` says; done once this returns. After the room is left, every command
@@ -256,6 +262,7 @@ struct Task {
 
 impl Task {
     async fn run(mut self, mut requests: mpsc::UnboundedReceiver<Request>) {
+        let mut roster_open = true;
         loop {
             tokio::select! {
                 request = requests.recv() => match request {
@@ -277,8 +284,11 @@ impl Task {
                         break;
                     }
                 },
-                changed = self.roster.changed() => {
+                // Once the roster's task is gone, its `changed` is ready at once, every time: then
+                // it's no longer asked, or the loop would spin.
+                changed = self.roster.changed(), if roster_open => {
                     if changed.is_err() {
+                        roster_open = false;
                         continue;
                     }
                     let roster = self.roster.borrow_and_update().clone();
@@ -317,7 +327,6 @@ impl Task {
             Ok(_) => return,
             Err(error) => {
                 tracing::info!(%error, "the connection gave up; dialing again");
-                let _entered = tokio::runtime::Handle::current().enter();
                 self.connection = Some(
                     self.moq
                         .clone()

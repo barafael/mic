@@ -552,7 +552,12 @@ mod tests {
             "0.12345 s is before 0.9 s, though its text is longer"
         );
         assert_eq!(long.as_str(), "2026-10-26T23:34:06.900000000+01:00");
-        assert!(Timestamp::parse("2026-10-26T23:34:06+01:00") < short);
+        let whole = Timestamp::parse("2026-10-26T23:34:06+01:00");
+        assert!(whole < short);
+        assert_eq!(whole.as_str(), "2026-10-26T23:34:06.000000000+01:00");
+        assert!(
+            Timestamp::parse("2026-10-26T23:34:06Z") < Timestamp::parse("2026-10-26T23:34:06.1Z")
+        );
     }
 
     #[test]
@@ -603,8 +608,14 @@ pub struct Timestamp(String);
 
 impl Timestamp {
     pub fn parse(text: &str) -> Self {
-        // `2026-10-26T23:34:06.12+01:00`: the seconds, the fraction, the offset.
-        let (seconds, rest) = text.split_once('.').unwrap_or((text, ""));
+        // `2026-10-26T23:34:06.12+01:00`: the seconds, the fraction, the offset; a time without
+        // a fraction (`…:06+01:00`, `…:06Z`) has one of nine zeros, before its offset.
+        let time = text.find('T').map_or(0, |at| at + 1);
+        let end = text[time..]
+            .find(|c: char| !(c.is_ascii_digit() || c == ':'))
+            .map_or(text.len(), |at| time + at);
+        let (seconds, rest) = text.split_at(end);
+        let rest = rest.strip_prefix('.').unwrap_or(rest);
         let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
         let offset = &rest[digits.len()..];
         Self(format!("{seconds}.{digits:0<9}{offset}"))

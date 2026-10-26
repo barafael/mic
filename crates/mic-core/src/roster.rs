@@ -45,7 +45,8 @@ impl std::str::FromStr for ParticipantKey {
     /// 64 hex digits.
     fn from_str(text: &str) -> Result<Self, Self::Err> {
         let not_a_key = "not a participant's key: 64 hex digits";
-        if text.len() != 64 || !text.is_ascii() {
+        // Hex digits only: `u8::from_str_radix` would also take a sign, as in "+f".
+        if text.len() != 64 || !text.bytes().all(|byte| byte.is_ascii_hexdigit()) {
             return Err(not_a_key);
         }
         let mut key = [0; 32];
@@ -178,6 +179,10 @@ pub(crate) async fn follow(mut peers: Peers, roster: watch::Sender<Roster>) {
                 None => break,
             },
             Some((path, participant)) = updates.recv() => {
+                // A profile its reader sent before the peer went: the peer is gone all the same.
+                if !readers.contains_key(&path) {
+                    continue;
+                }
                 // A rejoin is a new broadcast with the same key: the newer one stands.
                 present.retain(|(at, known)| *at == path || known.key != participant.key);
                 match present.iter_mut().find(|(at, _)| *at == path) {
@@ -273,6 +278,11 @@ mod tests {
         let key = ParticipantKey([0x5c; 32]);
         assert_eq!(key.to_string().parse(), Ok(key));
         assert!("5c".parse::<ParticipantKey>().is_err());
+        assert!(
+            format!("+f{}", &key.to_string()[2..])
+                .parse::<ParticipantKey>()
+                .is_err()
+        );
         let json = serde_json::to_string(&key).unwrap();
         assert_eq!(serde_json::from_str::<ParticipantKey>(&json).unwrap(), key);
     }

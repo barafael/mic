@@ -166,6 +166,9 @@ pub struct Peers {
     own: String,
     consumer: moq_net::origin::Consumer,
     announced: moq_net::announce::Consumer,
+    /// An arrival taken from the announcements whose broadcast isn't had yet: kept across a
+    /// cancelled [`Peers::next`], so a `select!` that drops it loses no one.
+    pending: Option<String>,
 }
 
 impl Peers {
@@ -180,13 +183,20 @@ impl Peers {
             own,
             consumer,
             announced,
+            pending: None,
         }
     }
 
     /// The next arrival or departure; none once the session's origin is gone. A broadcast that
-    /// isn't shaped as a participant's is an error, and the next call goes on.
+    /// isn't shaped as a participant's is an error, and the next call goes on. Cancel-safe: an
+    /// arrival whose broadcast was still being asked for is asked for again by the next call.
     pub async fn next(&mut self) -> Option<Result<PeerEvent, TrackError>> {
         loop {
+            if let Some(path) = self.pending.clone() {
+                let arrived = self.arrived(path).await;
+                self.pending = None;
+                return Some(arrived);
+            }
             let update = self.announced.next().await?;
             let path = update.prefix.as_str().to_owned();
             if path == self.own {
@@ -195,7 +205,7 @@ impl Peers {
             if !update.kind.is_active() {
                 return Some(Ok(PeerEvent::Gone(path)));
             }
-            return Some(self.arrived(path).await);
+            self.pending = Some(path);
         }
     }
 
