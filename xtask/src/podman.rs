@@ -11,6 +11,7 @@ use std::process::Command;
 use crate::error::{self, Error, Result};
 use crate::images;
 use crate::process;
+use crate::settings::Settings;
 
 /// The box's network: `--internal`, so nothing in it reaches the host's network or beyond.
 pub const NETWORK: &str = "mic-testbox";
@@ -103,8 +104,8 @@ pub fn podman(args: &[&str]) -> Command {
 
 pub struct TestBox {
     repo: PathBuf,
-    /// Whether client pods get the host's GPU (`up --no-gpu` says no).
-    gpu: bool,
+    /// How it was brought up, or is to be.
+    settings: Settings,
 }
 
 /// The marker of the pod files' lines that pass the host's GPU through.
@@ -113,17 +114,17 @@ const GPU: &str = "# @GPU@ ";
 pub const RENDER_NODE: &str = "/dev/dri/renderD128";
 
 impl TestBox {
-    pub fn new(repo: &Path) -> Self {
-        Self {
-            repo: repo.to_owned(),
-            gpu: true,
-        }
+    /// The box as `up` last brought it up here, or with the defaults.
+    pub fn new(repo: &Path) -> Result<Self> {
+        Ok(Self::with(repo, Settings::saved(repo)?))
     }
 
-    /// Client pods without the host's GPU: llvmpipe and lavapipe, and software codecs.
-    pub fn without_gpu(mut self) -> Self {
-        self.gpu = false;
-        self
+    /// The box with these settings, which `up` keeps for what plays it again later.
+    pub fn with(repo: &Path, settings: Settings) -> Self {
+        Self {
+            repo: repo.to_owned(),
+            settings,
+        }
     }
 
     pub fn repo(&self) -> &Path {
@@ -133,11 +134,12 @@ impl TestBox {
     /// Builds the images that are missing and what the box runs, makes the network, and plays
     /// every pod of the box.
     pub fn up(&self) -> Result<()> {
-        if self.gpu && !Path::new(RENDER_NODE).exists() {
+        if self.settings.gpu && !Path::new(RENDER_NODE).exists() {
             return Err(Error::Failed(format!(
                 "no {RENDER_NODE} on this host: `cargo testbox up --no-gpu`"
             )));
         }
+        self.settings.save(&self.repo)?;
         self.images()?;
         crate::builder::build(self)?;
         self.network()?;
@@ -289,7 +291,7 @@ impl TestBox {
                 .ok_or_else(|| Error::Failed(format!("{}: no image {name}", source.display())))?
                 .tag(&self.repo)
         })?;
-        Ok(gpu_lines(&rendered, self.gpu).replace("@NAME@", pod.name()))
+        Ok(gpu_lines(&rendered, self.settings.gpu).replace("@NAME@", pod.name()))
     }
 
     /// Stops and removes the box's pods; `wipe` also removes the builder, and then every volume

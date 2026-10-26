@@ -13,6 +13,7 @@ mod podman;
 mod process;
 mod ready;
 mod run;
+mod settings;
 mod view;
 
 use std::path::{Path, PathBuf};
@@ -99,10 +100,22 @@ enum Command {
 
 fn main() -> ExitCode {
     let repo = repo_root();
-    let the_box = TestBox::new(&repo);
-    let outcome = match Cli::parse().command {
-        Command::Up { no_gpu: false } => the_box.up(),
-        Command::Up { no_gpu: true } => TestBox::new(&repo).without_gpu().up(),
+    let command = Cli::parse().command;
+    // `up` brings up the box its flags say, and keeps them; the rest take the box as it was
+    // brought up.
+    let the_box = match &command {
+        Command::Up { no_gpu } => Ok(TestBox::with(&repo, settings::Settings { gpu: !no_gpu })),
+        _ => TestBox::new(&repo),
+    };
+    let the_box = match the_box {
+        Ok(the_box) => the_box,
+        Err(reason) => {
+            eprintln!("testbox: {reason}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let outcome = match command {
+        Command::Up { .. } => the_box.up(),
         Command::Build => builder::build(&the_box).map(|_| ()),
         Command::Test { phase, screenshots } => {
             run::test(&the_box, phase, &phase.name(), screenshots, "")

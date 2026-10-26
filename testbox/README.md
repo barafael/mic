@@ -115,6 +115,9 @@ Phases don't need a fresh box: each check uses rooms and broadcasts of its own. 
   every client before each round. Each run's records are in `target/testbox-record/run/<run>/`.
 - **`down --wipe`** is for when something is wrong with the box itself.
 
+`up` keeps its flags in `target/testbox-pods/box.settings`, and whatever plays pods again later
+(`dev`, `run --fresh`) plays the same box: after `up --no-gpu`, still without the GPU.
+
 | Phase | What it checks |
 |---|---|
 | `box` | The network is internal; a pod resolves no outside name and opens no outside connection; an unchanged box starts without a build; a second build of an unchanged tree is a no-op; a binary from the builder runs in the client image; the probe window renders on RADV (llvmpipe with `--no-gpu`); a client's display, through its socket, shows what it draws; VA-API decodes VP9 |
