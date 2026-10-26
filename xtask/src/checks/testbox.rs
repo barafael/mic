@@ -46,6 +46,10 @@ pub fn testbox(checks: &mut Checks, the_box: &TestBox) -> Result<()> {
     checks.record("a binary from the builder runs in the client image", || {
         probe_runs(the_box)
     });
+    checks.record(
+        "every binary from the builder finds its libraries in the client image",
+        || libraries_found(the_box),
+    );
     let client = "probe";
     let gpu = has_gpu(the_box, client)?;
     let expected = if gpu { "RADV" } else { "llvmpipe" };
@@ -57,11 +61,11 @@ pub fn testbox(checks: &mut Checks, the_box: &TestBox) -> Result<()> {
         display_shows(the_box, &directory)
     });
     if gpu {
-        checks.record("VA-API decodes VP9 in a client", || {
+        checks.record("VA-API decodes VP9 in the box", || {
             vp9_decode(the_box, client)
         });
     } else {
-        checks.skip("VA-API decodes VP9 in a client", "no GPU (`up --no-gpu`)");
+        checks.skip("VA-API decodes VP9 in the box", "no GPU (`up --no-gpu`)");
     }
     Ok(())
 }
@@ -187,6 +191,54 @@ fn probe_runs(the_box: &TestBox) -> Result<()> {
         Ok(())
     } else {
         Err(Error::Failed(format!("it said {said:?}")))
+    }
+}
+
+/// `ldd` of every binary in `target/testbox-bin`, in the client image: none names a library it
+/// can't find. The builder and the client image install their packages apart, and their lists
+/// drift as libraries arrive (libvpx, PipeWire, D-Bus).
+fn libraries_found(the_box: &TestBox) -> Result<()> {
+    let client = images::find("client").ok_or("no client image")?;
+    let tag = client.tag(the_box.repo())?;
+    let bin = the_box.repo().join(builder::BIN);
+    let mut binaries: Vec<String> = std::fs::read_dir(&bin)
+        .map_err(|source| Error::Io {
+            what: bin.display().to_string(),
+            source,
+        })?
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        // The builder's half-written files start with a dot.
+        .filter(|name| !name.starts_with('.'))
+        .collect();
+    binaries.sort();
+    if binaries.is_empty() {
+        return Err(Error::Failed(
+            "no binaries: `cargo testbox build`".to_owned(),
+        ));
+    }
+    let script = binaries
+        .iter()
+        .map(|binary| format!("echo '== {binary}'; ldd /opt/mic/{binary}"))
+        .collect::<Vec<_>>()
+        .join("; ");
+    let mut run = podman(&["run", "--rm", "--network", "none", "--volume"]);
+    run.arg(format!("{}:/opt/mic:ro", bin.display()))
+        .args([tag.as_str(), "bash", "-c", &script]);
+    let listed = process::output(run)?;
+    let mut binary = "";
+    let mut missing = Vec::new();
+    for line in listed.lines() {
+        if let Some(name) = line.strip_prefix("== ") {
+            binary = name;
+        } else if line.contains("not found") {
+            missing.push(format!("{binary}: {}", line.trim()));
+        }
+    }
+    if missing.is_empty() {
+        Ok(())
+    } else {
+        Err(Error::Failed(missing.join("; ")))
     }
 }
 
