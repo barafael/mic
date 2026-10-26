@@ -1,6 +1,6 @@
 [workspace]
 # Members are listed explicitly: a glob such as "crates/*" fails while it matches nothing.
-members = ["xtask"]
+members = ["testbox/probe", "xtask"]
 resolver = "3"
 # Spikes are measurements, not part of the app (PLAN.md, M4).
 exclude = ["spikes"]
@@ -10,3 +10,11 @@ version = "0.1.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 publish = false
+
+# What the box runs (`cargo testbox build`): optimized, as media code will need, but incremental
+# and without LTO, so a change is in the box in seconds; line tables for backtraces.
+[profile.testbox]
+inherits = "release"
+incremental = true
+codegen-units = 256
+debug = "line-tables-only"

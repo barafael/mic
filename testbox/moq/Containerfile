@@ -1,0 +1,34 @@
+# moq's own programs, built from upstream's repository at a release (MOQ_REV, xtask/src/pins.rs)
+# with its Cargo.lock: `moq-relay`, and the `clock` example of moq-tokio, which publishes a frame
+# a second and prints what it subscribes to. Arch, as every image of the box; pacman installs
+# from the Arch Linux Archive's snapshot of one day (ARCH_SNAPSHOT).
+# `keys` makes the box's TLS (keys.sh).
+ARG ARCH
+FROM ${ARCH} AS build
+ARG ARCH_SNAPSHOT
+# The packages' cache outlives the build, so a later snapshot downloads only what changed.
+RUN --mount=type=cache,target=/var/cache/pacman/pkg \
+    echo "Server = https://archive.archlinux.org/repos/${ARCH_SNAPSHOT}/\$repo/os/\$arch" \
+        > /etc/pacman.d/mirrorlist \
+    && pacman -Syu --noconfirm --needed base-devel clang cmake git rustup
+ARG MOQ_REV
+RUN git init -q /src \
+    && git -C /src fetch -q --depth 1 https://github.com/moq-dev/moq "${MOQ_REV}" \
+    && git -C /src checkout -q FETCH_HEAD
+WORKDIR /src
+# rustup installs the toolchain upstream's rust-toolchain.toml pins. The relay without iroh and
+# mDNS, which the box doesn't use. The caches outlive the build, so a pin bump rebuilds
+# incrementally.
+RUN --mount=type=cache,target=/root/.cargo/registry \
+    --mount=type=cache,target=/root/.cargo/git \
+    --mount=type=cache,target=/src/target \
+    cargo build --release --locked -p moq-relay --no-default-features --features noq,websocket \
+    && cargo build --release --locked -p moq-tokio --example clock \
+    && mkdir /out \
+    && cp target/release/moq-relay target/release/examples/clock /out/
+
+ARG ARCH
+FROM ${ARCH}
+COPY --from=build /out/ /usr/local/bin/
+
+COPY keys.sh /usr/local/bin/keys

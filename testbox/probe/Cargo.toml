@@ -1,0 +1,15 @@
+[package]
+name = "probe"
+description = "What the test box runs to check itself: that a binary from the builder runs in the client image"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+pollster = "1.0.1"
+wgpu = "30"
+winit = "0.30"
+
+[target."cfg(unix)".dependencies]
+signal-hook = "0.4"

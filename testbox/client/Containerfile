@@ -1,0 +1,16 @@
+# What a participant runs in. Its binaries aren't in the image: the builder writes them to
+# target/testbox-bin, which client pods mount read-only, so a change is a rebuild and a restart,
+# never an image build. Arch, as the builder; pacman installs from one day of the Arch Linux
+# Archive (ARCH_SNAPSHOT).
+ARG ARCH
+FROM ${ARCH}
+ARG ARCH_SNAPSHOT
+# TigerVNC's Xvnc, the display `with-display` runs a client on, and its `vncconfig`. Mesa's
+# userspace drivers, close to the host's kernel driver: radeonsi for VA-API and GL, RADV for
+# Vulkan, and llvmpipe and lavapipe for a box without the GPU (`up --no-gpu`); vainfo. The X
+# libraries winit loads at run time.
+RUN --mount=type=cache,target=/var/cache/pacman/pkg \
+    echo "Server = https://archive.archlinux.org/repos/${ARCH_SNAPSHOT}/\$repo/os/\$arch" \
+        > /etc/pacman.d/mirrorlist \
+    && pacman -Syu --noconfirm --needed tigervnc mesa vulkan-radeon vulkan-swrast libva-utils \
+        libxkbcommon-x11 libxcursor libxi libxrandr

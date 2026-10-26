@@ -1,0 +1,44 @@
+# The box's MoQ relay: moq-relay at a pin (xtask/src/pins.rs), in place of moq.pro, which the
+# internal network can't reach. The two speak the same protocol (docs/design.md, §1.8).
+# `cargo testbox up` fills in the image placeholders with content-hashed tags.
+{
+  apiVersion: "v1",
+  kind: "Pod",
+  metadata: {
+    name: "mic-testbox-relay",
+  },
+  spec: {
+    restartPolicy: "Always",
+    # The box's TLS, once (testbox/moq/keys.sh): a CA of its own, and the relay's certificate
+    # for the name the pods resolve it by.
+    initContainers: [
+      {
+        name: "keys",
+        image: "@IMAGE:moq@",
+        args: ["keys"],
+        env: [{ name: "RELAY_HOST", value: "mic-testbox-relay" }],
+        securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: ["ALL"] } },
+        volumeMounts: [{ name: "keys", mountPath: "/keys" }],
+      },
+    ],
+    containers: [
+      # QUIC on UDP 4443, and HTTP (and later the WebSocket fallback) on TCP 4443. Anyone may
+      # publish and subscribe, as on moq.pro's public prefix (D8).
+      {
+        name: "relay",
+        image: "@IMAGE:moq@",
+        args: [
+          "moq-relay",
+          "--listen", "[::]:4443",
+          "--listen-tls-cert", "/keys/relay.pem",
+          "--listen-tls-key", "/keys/relay.key",
+          "--web-http-listen", "[::]:4443",
+          "--auth-public", "**",
+        ],
+        securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: ["ALL"] } },
+        volumeMounts: [{ name: "keys", mountPath: "/keys", readOnly: true }],
+      },
+    ],
+    volumes: [{ name: "keys", persistentVolumeClaim: { claimName: "mic-testbox-keys" } }],
+  },
+}

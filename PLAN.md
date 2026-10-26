@@ -165,12 +165,15 @@ container needs no extra groups.
 
 - **Every client container gets the render node** (`/dev/dri/renderD128`, not `card1`: no
   display or mode setting, only rendering and video). With `podman kube play`, that's a
-  `hostPath` volume of type `CharDevice` **⚠ unverified**.
+  `hostPath` volume of type `CharDevice`, which works rootless with every capability dropped
+  (commit 8).
 - **Images carry Mesa's userspace drivers** (radeonsi for VA-API, RADV for Vulkan) at a version
   close to the host's kernel driver (Mesa 26.2 on the host). The client image's base is chosen
   for a recent Mesa, not for the oldest glibc.
-- **wgpu renders on RADV**, so Slint and `mic-render` run as on a desktop. Xvnc reads back the
-  frames, which costs a copy per frame and is fine at box resolutions **⚠ unverified**.
+- **wgpu renders on RADV**, so Slint and `mic-render` run as on a desktop, and its frames reach
+  Xvnc (commit 8). **But not with FIFO presentation:** Xvnc has no vertical blank, and 120
+  frames of `vkcube` in FIFO took a minute, against a second in mailbox or immediate. Everything
+  in the box presents without waiting for vblank.
 - **VP9 decodes on VA-API** once `moq-video` has a VA-API VP9 decoder **⚠ unverified** (M6).
   VP9 encoding is software everywhere: AMD has no VP9 encoder.
 - **Without a GPU** (CI, other hosts), `cargo testbox up --no-gpu` uses llvmpipe and lavapipe, and
@@ -198,7 +201,7 @@ box aims for an edit-to-running-conference loop of seconds.
   and forget its state, without restarting the process. `down --wipe` is only for when something
   is wrong with the box itself.
 - **But state can leak through `Reset`**, so `run --fresh` restarts every client before each
-  phase. It runs every few rounds and in the nightly job.
+  round. It runs every few rounds and in the nightly job.
 - **Phases can run concurrently.** Since rooms are isolated by name, `run --jobs n` runs n phases
   at once on one box, each with its own clients from a pool.
 - **Measurements run alone.** A check that measures a rate or a budget (frame rate, CPU, egress)
@@ -274,22 +277,26 @@ Each numbered item below is about one commit. Box phases are in **bold**.
 4. `xtask: cargo testbox up, down, logs and test`. The internal network, `pins.rs`, image tags from
    content hashes, records, and checks. **`box`**: a pod can't reach the outside, and `up` on
    an unchanged box runs no `podman build`.
-5. `testbox: moq-relay at a pin, with a self-signed certificate`. A `keys` init container makes the
-   certificate. Clients trust it through a CA file, or a fingerprint if `moq-tokio` takes one
-   **⚠ unverified**. **`relay`**: a pinned moq CLI publisher and subscriber pass frames through
-   the relay. This phase is the baseline for every later failure.
+5. `testbox: moq-relay at a pin, with the box's own CA`. A `keys` init container makes a CA and
+   the relay's certificate; clients trust the CA (`--connect-tls-root`), as they would a real
+   one. (`moq-tokio` also takes a fingerprint, `--connect-tls-fingerprint`.) **`relay`**:
+   moq-tokio's `clock` example, built at the relay's pin, publishes and subscribes through the
+   relay; a client without the CA is refused. This phase is the baseline for every later
+   failure.
 6. `testbox: the builder`. The long-lived builder container with persistent `target/` and
    registry volumes and mold; `cargo testbox build` writes `target/testbox-bin/`. **`box`**: a
    second build of an unchanged tree is a no-op, and a built binary runs in the client image.
 7. `testbox: displays`. `with-display`, the VNC and web viewers and `shot`, carried over from beep.
    **`box`**: a display comes up and `shot` returns its pixels.
-8. `testbox: the GPU in client pods`. The render node passed through **⚠ unverified**, Mesa in
+8. `testbox: the GPU in client pods`. The render node passed through, Mesa in
    the client image, and `--no-gpu` for llvmpipe and lavapipe. **`box`**: a tiny `wgpu` probe
-   window reports its adapter (RADV, or llvmpipe with `--no-gpu`) and shows up in a `shot`;
-   `vainfo` lists VP9 decode.
-9. `testbox: run, jobs and dev`. Readiness by `Ping`, `run --jobs`, `run --fresh`, the box-wide
-   measurement lock, `dev`. **`relay`**: `dev relay` is timed, and the target is under 10 s from
-   an unchanged box to a result.
+   window reports its adapter (RADV, or llvmpipe with `--no-gpu`) and its colour shows up in a
+   `shot`; `vainfo` lists VP9 decode.
+9. `testbox: run, jobs and dev`. Readiness said by the box (the relay answers, each client logs
+   that it's up; the harness's `Ping` from M2 on), `run --jobs`, `run --fresh`, `dev`.
+   **`relay`**: `dev relay` is timed, and the target is under 10 s from an unchanged box to a
+   result (7 s here). The box-wide measurement lock comes with the first check that measures
+   (M5).
 
 ### M2: A headless client: async, encrypted, reconnecting
 
@@ -352,6 +359,7 @@ Each numbered item below is about one commit. Box phases are in **bold**.
 25. `mic-media: sources and sinks behind a trait`, with the synthetic tone source and an analyzing
     sink. Ring buffers between real-time threads and async tasks. Unit tests.
 26. `mic-core: publish and play Opus` via `moq-audio`, at the priority and max age from §1.6.
+    `testbox: the measurement lock` arrives here, with the first check that measures.
     Tests: tones through `mic-testrelay`, and after a relay restart. **`audio`**: each client
     hears every other's frequency and not its own. **`impersonation`** reruns with audio.
 27. `mic-core, mic-slint: mute`. `Command::SetMuted`, and a button. **`audio`**: muted means
@@ -477,9 +485,7 @@ Each is checked by the commit named, which settles it in its body and in the des
 
 | Assumption | Checked in | If it's wrong |
 |---|---|---|
-| `podman kube play` passes `/dev/dri/renderD128` into a container as a device, from a `hostPath` of type `CharDevice` | 8 | The xtask starts client pods with `podman run --device` |
-| wgpu on RADV renders into an Xvnc display at box resolutions without trouble | 8 | Clients render on llvmpipe in the box; the GPU is only used for VA-API |
-| `moq-tokio` accepts a certificate fingerprint instead of a CA | 5 | The `keys` container writes a CA file that clients trust |
+| Slint's wgpu backend can present in mailbox or immediate mode, not only FIFO, which stalls on Xvnc | 23 | Slint's software renderer in the box, or a present mode set through `WGPUConfiguration::Manual` |
 | The `keyring` crate's backends work on Windows, macOS and a Linux Secret Service, including in CI and in the box | 11, 23 | Linux CI and the box run a Secret Service explicitly; what `mic` does with no keyring at all is an open point |
 | `moq-relay` can run inside a test process | 12 | moq-lite's in-memory origin (no QUIC), or the pinned relay binary, which only Linux CI has |
 | `moq-e2ee` encrypts the hang catalog like any other track | 14 | `mic` encrypts the catalog's payload itself, with a key derived the same way |
@@ -493,8 +499,8 @@ Each is checked by the commit named, which settles it in its body and in the des
 
 ## Open points for this plan
 
-1. **Display tooling.** Copy beep's `with-display`, viewers and `shot` into `mic`, or move them to
-   a crate both projects use? Copying is faster now. A shared crate is cleaner once both are
+1. **Display tooling.** Copied from beep into `testbox/view/` (commit 7), relicensed MIT OR
+   Apache-2.0 from beep's AGPL-3.0-only. A crate both projects share is cleaner once both are
    stable.
 2. **moq crates.** crates.io releases where they have what we need, and git pins on upstream `main`
    (for `vpx`) until releases catch up (design §8.1, item 7).
