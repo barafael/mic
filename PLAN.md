@@ -243,9 +243,11 @@ box aims for an edit-to-running-conference loop of seconds.
   A check can then say "bob decodes alice's camera at ≥ 25 fps, and hears 440 Hz from her and
   nothing else". No host kernel modules are needed (no v4l2loopback). The same generators and
   analyzers serve `cargo test`.
-- **A real keyring in windowed clients.** The client image runs a Secret Service (GNOME Keyring,
-  unlocked, in the pod's D-Bus session) **⚠ unverified**, so the keyring path is what the box
-  exercises. `mic-crowd` keeps its participants' secrets in memory.
+- **A real keyring in windowed clients.** The client image runs a Secret Service: GNOME Keyring
+  in the pod's D-Bus session, as a user that isn't root (as root it aborts, failing to drop
+  capabilities the container doesn't have), unlocked with a password, which makes its default
+  collection (both found in commit 11). So the keyring path is what the box exercises.
+  `mic-crowd` keeps its participants' secrets in memory.
 - **Real audio devices, later.** PipeWire inside the container, with a loopback from speaker to
   mic, exercises `cpal` and lets a check measure echo cancellation: alice must not hear her own
   tone come back from bob **⚠ unverified**.
@@ -304,9 +306,10 @@ Each numbered item below is about one commit. Box phases are in **bold**.
     `HKDF(device_secret, room_id)` to an Ed25519 key (D16), with the device secret passed in.
     Unit tests.
 11. `mic-core: the device secret in the system keyring`. 32 bytes from the OS's random
-    generator on first start, stored through `keyring` and read on every later one; a store
-    trait with an in-memory implementation for tests and the crowd. CI exercises the keyring on
-    Windows and macOS, and on Linux with a Secret Service in the job **⚠ unverified**.
+    generator on first start, stored through `keyring-core` (Secret Service over zbus, Keychain,
+    Credential Manager) and read on every later one; a store trait with an in-memory
+    implementation for tests and the crowd. Tested against GNOME Keyring in a container; CI
+    exercises the keyring on Windows, macOS and Linux **⚠ unverified until CI runs**.
 12. `mic-testrelay: a relay in the test process`, for `cargo test`. Its first test publishes and
     subscribes a track through it **⚠ unverified** that `moq-relay` embeds.
 13. `mic-core: an async client and session`. `Client::new(config, handle)` and
@@ -486,7 +489,7 @@ Each is checked by the commit named, which settles it in its body and in the des
 | Assumption | Checked in | If it's wrong |
 |---|---|---|
 | Slint's wgpu backend can present in mailbox or immediate mode, not only FIFO, which stalls on Xvnc | 23 | Slint's software renderer in the box, or a present mode set through `WGPUConfiguration::Manual` |
-| The `keyring` crate's backends work on Windows, macOS and a Linux Secret Service, including in CI and in the box | 11, 23 | Linux CI and the box run a Secret Service explicitly; what `mic` does with no keyring at all is an open point |
+| The keyring works on GitHub's Windows and macOS runners, and GNOME Keyring on its Linux one (it does in a container here) | 11 (CI) | The keyring test is skipped in CI where it can't run, and the box's clients cover Linux |
 | `moq-relay` can run inside a test process | 12 | moq-lite's in-memory origin (no QUIC), or the pinned relay binary, which only Linux CI has |
 | `moq-e2ee` encrypts the hang catalog like any other track | 14 | `mic` encrypts the catalog's payload itself, with a key derived the same way |
 | PipeWire runs in a rootless container with a speaker-to-mic loopback | 28 | A virtual sink and source in the `cpal` test path only, without PipeWire |

@@ -1,4 +1,4 @@
-//! mic's core, toolkit-agnostic: rooms and invites, keys, and (from the next commits) the session
+//! mic's core, toolkit-agnostic: rooms and invites, keys, the device secret in the keyring, and (from the next commits) the session
 //! with the relay, the roster, room state and commands. Frontends only bind to it (PLAN.md, "The
 //! core and its frontends").
 
@@ -7,9 +7,11 @@
 
 pub mod invite;
 pub mod keys;
+pub mod secrets;
 
 pub use invite::{Invite, RoomId, RoomSecret};
 pub use keys::{DeviceSecret, RoomKey};
+pub use secrets::{SecretStore, device_secret};
 
 /// `N` bytes from the operating system's random generator.
 pub(crate) fn random<const N: usize>() -> [u8; N] {
