@@ -321,10 +321,11 @@ Each numbered item below is about one commit. Box phases are in **bold**.
     fingerprint mismatch). Tests: join and leave against `mic-testrelay`; the same key across
     joins; an absent relay and a wrong certificate, each said so.
 14. `mic-core: moq-e2ee on every track` (D17). The track layer every later commit publishes and
-    subscribes through: catalogs, `profile`, and every track to come. There's no API for a
-    track in the clear **⚠ unverified** that `moq-e2ee` wraps the hang catalog like any other
-    track. Tests: a subscriber without the secret gets only ciphertext; a wrong secret is an
-    error, not garbage.
+    subscribes through: catalogs, `profile`, and every track to come; moq-e2ee works per track,
+    so the catalog is wrapped like any other. There's no API for a track in the clear. A room's
+    session is rooted at its prefix by the URL's path. Tests: a participant reads another's
+    track; another room, or the same room with another secret, sees nothing; a snoop on the
+    relay sees only opaque names and ciphertext; a wrong secret is an error, not garbage.
 15. `mic-core: the roster`. Each participant publishes a broadcast under the room prefix with an
     encrypted `profile` JSON track (display name); the roster comes from announcements (§1.5,
     §5.2). Tests: two clients see each other arrive and leave.
@@ -498,7 +499,6 @@ Each is checked by the commit named, which settles it in its body and in the des
 |---|---|---|
 | Slint's wgpu backend can present in mailbox or immediate mode, not only FIFO, which stalls on Xvnc | 23 | Slint's software renderer in the box, or a present mode set through `WGPUConfiguration::Manual` |
 | The keyring works on GitHub's Windows and macOS runners, and GNOME Keyring on its Linux one (it does in a container here) | 11 (CI) | The keyring test is skipped in CI where it can't run, and the box's clients cover Linux |
-| `moq-e2ee` encrypts the hang catalog like any other track | 14 | `mic` encrypts the catalog's payload itself, with a key derived the same way |
 | PipeWire runs in a rootless container with a speaker-to-mic loopback | 28 | A virtual sink and source in the `cpal` test path only, without PipeWire |
 | libvpx builds and links on the Windows and macOS CI runners | 32 | A vendored static build through the binding's build script |
 | lavapipe renders offscreen in GitHub's Linux runners | 34 | `mic-render`'s pixel tests run in the box only |

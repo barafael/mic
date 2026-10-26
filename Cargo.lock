@@ -2735,12 +2735,14 @@ version = "0.1.0"
 dependencies = [
  "apple-native-keyring-store",
  "base64 0.23.1",
+ "bytes",
  "derive_more",
  "ed25519-dalek",
  "getrandom 0.4.3",
  "hkdf",
  "keyring-core",
  "mic-testrelay",
+ "moq-e2ee",
  "moq-net",
  "moq-tokio",
  "sha2",
@@ -2852,6 +2854,22 @@ dependencies = [
  "tokio",
  "tracing",
  "url",
+]
+
+[[package]]
+name = "moq-e2ee"
+version = "0.0.17"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fe439ebd0aecc694fd177b28b481b80a15e00a1e2df0360ecb23ad7caf67e24d"
+dependencies = [
+ "aws-lc-rs",
+ "base64 0.23.1",
+ "bytes",
+ "kio 0.6.3",
+ "moq-net",
+ "thiserror 2.0.21",
+ "uuid",
+ "zeroize",
 ]
 
 [[package]]

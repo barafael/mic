@@ -14,6 +14,7 @@ use derive_more::{Display, Error, From};
 use crate::invite::Invite;
 use crate::keys::{DeviceSecret, RoomKey};
 use crate::secrets::{self, SecretError, SecretStore};
+use crate::tracks::{Peers, Publication, RoomCrypto, TrackError};
 
 /// How long a join may take to reach the relay before it fails.
 pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -55,6 +56,9 @@ pub enum Trust {
 pub enum Error {
     #[display("the device secret: {_0}")]
     Secret(SecretError),
+    /// Encrypting, decrypting or naming a track.
+    #[display("a track: {_0}")]
+    Track(TrackError),
     /// moq's configuration or session failed.
     #[from(ignore)]
     #[display("moq: {_0}")]
@@ -141,12 +145,20 @@ impl Client {
 impl Inner {
     async fn join(&self, invite: Invite) -> Result<Room, Error> {
         let key = self.secret.room_key(&invite.room);
+        let crypto = RoomCrypto::new(&invite)?;
+        // The session is rooted at the room's prefix on the relay, by its URL's path, as a
+        // relay roots every session: it publishes under the prefix, and hears of no other
+        // room's broadcasts. Paths in the session are relative to it. (Scoping the origin
+        // instead would only rename paths locally: on the wire they'd be unprefixed.)
+        let mut url = self.config.relay.clone();
+        url.path_segments_mut()
+            .map_err(|()| moq("the relay's URL can't have a path"))?
+            .pop_if_empty()
+            .push(crypto.prefix().as_str());
         let origin = moq_tokio::origin::spawn();
-        let connection = self
-            .moq
-            .clone()
-            .with_origin(origin.clone())
-            .connect(self.config.relay.clone());
+        let (path, generation) = crypto.publisher(key.public().as_bytes())?;
+        let broadcast = origin.create_broadcast(&path).map_err(moq)?;
+        let connection = self.moq.clone().with_origin(origin.clone()).connect(url);
         let connection = connection
             .established()
             .await
@@ -158,6 +170,9 @@ impl Inner {
         Ok(Room {
             invite,
             key,
+            crypto,
+            path: path.as_str().to_owned(),
+            publication: Publication::new(generation, broadcast),
             connection,
             origin,
             runtime: self.runtime.clone(),
@@ -182,17 +197,18 @@ fn connect_config(config: &Config) -> moq_tokio::connect::Config {
     connect
 }
 
-/// A room joined: a session with the relay, and this device's key in the room. Leaving ends the
-/// session; so does dropping it.
+/// A room joined: a session with the relay, this device's key in the room, and its broadcast
+/// there. Everything published and read through it is encrypted under the room's secret
+/// (`crate::tracks`). Leaving ends the session; so does dropping it.
 pub struct Room {
     invite: Invite,
     key: RoomKey,
+    crypto: RoomCrypto,
+    /// This participant's broadcast's path under the room's prefix.
+    path: String,
+    publication: Publication,
     connection: moq_tokio::Connection,
-    /// What this participant publishes and what it subscribes to, over the session.
-    #[expect(
-        dead_code,
-        reason = "the roster publishes and subscribes through it (commit 15)"
-    )]
+    /// The session's origin: its paths are relative to the room's prefix.
     origin: moq_net::origin::Producer,
     runtime: tokio::runtime::Handle,
 }
@@ -205,6 +221,26 @@ impl Room {
     /// This device's key in the room.
     pub fn key(&self) -> &RoomKey {
         &self.key
+    }
+
+    /// This participant's broadcast's path under the room's prefix.
+    pub fn path(&self) -> &str {
+        &self.path
+    }
+
+    /// A track `semantic` of this participant's broadcast, encrypted. The broadcast is announced
+    /// with its first track.
+    pub fn publish(&mut self, semantic: &str) -> Result<moq_e2ee::track::Producer, Error> {
+        Ok(self.publication.track(semantic)?)
+    }
+
+    /// The other participants' broadcasts as they arrive and go, those there already first.
+    pub fn peers(&self) -> Peers {
+        Peers::new(
+            self.crypto.clone(),
+            self.path.clone(),
+            self.origin.consume(),
+        )
     }
 
     /// Ends the session with the relay.

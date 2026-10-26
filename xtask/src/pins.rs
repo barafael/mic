@@ -44,10 +44,11 @@ mod tests {
     /// The versions of moq's crates at `MOQ_REV`, which mic's own crates use: the box's relay and
     /// `mic-testrelay`'s are then the same code, and mic speaks to the relay it's tested against. A
     /// test holds Cargo.lock to them.
-    const MOQ_CRATES: [(&str, &str); 3] = [
+    const MOQ_CRATES: [(&str, &str); 4] = [
         ("moq-relay", "0.17.8"),
         ("moq-tokio", "0.19.29"),
         ("moq-net", "0.3.16"),
+        ("moq-e2ee", "0.0.17"),
     ];
 
     #[test]

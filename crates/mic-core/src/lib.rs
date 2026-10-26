@@ -9,6 +9,7 @@ pub mod invite;
 pub mod keys;
 pub mod secrets;
 pub mod session;
+pub mod tracks;
 
 pub use invite::{Invite, RoomId, RoomSecret};
 pub use keys::{DeviceSecret, RoomKey};
