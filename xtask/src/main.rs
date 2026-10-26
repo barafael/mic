@@ -11,6 +11,8 @@ mod images;
 mod pins;
 mod podman;
 mod process;
+mod ready;
+mod run;
 mod view;
 
 use std::path::{Path, PathBuf};
@@ -18,7 +20,7 @@ use std::process::ExitCode;
 
 use clap::Parser;
 
-use error::Result;
+use checks::Phase;
 use podman::TestBox;
 
 /// Checks mic in a box of Podman pods on an internal network: nothing in it reaches anything
@@ -48,6 +50,24 @@ enum Command {
         #[arg(long)]
         screenshots: bool,
     },
+    /// Runs phases on the box in rounds, and sums up; each run's records are in
+    /// target/testbox-record/run/<run>/.
+    Run {
+        /// The phases; all of them if none.
+        phases: Vec<Phase>,
+        /// How many times each.
+        #[arg(long, default_value_t = 1)]
+        rounds: u32,
+        /// How many phases at once: they use rooms of their own, so they share the box.
+        #[arg(long, default_value_t = 1)]
+        jobs: usize,
+        /// Restarts every client before each round.
+        #[arg(long)]
+        fresh: bool,
+    },
+    /// The inner loop: the box up, what it runs built, the clients restarted if that changed,
+    /// then the phase; the box stays up.
+    Dev { phase: Phase },
     /// Shows the clients' displays in a window.
     Vnc {
         /// Lets the window's keys and pointer through to the clients, where they race a running
@@ -77,23 +97,6 @@ enum Command {
     Logs { names: Vec<String> },
 }
 
-/// `test`'s phases.
-#[derive(Clone, Copy, clap::ValueEnum)]
-enum Phase {
-    /// The box itself: no egress, and no build when nothing changed.
-    Box,
-    /// Frames pass through the relay between a stock moq publisher and subscriber.
-    Relay,
-}
-
-impl Phase {
-    fn name(self) -> String {
-        clap::ValueEnum::to_possible_value(&self)
-            .map(|value| value.get_name().to_owned())
-            .unwrap_or_default()
-    }
-}
-
 fn main() -> ExitCode {
     let repo = repo_root();
     let the_box = TestBox::new(&repo);
@@ -101,7 +104,16 @@ fn main() -> ExitCode {
         Command::Up { no_gpu: false } => the_box.up(),
         Command::Up { no_gpu: true } => TestBox::new(&repo).without_gpu().up(),
         Command::Build => builder::build(&the_box).map(|_| ()),
-        Command::Test { phase, screenshots } => test(&the_box, phase, screenshots),
+        Command::Test { phase, screenshots } => {
+            run::test(&the_box, phase, &phase.name(), screenshots, "")
+        }
+        Command::Run {
+            phases,
+            rounds,
+            jobs,
+            fresh,
+        } => run::run(&the_box, &phases, rounds, jobs, fresh),
+        Command::Dev { phase } => run::dev(&the_box, phase),
         Command::Vnc { interactive } => view::vnc(&the_box, interactive),
         Command::Web { interactive } => view::web(&the_box, interactive),
         Command::Images { prune } => the_box.list_images(prune),
@@ -122,12 +134,4 @@ fn repo_root() -> PathBuf {
         .parent()
         .expect("xtask lives in the workspace root")
         .to_owned()
-}
-
-fn test(the_box: &TestBox, phase: Phase, screenshots: bool) -> Result<()> {
-    let record = checks::Record::new(the_box, &phase.name(), screenshots)?;
-    checks::phase(the_box, record, |checks| match phase {
-        Phase::Box => checks::testbox(checks, the_box),
-        Phase::Relay => checks::relay(checks, the_box),
-    })
 }

@@ -73,25 +73,25 @@ pub fn unique(what: &str) -> Result<String> {
 }
 
 /// Runs with stdout attached and stderr passed through line by line; fails on a non-zero exit,
-/// and says whether a line of stderr contained `needle` (cargo's `Compiling `).
-pub fn run_watching(mut command: Command, needle: &str) -> Result<bool> {
+/// and returns stderr's lines (cargo's progress, a script's messages).
+pub fn run_capturing_stderr(mut command: Command) -> Result<Vec<String>> {
     use std::io::BufRead;
     let mut child = command
         .stdin(Stdio::null())
         .stderr(Stdio::piped())
         .spawn()
         .context(describe(&command))?;
-    let mut seen = false;
+    let mut lines = Vec::new();
     if let Some(stderr) = child.stderr.take() {
         for line in std::io::BufReader::new(stderr).lines() {
             let line = line.context(describe(&command))?;
-            seen |= line.contains(needle);
             eprintln!("{line}");
+            lines.push(line);
         }
     }
     let status = child.wait().context(describe(&command))?;
     if status.success() {
-        Ok(seen)
+        Ok(lines)
     } else {
         Err(Error::Command {
             command: describe(&command),

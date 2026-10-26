@@ -68,8 +68,7 @@ impl Record {
         }
     }
 
-    /// Every container's log into the record; says where it is. What can't be had is noted in
-    /// its file instead.
+    /// Every container's log into the record. What can't be had is noted in its file instead.
     pub fn keep_logs(&self, the_box: &TestBox) {
         for container in the_box.containers() {
             let log = the_box
@@ -77,7 +76,6 @@ impl Record {
                 .unwrap_or_else(|error| error.to_string());
             self.write(&format!("{container}.log"), &log);
         }
-        println!("record: {}", self.directory.display());
     }
 
     fn write(&self, name: &str, contents: &str) {

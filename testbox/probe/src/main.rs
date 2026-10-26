@@ -7,10 +7,13 @@
 //!   without (`cargo testbox up --no-gpu`). The `box` phase reads the colour back from the display
 //!   and the adapter from the log.
 //!
+//! On SIGTERM it closes its window and exits cleanly, so a restarted client counts as no crash.
+//!
 //! It presents without waiting for vertical blank: Xvnc has none, and FIFO presentation there
 //! stalls (120 frames of `vkcube` took a minute; mailbox and immediate take a second or less).
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use winit::application::ApplicationHandler;
@@ -52,6 +55,9 @@ fn main() -> std::process::ExitCode {
 fn window() -> Result<(), String> {
     let event_loop = EventLoop::new().map_err(|error| format!("an event loop: {error}"))?;
     let mut probe = Probe::default();
+    #[cfg(unix)]
+    signal_hook::flag::register(signal_hook::consts::SIGTERM, probe.stop.clone())
+        .map_err(|error| format!("SIGTERM's handler: {error}"))?;
     event_loop
         .run_app(&mut probe)
         .map_err(|error| format!("the event loop: {error}"))?;
@@ -62,6 +68,8 @@ fn window() -> Result<(), String> {
 struct Probe {
     drawn: Option<Drawn>,
     failed: Option<String>,
+    /// Set by SIGTERM; the next tick ends the event loop.
+    stop: Arc<AtomicBool>,
 }
 
 /// The window and what it's drawn with.
@@ -110,6 +118,10 @@ impl ApplicationHandler for Probe {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        if self.stop.load(Ordering::Relaxed) {
+            event_loop.exit();
+            return;
+        }
         if let Some(drawn) = &self.drawn {
             drawn.window.request_redraw();
             event_loop.set_control_flow(ControlFlow::WaitUntil(Instant::now() + REDRAW));

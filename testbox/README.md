@@ -96,9 +96,24 @@ cargo testbox up
 cargo testbox test box
 ```
 
-Each check prints `check <what>: passed` or `failed: <why>`; `test` fails if any did. The last
-check of every phase is that no container crashed. The phase's record, every container's log, is
-in `target/testbox-record/<phase>/`. `cargo testbox down` stops the pods.
+`up` builds what's missing (images, then what the box runs), plays the pods, and returns once
+the box says it's ready: the relay answers, and every client has logged that it's up. No fixed
+sleeps.
+
+Each check prints `check <what>: passed` or `failed: <why>` (or `skipped: <why>`, for a check
+that doesn't apply to this box); `test` fails if any failed. The last check of every phase is
+that no container crashed. The phase's record, every container's log, is in
+`target/testbox-record/<phase>/`. `cargo testbox down` stops the pods.
+
+Phases don't need a fresh box: each check uses rooms and broadcasts of its own. So:
+
+- **`cargo testbox dev <phase>`** is the inner loop: the box up if it isn't, what it runs built,
+  the clients restarted only if a binary they run changed, then the phase. It says how long that
+  took: from an unchanged box, `dev relay` takes about 7 s.
+- **`cargo testbox run [<phase>...]`** runs phases (all if none) in rounds (`--rounds n`), up to
+  `--jobs n` at once, their lines prefixed with their names, and sums up; `--fresh` restarts
+  every client before each round. Each run's records are in `target/testbox-record/run/<run>/`.
+- **`down --wipe`** is for when something is wrong with the box itself.
 
 | Phase | What it checks |
 |---|---|

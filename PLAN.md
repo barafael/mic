@@ -201,7 +201,7 @@ box aims for an edit-to-running-conference loop of seconds.
   and forget its state, without restarting the process. `down --wipe` is only for when something
   is wrong with the box itself.
 - **But state can leak through `Reset`**, so `run --fresh` restarts every client before each
-  phase. It runs every few rounds and in the nightly job.
+  round. It runs every few rounds and in the nightly job.
 - **Phases can run concurrently.** Since rooms are isolated by name, `run --jobs n` runs n phases
   at once on one box, each with its own clients from a pool.
 - **Measurements run alone.** A check that measures a rate or a budget (frame rate, CPU, egress)
@@ -292,9 +292,11 @@ Each numbered item below is about one commit. Box phases are in **bold**.
    the client image, and `--no-gpu` for llvmpipe and lavapipe. **`box`**: a tiny `wgpu` probe
    window reports its adapter (RADV, or llvmpipe with `--no-gpu`) and its colour shows up in a
    `shot`; `vainfo` lists VP9 decode.
-9. `testbox: run, jobs and dev`. Readiness by `Ping`, `run --jobs`, `run --fresh`, the box-wide
-   measurement lock, `dev`. **`relay`**: `dev relay` is timed, and the target is under 10 s from
-   an unchanged box to a result.
+9. `testbox: run, jobs and dev`. Readiness said by the box (the relay answers, each client logs
+   that it's up; the harness's `Ping` from M2 on), `run --jobs`, `run --fresh`, `dev`.
+   **`relay`**: `dev relay` is timed, and the target is under 10 s from an unchanged box to a
+   result (7 s here). The box-wide measurement lock comes with the first check that measures
+   (M5).
 
 ### M2: A headless client: async, encrypted, reconnecting
 
@@ -357,6 +359,7 @@ Each numbered item below is about one commit. Box phases are in **bold**.
 25. `mic-media: sources and sinks behind a trait`, with the synthetic tone source and an analyzing
     sink. Ring buffers between real-time threads and async tasks. Unit tests.
 26. `mic-core: publish and play Opus` via `moq-audio`, at the priority and max age from §1.6.
+    `testbox: the measurement lock` arrives here, with the first check that measures.
     Tests: tones through `mic-testrelay`, and after a relay restart. **`audio`**: each client
     hears every other's frequency and not its own. **`impersonation`** reruns with audio.
 27. `mic-core, mic-slint: mute`. `Command::SetMuted`, and a button. **`audio`**: muted means

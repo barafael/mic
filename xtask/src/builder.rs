@@ -2,7 +2,7 @@
 //! incrementally, and puts each binary into `target/testbox-bin` only when it changed, by a
 //! rename, so a running client keeps the file it started from.
 
-use crate::error::{Error, Result};
+use crate::error::Result;
 use crate::images;
 use crate::podman::{Pod, TestBox};
 use crate::process;
@@ -16,6 +16,35 @@ const WORKSPACES: [(&str, &[&str]); 2] = [
     ("Cargo.toml", &["probe"]),
     ("testbox/view/Cargo.toml", &["with-display"]),
 ];
+
+/// What the build script says, on stderr, for a binary it put into place.
+const UPDATED: &str = "testbox-builder: updated ";
+
+/// One script for the builder, so a build is one `podman exec`: each workspace's packages, then
+/// each binary into place by a rename, and only when it differs, so a client restarts only for a
+/// change and a running one keeps the file it started from.
+fn script() -> String {
+    let mut script = String::from("set -e\n");
+    for (manifest, packages) in WORKSPACES {
+        let packages: String = packages
+            .iter()
+            .map(|package| format!(" -p {package}"))
+            .collect();
+        script.push_str(&format!(
+            "cargo build --profile testbox --locked --manifest-path {manifest}{packages}\n"
+        ));
+    }
+    // Each package's binary is named as the package.
+    for binary in WORKSPACES.iter().flat_map(|(_, packages)| packages.iter()) {
+        script.push_str(&format!(
+            "if ! cmp -s /target/testbox/{binary} /out/{binary}; then \
+             cp /target/testbox/{binary} /out/.{binary}.new; \
+             mv -f /out/.{binary}.new /out/{binary}; \
+             echo '{UPDATED}{binary}' >&2; fi\n"
+        ));
+    }
+    script
+}
 
 /// What a build did.
 pub struct Built {
@@ -33,44 +62,18 @@ pub fn build(the_box: &TestBox) -> Result<Built> {
     if !the_box.running(&builder) || the_box.image_of(&builder).as_deref() != Some(tag.as_str()) {
         the_box.play(Pod::Builder)?;
     }
-    let mut compiled = false;
-    for (manifest, packages) in WORKSPACES {
-        let mut cargo = vec![
-            "cargo",
-            "build",
-            "--profile",
-            "testbox",
-            "--locked",
-            "--manifest-path",
-            manifest,
-        ];
-        for package in packages {
-            cargo.extend(["-p", package]);
-        }
-        let mut exec = crate::podman::podman(&["exec", &builder]);
-        exec.args(&cargo);
-        compiled |= process::run_watching(exec, "Compiling ")?;
-    }
-    let mut updated = Vec::new();
-    // Each package's binary is named as the package.
-    for &binary in WORKSPACES.iter().flat_map(|(_, packages)| packages.iter()) {
-        // Replaced by a rename, and only when it differs: a client restarts only for a change.
-        let install = format!(
-            "if ! cmp -s /target/testbox/{binary} /out/{binary}; then \
-             cp /target/testbox/{binary} /out/.{binary}.new && mv -f /out/.{binary}.new /out/{binary} \
-             && echo updated; fi"
-        );
-        let installed = the_box.exec(&builder, &["bash", "-c", &install])?;
-        if !installed.status.success() {
-            return Err(Error::Failed(format!(
-                "installing {binary}: {}",
-                String::from_utf8_lossy(&installed.stderr)
-            )));
-        }
-        if String::from_utf8_lossy(&installed.stdout).contains("updated") {
-            println!("updated {BIN}/{binary}");
-            updated.push(binary.to_owned());
-        }
+    let script = script();
+    let mut exec = crate::podman::podman(&["exec", &builder, "bash", "-c", &script]);
+    exec.env_remove("CARGO_TERM_COLOR");
+    let lines = process::run_capturing_stderr(exec)?;
+    let compiled = lines.iter().any(|line| line.contains("Compiling "));
+    let updated: Vec<String> = lines
+        .iter()
+        .filter_map(|line| line.strip_prefix(UPDATED))
+        .map(str::to_owned)
+        .collect();
+    for binary in &updated {
+        println!("updated {BIN}/{binary}");
     }
     Ok(Built { compiled, updated })
 }

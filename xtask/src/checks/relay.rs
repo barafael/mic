@@ -2,11 +2,9 @@
 //! subscriber (moq-tokio's `clock` example), over QUIC, with the box's CA. The baseline for every
 //! later failure: if this fails, the box is broken, not `mic`.
 
-use std::time::{Duration, Instant};
-
 use crate::error::{Error, Result};
 use crate::podman::{Pod, TestBox};
-use crate::process;
+use crate::{process, ready};
 
 use super::Checks;
 
@@ -14,54 +12,33 @@ use super::Checks;
 const RELAY: &str = "https://mic-testbox-relay:4443/";
 /// The box's CA (testbox/moq/keys.sh).
 const CA: &str = "/keys/ca.pem";
-/// How long the relay may take to serve after `up`.
-const START: Duration = Duration::from_secs(30);
 /// How long the subscriber listens: the clock publishes a frame a second.
-const LISTEN_SECS: u64 = 6;
+const LISTEN_SECS: u64 = 5;
+/// How long the subscriber without the CA listens: the handshake fails at once.
+const REFUSED_SECS: u64 = 3;
 /// How many frames it must hear in that time. The first may take a moment to come.
 const FRAMES: usize = 3;
 
 pub fn relay(checks: &mut Checks, the_box: &TestBox) -> Result<()> {
-    checks.require("the relay serves", || serves(the_box))?;
-    checks.record("frames pass through the relay", || frames_pass(the_box));
-    checks.record("a client without the box's CA is refused", || {
-        refused(the_box)
+    checks.require("the relay serves", || ready::relay(the_box))?;
+    // At once: each listens for seconds, and they don't share a broadcast.
+    let (frames, refusal) = std::thread::scope(|scope| {
+        let frames = scope.spawn(|| frames_pass(the_box));
+        let refusal = scope.spawn(|| refused(the_box));
+        (joined(frames.join()), joined(refusal.join()))
     });
+    checks.record("frames pass through the relay", || frames);
+    checks.record("a client without the box's CA is refused", || refusal);
     Ok(())
+}
+
+/// A check run on a thread of its own: a panic there fails it.
+fn joined(outcome: std::thread::Result<Result<()>>) -> Result<()> {
+    outcome.unwrap_or_else(|_| Err(Error::Failed("its thread panicked".to_owned())))
 }
 
 fn tools() -> String {
     Pod::Tools.container("tools")
-}
-
-/// The relay answers HTTP on TCP 4443 (`/announced`, what is announced), which it serves beside
-/// QUIC.
-fn serves(the_box: &TestBox) -> Result<()> {
-    let deadline = Instant::now() + START;
-    loop {
-        let asked = the_box.exec(
-            &tools(),
-            &[
-                "curl",
-                "--silent",
-                "--fail",
-                "--max-time",
-                "2",
-                "http://mic-testbox-relay:4443/announced",
-            ],
-        )?;
-        if asked.status.success() {
-            return Ok(());
-        }
-        if Instant::now() > deadline {
-            return Err(Error::Failed(format!(
-                "no answer within {}s: {}",
-                START.as_secs(),
-                String::from_utf8_lossy(&asked.stderr).trim()
-            )));
-        }
-        std::thread::sleep(Duration::from_millis(250));
-    }
 }
 
 /// `clock` publishes; another `clock` subscribes through the relay and must print frames.
@@ -81,7 +58,12 @@ fn frames_pass(the_box: &TestBox) -> Result<()> {
     if !started.status.success() {
         return Err(Error::Failed("the publisher didn't start".to_owned()));
     }
-    let heard = subscribe(the_box, &broadcast, &["--connect-tls-root", CA])?;
+    let heard = subscribe(
+        the_box,
+        &broadcast,
+        &["--connect-tls-root", CA],
+        LISTEN_SECS,
+    )?;
     let frames: Vec<&str> = heard.lines().filter(|line| is_clock_frame(line)).collect();
     let mut distinct = frames.clone();
     distinct.dedup();
@@ -99,7 +81,7 @@ fn frames_pass(the_box: &TestBox) -> Result<()> {
 /// is checked, not taken on faith.
 fn refused(the_box: &TestBox) -> Result<()> {
     let broadcast = process::unique("relay-check")?;
-    let heard = subscribe(the_box, &broadcast, &[])?;
+    let heard = subscribe(the_box, &broadcast, &[], REFUSED_SECS)?;
     if heard.lines().any(is_clock_frame) {
         Err(Error::Failed(format!("it heard frames: {heard:?}")))
     } else {
@@ -107,9 +89,9 @@ fn refused(the_box: &TestBox) -> Result<()> {
     }
 }
 
-/// What a subscriber to `broadcast` prints in [`LISTEN_SECS`], connecting with `tls`.
-fn subscribe(the_box: &TestBox, broadcast: &str, tls: &[&str]) -> Result<String> {
-    let listen = LISTEN_SECS.to_string();
+/// What a subscriber to `broadcast` prints in `seconds`, connecting with `tls`.
+fn subscribe(the_box: &TestBox, broadcast: &str, tls: &[&str], seconds: u64) -> Result<String> {
+    let listen = seconds.to_string();
     let mut argv = vec!["timeout", &listen, "clock", "--connect", RELAY];
     argv.extend_from_slice(tls);
     argv.extend_from_slice(&["--broadcast", broadcast, "subscribe"]);

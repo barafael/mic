@@ -145,7 +145,7 @@ impl TestBox {
         for pod in Pod::all() {
             self.play(pod)?;
         }
-        Ok(())
+        crate::ready::all(self)
     }
 
     /// Each client's directory for its display's socket: the owner's only, whatever is in it,
@@ -335,6 +335,15 @@ impl TestBox {
                     .collect()
             })
             .unwrap_or_default()
+    }
+
+    /// The containers of `pod`, stopped ones too.
+    pub fn containers_of(&self, pod: Pod) -> Vec<String> {
+        let prefix = format!("{}-", pod.podman_name());
+        self.containers()
+            .into_iter()
+            .filter(|container| container.starts_with(&prefix))
+            .collect()
     }
 
     /// The container `name`'s log so far, stdout and stderr alike.

@@ -68,8 +68,6 @@ pub fn testbox(checks: &mut Checks, the_box: &TestBox) -> Result<()> {
 
 /// What the probe window clears its window to (testbox/probe/src/main.rs, `COLOUR`).
 const BACKGROUND: [u8; 3] = [0xc0, 0x39, 0x2b];
-/// How long the probe window may take to present its first frame after `up`.
-const PRESENT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Whether `client`'s pod has the host's render node.
 fn has_gpu(the_box: &TestBox, client: &'static str) -> Result<bool> {
@@ -82,29 +80,15 @@ fn has_gpu(the_box: &TestBox, client: &'static str) -> Result<bool> {
 
 /// Once the probe window has presented a frame, the adapter it says it got is `expected`'s.
 fn adapter(the_box: &TestBox, client: &'static str, expected: &str) -> Result<()> {
-    let container = view::container(client);
-    let deadline = std::time::Instant::now() + PRESENT;
-    loop {
-        let log = the_box.log(&container)?;
-        if log.lines().any(|line| line == "probe: presented") {
-            let adapter = log
-                .lines()
-                .find(|line| line.starts_with("probe: adapter "))
-                .ok_or("presented, but named no adapter")?;
-            return if adapter.contains(expected) {
-                Ok(())
-            } else {
-                Err(Error::Failed(format!("{adapter:?}")))
-            };
-        }
-        if std::time::Instant::now() > deadline {
-            return Err(Error::Failed(format!(
-                "no frame presented within {}s: {:?}",
-                PRESENT.as_secs(),
-                log.lines().last().unwrap_or_default()
-            )));
-        }
-        std::thread::sleep(std::time::Duration::from_millis(200));
+    let log = crate::ready::client_up(the_box, client)?;
+    let adapter = log
+        .lines()
+        .find(|line| line.starts_with("probe: adapter "))
+        .ok_or("presented, but named no adapter")?;
+    if adapter.contains(expected) {
+        Ok(())
+    } else {
+        Err(Error::Failed(format!("{adapter:?}")))
     }
 }
 
