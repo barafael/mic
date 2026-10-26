@@ -2758,6 +2758,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "mic-harness"
+version = "0.1.0"
+dependencies = [
+ "mic-core",
+ "mic-testrelay",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "mic-testrelay"
 version = "0.1.0"
 dependencies = [

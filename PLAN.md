@@ -154,8 +154,8 @@ flowchart LR
 - Records in `target/testbox-record/<phase>/`; checks that print `check <what>: passed`; and a
   last check in every phase that no client crashed.
 - An agent harness crate, `mic-harness`: JSON lines over a Unix socket (`Ping`, `Snapshot`,
-  `Subscribe`, `Act`, `Screenshot`, `Reset`). Every frontend and `mic-crowd` embed its server
-  when built with the `harness` feature.
+  `Subscribe`, `Join`, `Act`, `Reset`). Every frontend and `mic-crowd` embed its server when
+  built with the `harness` feature.
 
 ### The host's GPU in the box
 
@@ -344,9 +344,12 @@ Each numbered item below is about one commit. Box phases are in **bold**.
     after the timeout, with its reason. Tests: the test relay stops for longer than the window
     and restarts; both rooms show `Reconnecting`, then `Connected`, and each other once. Each
     media commit adds "and the media resumes" to this test.
-18. `mic-harness: the protocol and its server`. `Snapshot` is `RoomState` with the `ui` section;
-    `Act` is a `Command`; `Screenshot` asks the display; `Reset` leaves and forgets. The server
-    takes a `mic-core` client. Unit tests on the protocol.
+18. `mic-harness: the protocol and its server`. JSON lines over a Unix socket: `Ping`,
+    `Snapshot` (the `RoomState` with the frontend's `ui` section), `Subscribe` (pushes on every
+    change), `Join` (an invite and a name: each check picks a fresh room), `Act` (a `Command`),
+    `Reset` (leaves and forgets). Screenshots come from the display, not the harness. The server
+    takes a `mic-core` client; a blocking client comes with it, for the xtask. Tests drive two
+    participants through their harnesses against `mic-testrelay`.
 19. `mic-crowd: headless participants`, one or many per process, each with a harness socket.
     `testbox: clients`, and the snoop. **`roster`**: alice and bob join and see each other; bob
     leaves and alice sees him go; a restarted relay is rejoined. **`e2ee`**: the snoop receives
