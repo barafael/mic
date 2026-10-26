@@ -39,6 +39,38 @@ impl fmt::Display for ParticipantKey {
     }
 }
 
+impl std::str::FromStr for ParticipantKey {
+    type Err = &'static str;
+
+    /// 64 hex digits.
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        let not_a_key = "not a participant's key: 64 hex digits";
+        if text.len() != 64 || !text.is_ascii() {
+            return Err(not_a_key);
+        }
+        let mut key = [0; 32];
+        for (byte, pair) in key.iter_mut().zip(text.as_bytes().chunks(2)) {
+            let pair = std::str::from_utf8(pair).map_err(|_| not_a_key)?;
+            *byte = u8::from_str_radix(pair, 16).map_err(|_| not_a_key)?;
+        }
+        Ok(Self(key))
+    }
+}
+
+/// As its hex digits, in the room's state and the harness.
+impl Serialize for ParticipantKey {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(self)
+    }
+}
+
+impl<'de> Deserialize<'de> for ParticipantKey {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let text = String::deserialize(deserializer)?;
+        text.parse().map_err(serde::de::Error::custom)
+    }
+}
+
 impl fmt::Debug for ParticipantKey {
     /// The first 8 hex digits: enough to tell participants apart in a log.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -47,7 +79,7 @@ impl fmt::Debug for ParticipantKey {
 }
 
 /// What a participant says about itself.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Profile {
     /// Self-asserted (D5): trimmed, at most [`NAME_LIMIT`] characters.
     pub name: String,
@@ -82,15 +114,8 @@ impl ProfileFrame {
     /// The participant a profile frame describes; none if it isn't one.
     fn decode(bytes: &[u8]) -> Option<Participant> {
         let frame: Self = serde_json::from_slice(bytes).ok()?;
-        let mut key = [0; 32];
-        if frame.key.len() != 64 {
-            return None;
-        }
-        for (byte, pair) in key.iter_mut().zip(frame.key.as_bytes().chunks(2)) {
-            *byte = u8::from_str_radix(std::str::from_utf8(pair).ok()?, 16).ok()?;
-        }
         Some(Participant {
-            key: ParticipantKey(key),
+            key: frame.key.parse().ok()?,
             profile: Profile::new(&frame.name),
         })
     }
@@ -111,8 +136,8 @@ pub(crate) fn write_profile(
     Ok(())
 }
 
-/// Someone else in the room.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// Someone in the room.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Participant {
     pub key: ParticipantKey,
     pub profile: Profile,
@@ -241,6 +266,15 @@ mod tests {
             Profile::new(&"ä".repeat(100)).name.chars().count(),
             NAME_LIMIT
         );
+    }
+
+    #[test]
+    fn a_key_reads_back_from_its_hex() {
+        let key = ParticipantKey([0x5c; 32]);
+        assert_eq!(key.to_string().parse(), Ok(key));
+        assert!("5c".parse::<ParticipantKey>().is_err());
+        let json = serde_json::to_string(&key).unwrap();
+        assert_eq!(serde_json::from_str::<ParticipantKey>(&json).unwrap(), key);
     }
 
     #[test]

@@ -332,8 +332,11 @@ Each numbered item below is about one commit. Box phases are in **bold**.
     broadcast's epoch is a UUIDv7), the same for everyone. Leaving finishes the own tracks first,
     so the others see it at once. Tests: participants see each other arrive and leave; a new
     name reaches the others; a second session of one device is one participant.
-16. `mic-core: room state, commands and events`. `RoomState` behind `watch`, `Event` as a stream,
-    and `Command` with `Leave` as its first variant. Tests drive two clients by commands only.
+16. `mic-core: room state, commands and events`. A `Room` is a cheap handle to a task of the
+    room's own; `RoomState` behind `watch`, `Event`s (arrivals, departures), and `Command`
+    (`Leave`, `SetName`), answered over a oneshot, so any executor awaits it. Dropping every
+    handle leaves the room. Tests drive clients by commands only, one from a thread without
+    tokio.
 17. `mic-core: reconnecting`. moq-tokio's connection already redials with backoff, but gives up
     after its redial window, which is the join's connect timeout (10 s) today: settle how long a
     room tries (minutes, or until left), and surface it. When the session drops, the client

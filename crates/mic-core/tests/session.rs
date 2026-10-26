@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use mic_core::secrets::InMemory;
 use mic_core::session::Error;
-use mic_core::{Client, Config, Invite, Profile, Trust};
+use mic_core::{Client, Command, Config, Invite, Profile, Trust};
 use mic_testrelay::TestRelay;
 
 /// A client of `relay`, trusting its certificate by fingerprint.
@@ -30,7 +30,7 @@ async fn a_client_joins_a_room_and_leaves_it() {
         .await
         .unwrap();
     assert_eq!(room.invite(), &invite);
-    room.leave().await.unwrap();
+    room.command(Command::Leave).await.unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -42,11 +42,11 @@ async fn a_room_keeps_the_devices_key_across_joins() {
         .join(invite.clone(), Profile::new("someone"))
         .await
         .unwrap();
-    let key = first.key().public();
-    first.leave().await.unwrap();
+    let key = first.participant();
+    first.command(Command::Leave).await.unwrap();
     let again = client.join(invite, Profile::new("someone")).await.unwrap();
-    assert_eq!(again.key().public(), key);
-    again.leave().await.unwrap();
+    assert_eq!(again.participant(), key);
+    again.command(Command::Leave).await.unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]

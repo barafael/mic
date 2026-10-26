@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use mic_core::secrets::InMemory;
-use mic_core::{Client, Config, Invite, Profile, Room, Roster, Trust};
+use mic_core::{Client, Command, Config, Invite, Participant, Profile, Room, Trust};
 use mic_testrelay::TestRelay;
 
 const PATIENCE: Duration = Duration::from_secs(10);
@@ -19,25 +19,26 @@ fn client(relay: &TestRelay) -> Client {
     .unwrap()
 }
 
-/// Waits until `room`'s roster is `names`, in order; fails with what it was.
+/// Waits until the others in `room` are `names`, in order; fails with who they were.
 async fn roster_is(room: &Room, names: &[&str]) {
-    let mut roster = room.roster();
-    let names_of = |roster: &Roster| -> Vec<String> {
-        roster
+    let mut state = room.state();
+    let names_of = |participants: &[Participant]| -> Vec<String> {
+        participants
             .iter()
             .map(|participant| participant.profile.name.clone())
             .collect()
     };
     let reached = tokio::time::timeout(
         PATIENCE,
-        roster.wait_for(|roster| names_of(roster) == names),
+        state.wait_for(|state| names_of(&state.participants) == names),
     )
     .await;
     if reached.is_err() {
+        let state = room.state().borrow().clone();
         panic!(
             "{}'s roster: {:?}, not {names:?}",
-            room.profile().name,
-            names_of(&room.roster().borrow())
+            state.me.profile.name,
+            names_of(&state.participants)
         );
     }
 }
@@ -56,7 +57,7 @@ async fn participants_see_each_other_come_and_go() {
         .unwrap();
     roster_is(&alice, &["Bob"]).await;
     roster_is(&bob, &["Alice"]).await;
-    let bobs = alice.roster().borrow()[0].key;
+    let bobs = alice.state().borrow().participants[0].key;
     assert_eq!(bobs, bob.participant());
 
     let carol = client(&relay)
@@ -66,7 +67,7 @@ async fn participants_see_each_other_come_and_go() {
     roster_is(&alice, &["Bob", "Carol"]).await;
     roster_is(&carol, &["Alice", "Bob"]).await;
 
-    bob.leave().await.unwrap();
+    bob.command(Command::Leave).await.unwrap();
     roster_is(&alice, &["Carol"]).await;
     roster_is(&carol, &["Alice"]).await;
 }
@@ -75,7 +76,7 @@ async fn participants_see_each_other_come_and_go() {
 async fn a_new_name_reaches_the_others() {
     let relay = TestRelay::start().await.unwrap();
     let invite = Invite::new_room();
-    let mut alice = client(&relay)
+    let alice = client(&relay)
         .join(invite.clone(), Profile::new("Alice"))
         .await
         .unwrap();
@@ -84,7 +85,12 @@ async fn a_new_name_reaches_the_others() {
         .await
         .unwrap();
     roster_is(&bob, &["Alice"]).await;
-    alice.set_profile(Profile::new("Alice B.")).unwrap();
+    alice
+        .command(Command::SetName {
+            name: "Alice B.".to_owned(),
+        })
+        .await
+        .unwrap();
     roster_is(&bob, &["Alice B."]).await;
 }
 

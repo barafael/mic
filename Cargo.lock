@@ -2745,6 +2745,7 @@ dependencies = [
  "moq-e2ee",
  "moq-net",
  "moq-tokio",
+ "pollster",
  "serde",
  "serde_json",
  "sha2",

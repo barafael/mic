@@ -24,8 +24,8 @@ fn client(relay: &TestRelay) -> Client {
 
 /// `room` publishes a track `note` with one group holding [`PLAINTEXT`]; returns its producer,
 /// which keeps the track up.
-fn publish_note(room: &mut Room) -> moq_e2ee::track::Producer {
-    let mut track = room.publish("note").unwrap();
+async fn publish_note(room: &Room) -> moq_e2ee::track::Producer {
+    let mut track = room.publish("note").await.unwrap();
     let mut group = track.append_group().unwrap();
     group
         .write_frame(moq_net::Timestamp::now(), PLAINTEXT.as_bytes())
@@ -52,11 +52,11 @@ async fn first_peer(room: &Room) -> mic_core::tracks::Peer {
 async fn a_participant_reads_anothers_track_decrypted() {
     let relay = TestRelay::start().await.unwrap();
     let invite = Invite::new_room();
-    let mut alice = client(&relay)
+    let alice = client(&relay)
         .join(invite.clone(), Profile::new("someone"))
         .await
         .unwrap();
-    let _note = publish_note(&mut alice);
+    let _note = publish_note(&alice).await;
     let bob = client(&relay)
         .join(invite, Profile::new("someone"))
         .await
@@ -78,11 +78,11 @@ async fn a_participant_reads_anothers_track_decrypted() {
 async fn another_room_sees_nothing_of_it() {
     let relay = TestRelay::start().await.unwrap();
     let invite = Invite::new_room();
-    let mut alice = client(&relay)
+    let alice = client(&relay)
         .join(invite.clone(), Profile::new("someone"))
         .await
         .unwrap();
-    let _note = publish_note(&mut alice);
+    let _note = publish_note(&alice).await;
     // Another room, and the same room's id with another secret: neither finds alice.
     let elsewhere = client(&relay)
         .join(Invite::new_room(), Profile::new("someone"))
@@ -107,11 +107,11 @@ async fn another_room_sees_nothing_of_it() {
 async fn the_relay_sees_only_opaque_names_and_ciphertext() {
     let relay = TestRelay::start().await.unwrap();
     let invite = Invite::new_room();
-    let mut alice = client(&relay)
+    let alice = client(&relay)
         .join(invite.clone(), Profile::new("someone"))
         .await
         .unwrap();
-    let _note = publish_note(&mut alice);
+    let _note = publish_note(&alice).await;
 
     // A snoop on the relay: a plain moq client subscribing to every announcement.
     let origin = moq_tokio::origin::spawn();
@@ -134,13 +134,7 @@ async fn the_relay_sees_only_opaque_names_and_ciphertext() {
         format!("{}/{}", crypto.prefix().as_str(), alice.path())
     );
     let room_id = invite.room.to_string();
-    let participant: String = alice
-        .key()
-        .public()
-        .as_bytes()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect();
+    let participant = alice.participant().to_string();
     assert!(!path.contains(&room_id) && !path.contains(&participant));
 
     // The track's name is opaque too; the relay learns it from a subscriber, as this does.
