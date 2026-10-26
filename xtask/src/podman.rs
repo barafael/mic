@@ -292,25 +292,37 @@ impl TestBox {
         Ok(gpu_lines(&rendered, self.gpu).replace("@NAME@", pod.name()))
     }
 
-    /// Stops and removes the box's pods; `wipe` also removes their volumes, and the builder with
-    /// its caches. A pod never played from here is left alone: `kube down` needs the file it was
-    /// played from.
+    /// Stops and removes the box's pods; `wipe` also removes the builder, and then every volume
+    /// of the box's (the keys, the builder's caches). Pods share volumes, so the volumes go only
+    /// once every pod is down. A pod never played from here is left alone: `kube down` needs the
+    /// file it was played from.
     pub fn down(&self, wipe: bool) -> Result<()> {
         let mut pods = Pod::all();
         if wipe {
             pods.push(Pod::Builder);
         }
-        for pod in pods {
+        // The reverse of the order they're played in: the relay, whose keys the others read,
+        // goes last.
+        for pod in pods.into_iter().rev() {
             let file = pod.rendered(&self.repo);
             if !file.exists() {
                 continue;
             }
             let mut down = podman(&["kube", "down"]);
-            if wipe {
-                down.arg("--force");
-            }
             down.arg(&file);
             process::run(down)?;
+        }
+        if wipe {
+            let volumes = process::output(podman(&[
+                "volume",
+                "ls",
+                "--quiet",
+                "--filter",
+                &format!("name=^{PREFIX}"),
+            ]))?;
+            for volume in volumes.lines() {
+                process::run(podman(&["volume", "rm", volume]))?;
+            }
         }
         Ok(())
     }
