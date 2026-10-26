@@ -165,7 +165,11 @@ impl Inner {
         let origin = moq_tokio::origin::spawn();
         let (path, generation) = crypto.publisher(key.public().as_bytes())?;
         let broadcast = origin.create_broadcast(&path).map_err(moq)?;
-        let connection = self.moq.clone().with_origin(origin.clone()).connect(url);
+        let connection = self
+            .moq
+            .clone()
+            .with_origin(origin.clone())
+            .connect(url.clone());
         let connection = connection
             .established()
             .await
@@ -189,6 +193,8 @@ impl Inner {
             profile,
             profile_track,
             connection,
+            moq: self.moq.clone(),
+            url,
             origin,
             runtime: self.runtime.clone(),
         }))

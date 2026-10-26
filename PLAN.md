@@ -337,14 +337,13 @@ Each numbered item below is about one commit. Box phases are in **bold**.
     (`Leave`, `SetName`), answered over a oneshot, so any executor awaits it. Dropping every
     handle leaves the room. Tests drive clients by commands only, one from a thread without
     tokio.
-17. `mic-core: reconnecting`. moq-tokio's connection already redials with backoff, but gives up
-    after its redial window, which is the join's connect timeout (10 s) today: settle how long a
-    room tries (minutes, or until left), and surface it. When the session drops, the client
-    reconnects with backoff,
-    announces its broadcast again and resubscribes; `RoomState` shows `Reconnecting` meanwhile.
-    It sits here because it needs the roster and the state, and before any media, so every
-    track is born with it. Tests: `mic-testrelay` restarts mid-call; the roster comes back with
-    no duplicates. Each media commit adds "and the media resumes" to this test.
+17. `mic-core: reconnecting`. moq-tokio's connection redials with backoff and gives up after its
+    redial window (the connect timeout); the room then dials a new connection on the same
+    origin, and so on until it's left, so its broadcast comes back as it was (same path, same
+    epoch: no duplicates). `RoomState` shows `Reconnecting` meanwhile. A first join still fails
+    after the timeout, with its reason. Tests: the test relay stops for longer than the window
+    and restarts; both rooms show `Reconnecting`, then `Connected`, and each other once. Each
+    media commit adds "and the media resumes" to this test.
 18. `mic-harness: the protocol and its server`. `Snapshot` is `RoomState` with the `ui` section;
     `Act` is a `Command`; `Screenshot` asks the display; `Reset` leaves and forgets. The server
     takes a `mic-core` client. Unit tests on the protocol.

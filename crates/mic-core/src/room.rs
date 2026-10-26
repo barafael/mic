@@ -35,6 +35,9 @@ pub struct RoomState {
 #[serde(rename_all = "snake_case")]
 pub enum Connection {
     Connected,
+    /// The session dropped, and the room is dialing the relay again, with backoff, for as long
+    /// as it takes or until it's left. Its broadcast comes back as it was.
+    Reconnecting,
     /// Left: the room is over for this participant, and no command does anything any more.
     Left,
 }
@@ -99,6 +102,9 @@ pub(crate) struct Joined {
     pub profile: Profile,
     pub profile_track: moq_e2ee::track::Producer,
     pub connection: moq_tokio::Connection,
+    /// What the room dials again with, once a connection gives up.
+    pub moq: moq_tokio::Client,
+    pub url: url::Url,
     pub origin: moq_net::origin::Producer,
     pub runtime: tokio::runtime::Handle,
 }
@@ -135,7 +141,9 @@ impl Room {
             profile_track: Some(joined.profile_track),
             participant: joined.participant,
             connection: Some(joined.connection),
-            _origin: joined.origin,
+            moq: joined.moq,
+            url: joined.url,
+            origin: joined.origin,
             following,
             roster: followed,
             state,
@@ -236,8 +244,10 @@ struct Task {
     participant: ParticipantKey,
     /// Until the room is left.
     connection: Option<moq_tokio::Connection>,
-    /// Kept for the session's life.
-    _origin: moq_net::origin::Producer,
+    moq: moq_tokio::Client,
+    url: url::Url,
+    /// What the session publishes and subscribes to; a new connection takes it up as it was.
+    origin: moq_net::origin::Producer,
     following: tokio::task::JoinHandle<()>,
     roster: watch::Receiver<Roster>,
     state: watch::Sender<RoomState>,
@@ -274,6 +284,7 @@ impl Task {
                     let roster = self.roster.borrow_and_update().clone();
                     self.roster_changed(roster);
                 }
+                status = status(&mut self.connection) => self.status(status),
             }
         }
     }
@@ -293,6 +304,34 @@ impl Task {
                 Ok(())
             }
         }
+    }
+
+    /// What the connection said into the state. A connection gives up after its redial window;
+    /// the room then dials a new one on the same origin, and so goes on until it's left.
+    fn status(&mut self, status: moq_tokio::Result<moq_tokio::Status>) {
+        let connection = match status {
+            Ok(moq_tokio::Status::Connected) => Connection::Connected,
+            Ok(moq_tokio::Status::Disconnected) => Connection::Reconnecting,
+            // A GOAWAY (the old session serves while the new one is dialed), or a status a later
+            // moq-tokio adds: the connection as it was.
+            Ok(_) => return,
+            Err(error) => {
+                tracing::info!(%error, "the connection gave up; dialing again");
+                let _entered = tokio::runtime::Handle::current().enter();
+                self.connection = Some(
+                    self.moq
+                        .clone()
+                        .with_origin(self.origin.clone())
+                        .connect(self.url.clone()),
+                );
+                Connection::Reconnecting
+            }
+        };
+        self.state.send_if_modified(|state| {
+            let changed = state.connection != connection;
+            state.connection = connection;
+            changed
+        });
     }
 
     /// The new roster into the state, and who came and went as events.
@@ -340,5 +379,15 @@ impl Task {
 impl Drop for Task {
     fn drop(&mut self) {
         self.following.abort();
+    }
+}
+
+/// The next change of `connection`'s status; never, once there's no connection.
+async fn status(
+    connection: &mut Option<moq_tokio::Connection>,
+) -> moq_tokio::Result<moq_tokio::Status> {
+    match connection {
+        Some(connection) => connection.status().await,
+        None => std::future::pending().await,
     }
 }
