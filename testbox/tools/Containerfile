@@ -1,0 +1,4 @@
+# What the checks run inside the box's network. Arch, as every image of the box
+# (xtask/src/pins.rs); `ARCH` is pinned by digest.
+ARG ARCH
+FROM ${ARCH}
