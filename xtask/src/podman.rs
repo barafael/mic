@@ -28,17 +28,34 @@ pub enum Pod {
     Relay,
     /// The checks' tools inside the network.
     Tools,
+    /// Builds what the box runs (`crate::builder`). Not part of the box: it fetches crates, so
+    /// it's on podman's default network, and it outlives `down`.
+    Builder,
 }
 
 impl Pod {
-    /// In the order they're played: the relay makes the keys the others read.
+    /// The box's pods, in the order they're played: the relay makes the keys the others read.
     pub const ALL: [Pod; 2] = [Pod::Relay, Pod::Tools];
 
     pub fn name(self) -> &'static str {
         match self {
             Pod::Relay => "relay",
             Pod::Tools => "tools",
+            Pod::Builder => "builder",
         }
+    }
+
+    /// The network it's played on.
+    fn network(self) -> &'static str {
+        match self {
+            Pod::Relay | Pod::Tools => NETWORK,
+            Pod::Builder => "podman",
+        }
+    }
+
+    /// The pod file as it was last played.
+    fn rendered(self, repo: &Path) -> PathBuf {
+        repo.join(RENDERED).join(format!("{}.yaml", self.name()))
     }
 
     pub fn file(self, repo: &Path) -> PathBuf {
@@ -78,20 +95,49 @@ impl TestBox {
         &self.repo
     }
 
-    /// Builds the images that are missing, makes the network and plays every pod.
+    /// Builds the images that are missing, makes the network and plays every pod of the box.
     pub fn up(&self) -> Result<()> {
         self.images()?;
         self.network()?;
-        let rendered = self.repo.join(RENDERED);
-        error::create_dir_all(&rendered)?;
         for pod in Pod::ALL {
-            let file = rendered.join(format!("{}.yaml", pod.name()));
-            error::write(&file, self.render(pod)?)?;
-            let mut play = podman(&["kube", "play", "--replace", "--network", NETWORK]);
-            play.arg(&file);
-            process::run(play)?;
+            self.play(pod)?;
         }
         Ok(())
+    }
+
+    /// Plays `pod`, replacing what runs under its name.
+    pub fn play(&self, pod: Pod) -> Result<()> {
+        let file = pod.rendered(&self.repo);
+        error::create_dir_all(&self.repo.join(RENDERED))?;
+        error::write(&file, self.render(pod)?)?;
+        let mut play = podman(&["kube", "play", "--replace", "--network", pod.network()]);
+        play.arg(&file);
+        process::run(play)
+    }
+
+    /// The image `container` runs, if it exists.
+    pub fn image_of(&self, container: &str) -> Option<String> {
+        process::output(podman(&[
+            "container",
+            "inspect",
+            "--format",
+            "{{.ImageName}}",
+            container,
+        ]))
+        .ok()
+        .map(|name| name.trim().to_owned())
+    }
+
+    /// Whether `container` runs; one that isn't there doesn't.
+    pub fn running(&self, container: &str) -> bool {
+        process::output(podman(&[
+            "container",
+            "inspect",
+            "--format",
+            "{{.State.Running}}",
+            container,
+        ]))
+        .is_ok_and(|running| running.trim() == "true")
     }
 
     /// Builds each image whose tag is missing; returns those it built.
@@ -175,14 +221,17 @@ impl TestBox {
         })
     }
 
-    /// Stops and removes the pods; `wipe` also removes their volumes. A pod never played from
-    /// here is left alone: `kube down` needs the file it was played from.
+    /// Stops and removes the box's pods; `wipe` also removes their volumes, and the builder with
+    /// its caches. A pod never played from here is left alone: `kube down` needs the file it was
+    /// played from.
     pub fn down(&self, wipe: bool) -> Result<()> {
-        for pod in Pod::ALL {
-            let file = self
-                .repo
-                .join(RENDERED)
-                .join(format!("{}.yaml", pod.name()));
+        let pods: &[Pod] = if wipe {
+            &[Pod::Relay, Pod::Tools, Pod::Builder]
+        } else {
+            &Pod::ALL
+        };
+        for &pod in pods {
+            let file = pod.rendered(&self.repo);
             if !file.exists() {
                 continue;
             }
@@ -335,7 +384,7 @@ mod tests {
     #[test]
     fn every_pod_has_a_pod_file_naming_known_images() {
         let repo = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-        for pod in Pod::ALL {
+        for pod in [Pod::Relay, Pod::Tools, Pod::Builder] {
             let file = pod.file(repo);
             let source = std::fs::read_to_string(&file).unwrap();
             assert!(

@@ -1,0 +1,41 @@
+# The box's builder (testbox/builder): idles, and `cargo testbox build` runs cargo in it. Not part
+# of the box: it fetches crates, so it's played on podman's default network, and `down` leaves it
+# running; `down --wipe` removes it and its caches. The repository is mounted read-only; the
+# target directory and the cargo registry are volumes, so builds are incremental; the binaries go
+# to target/testbox-bin, which the clients mount.
+{
+  apiVersion: "v1",
+  kind: "Pod",
+  metadata: {
+    name: "mic-testbox-builder",
+  },
+  spec: {
+    restartPolicy: "Always",
+    containers: [
+      {
+        name: "builder",
+        image: "@IMAGE:builder@",
+        args: ["bash", "-c", "trap 'exit 0' TERM; sleep infinity & wait"],
+        workingDir: "/src",
+        env: [
+          { name: "CARGO_TARGET_DIR", value: "/target" },
+          { name: "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER", value: "clang" },
+          { name: "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS", value: "-C link-arg=-fuse-ld=mold" },
+        ],
+        securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: ["ALL"] } },
+        volumeMounts: [
+          { name: "src", mountPath: "/src", readOnly: true },
+          { name: "target", mountPath: "/target" },
+          { name: "registry", mountPath: "/usr/local/cargo/registry" },
+          { name: "bin", mountPath: "/out" },
+        ],
+      },
+    ],
+    volumes: [
+      { name: "src", hostPath: { path: "@REPO@", type: "Directory" } },
+      { name: "target", persistentVolumeClaim: { claimName: "mic-testbox-target" } },
+      { name: "registry", persistentVolumeClaim: { claimName: "mic-testbox-registry" } },
+      { name: "bin", hostPath: { path: "@REPO@/target/testbox-bin", type: "DirectoryOrCreate" } },
+    ],
+  },
+}

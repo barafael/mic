@@ -13,6 +13,10 @@ only while they build. [PLAN.md](../PLAN.md) says what the box is growing into.
 flowchart LR
     subgraph host["Host"]
         xtask["cargo testbox"]
+        bin[("target/testbox-bin")]
+    end
+    subgraph default["podman's default network"]
+        builder["pod mic-testbox-builder<br/>cargo, mold; target and registry volumes"]
     end
     subgraph net["Network mic-testbox: internal, no egress"]
         subgraph prelay["pod mic-testbox-relay"]
@@ -25,6 +29,8 @@ flowchart LR
         ca[("volume mic-testbox-keys")]
     end
     xtask -- "podman exec" --> tools
+    xtask -- "cargo testbox build" --> builder
+    builder --> bin
     keys --> ca
     ca -. "read-only" .-> relay
     ca -. "read-only" .-> tools
@@ -42,6 +48,12 @@ flowchart LR
 - **The relay is `moq-relay`** at a release, in place of moq.pro, which the internal network
   can't reach. It's built from upstream's repository with its `Cargo.lock`, as is moq-tokio's
   `clock` example, the stock publisher and subscriber the `relay` phase uses.
+- **`mic` isn't built into an image.** `cargo testbox build` compiles what the box runs in the
+  builder pod, a long-lived container whose target directory and cargo registry are volumes,
+  linking with mold, in the `testbox` profile (optimized, incremental, no LTO). Each binary goes
+  into `target/testbox-bin` only when it changed, by a rename, and client pods mount that
+  directory read-only. The builder fetches crates, so it's on podman's default network, outside
+  the box; `down` leaves it running, `down --wipe` removes it and its caches.
 - **The box has its own CA.** The relay pod's `keys` init container makes it and the relay's
   certificate once, in the volume `mic-testbox-keys`; clients trust the CA. `down --wipe`
   removes it.
@@ -68,5 +80,5 @@ in `target/testbox-record/<phase>/`. `cargo testbox down` stops the pods.
 
 | Phase | What it checks |
 |---|---|
-| `box` | The network is internal; a pod resolves no outside name and opens no outside connection; an unchanged box starts without a build |
+| `box` | The network is internal; a pod resolves no outside name and opens no outside connection; an unchanged box starts without a build; a second build of an unchanged tree is a no-op; a binary from the builder runs in the client image |
 | `relay` | Frames pass through the relay between moq's own publisher and subscriber; a client without the box's CA is refused. If this fails, the box is broken, not `mic` |

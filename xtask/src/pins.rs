@@ -30,6 +30,13 @@ pub const MOQ_REV: Pin = Pin {
     value: "225ab82a401b5731f726cd9bfbece08162bd63f5",
 };
 
+/// The Rust toolchain the builder compiles with: rust-toolchain.toml's, which a test holds it
+/// to, so the box runs what CI checked.
+pub const RUST: Pin = Pin {
+    name: "RUST",
+    value: "1.99.1",
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -54,5 +61,17 @@ mod tests {
     fn moq_is_pinned_by_commit() {
         assert_eq!(MOQ_REV.value.len(), 40);
         assert!(MOQ_REV.value.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn the_builder_compiles_with_the_repositorys_toolchain() {
+        let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap();
+        let toolchain = std::fs::read_to_string(repo.join("rust-toolchain.toml")).unwrap();
+        assert!(
+            toolchain.contains(&format!("channel = \"{}\"", RUST.value)),
+            "rust-toolchain.toml and pins::RUST differ"
+        );
     }
 }

@@ -4,6 +4,7 @@
 // Every outcome is handled: a discarded `Result` would hide a failed step.
 #![deny(clippy::let_underscore_must_use, clippy::let_underscore_untyped)]
 
+mod builder;
 mod checks;
 mod error;
 mod images;
@@ -32,6 +33,8 @@ struct Cli {
 enum Command {
     /// Builds the images that are missing, and plays the pods.
     Up,
+    /// Compiles what the box runs, in the builder pod, into target/testbox-bin.
+    Build,
     /// Runs a phase's checks against the box; its record is in target/testbox-record/<phase>/.
     Test { phase: Phase },
     /// Lists the images' current tags, content-hashed.
@@ -72,6 +75,7 @@ fn main() -> ExitCode {
     let the_box = TestBox::new(&repo);
     let outcome = match Cli::parse().command {
         Command::Up => the_box.up(),
+        Command::Build => builder::build(&the_box).map(|_| ()),
         Command::Test { phase } => test(&the_box, phase),
         Command::Images { prune } => the_box.list_images(prune),
         Command::Down { wipe } => the_box.down(wipe),

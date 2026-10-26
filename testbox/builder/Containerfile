@@ -1,0 +1,17 @@
+# Compiles what the box runs (`cargo testbox build`), incrementally: a long-lived container whose
+# target directory and cargo registry are volumes. Arch, as the client image, so the binaries find
+# the libraries they were linked with; pacman installs from one day of the Arch Linux Archive
+# (ARCH_SNAPSHOT). mold links.
+ARG ARCH
+FROM ${ARCH}
+ARG ARCH_SNAPSHOT
+RUN --mount=type=cache,target=/var/cache/pacman/pkg \
+    echo "Server = https://archive.archlinux.org/repos/${ARCH_SNAPSHOT}/\$repo/os/\$arch" \
+        > /etc/pacman.d/mirrorlist \
+    && pacman -Syu --noconfirm --needed base-devel clang mold rustup
+# The toolchain rust-toolchain.toml pins (xtask/src/pins.rs holds RUST to it), in the image, so
+# the repository's rust-toolchain.toml finds it installed, with the components it names.
+ARG RUST
+ENV RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo
+RUN rustup toolchain install "${RUST}" --profile minimal --component clippy,rustfmt \
+    && rustup default "${RUST}"

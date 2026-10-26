@@ -24,7 +24,18 @@ pub struct Image {
     pub pins: &'static [Pin],
 }
 
-pub const IMAGES: [Image; 1] = [
+pub const IMAGES: [Image; 3] = [
+    // Compiles what the box runs, against the same Arch as the client image, so the binaries
+    // find the libraries they were linked with.
+    Image {
+        name: "builder",
+        pins: &[pins::ARCH, pins::ARCH_SNAPSHOT, pins::RUST],
+    },
+    // What a participant runs in: the binaries come from the builder, bind-mounted.
+    Image {
+        name: "client",
+        pins: &[pins::ARCH, pins::ARCH_SNAPSHOT],
+    },
     // moq's relay, and its clock example as a stock publisher and subscriber.
     Image {
         name: "moq",

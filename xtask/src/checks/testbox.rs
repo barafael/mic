@@ -1,8 +1,11 @@
-//! The `box` phase: the box itself. Its network reaches nothing outside, and an unchanged box
-//! starts without building an image.
+//! The `box` phase: the box itself. Its network reaches nothing outside, an unchanged box starts
+//! without building an image, and the builder's binaries run in the client image.
 
+use crate::builder;
 use crate::error::{Error, Result};
-use crate::podman::{NETWORK, Pod, TestBox};
+use crate::images;
+use crate::podman::{NETWORK, Pod, TestBox, podman};
+use crate::process;
 
 use super::Checks;
 
@@ -26,7 +29,39 @@ pub fn testbox(checks: &mut Checks, the_box: &TestBox) -> Result<()> {
             Err(Error::Failed(format!("built {}", built.join(", "))))
         }
     });
+    checks.record("a second build of an unchanged tree is a no-op", || {
+        builder::build(the_box)?;
+        let again = builder::build(the_box)?;
+        if again.compiled || !again.updated.is_empty() {
+            Err(Error::Failed(format!(
+                "compiled: {}, updated: {:?}",
+                again.compiled, again.updated
+            )))
+        } else {
+            Ok(())
+        }
+    });
+    checks.record("a binary from the builder runs in the client image", || {
+        probe_runs(the_box)
+    });
     Ok(())
+}
+
+/// The probe from `target/testbox-bin`, in the client image with no network, says it runs
+/// (testbox/probe/src/main.rs, `RUNS`).
+fn probe_runs(the_box: &TestBox) -> Result<()> {
+    let client = images::find("client").ok_or("no client image")?;
+    let tag = client.tag(the_box.repo())?;
+    let bin = the_box.repo().join(builder::BIN);
+    let mut run = podman(&["run", "--rm", "--network", "none", "--volume"]);
+    run.arg(format!("{}:/opt/mic:ro", bin.display()))
+        .args([tag.as_str(), "/opt/mic/probe"]);
+    let said = process::output(run)?;
+    if said.starts_with("probe: runs") {
+        Ok(())
+    } else {
+        Err(Error::Failed(format!("it said {said:?}")))
+    }
 }
 
 /// From the tools pod: a name doesn't resolve, and a connection to an address doesn't open. Both
