@@ -11,7 +11,7 @@ only while they build. [PLAN.md](../PLAN.md) says what the box is growing into.
 
 ```mermaid
 flowchart LR
-    subgraph host["Host"]
+    subgraph host["Host: AMD GPU, /dev/dri/renderD128"]
         xtask["cargo testbox"]
         bin[("target/testbox-bin")]
         view[("target/testbox-view<br/>display sockets")]
@@ -28,7 +28,7 @@ flowchart LR
             tools["tools<br/>probes, moq's clock"]
         end
         subgraph palice["pod mic-testbox-alice"]
-            alice["client<br/>with-display: Xvnc"]
+            alice["client<br/>with-display: Xvnc<br/>probe window: wgpu"]
         end
         ca[("volume mic-testbox-keys")]
     end
@@ -68,12 +68,20 @@ flowchart LR
   running check's. `test --screenshots` keeps each display after each check in the phase's
   record. These tools are a workspace of their own in `testbox/view/`, Linux only, carried over
   from beep's testbox.
+- **Clients use the host's GPU**: each client pod gets the render node, `/dev/dri/renderD128`
+  (rendering and video only, no mode setting), and the client image carries Mesa's userspace
+  drivers: RADV for Vulkan, radeonsi for GL and VA-API. Without a GPU, `up --no-gpu` leaves the
+  node out, and Mesa falls back to llvmpipe and lavapipe; checks of hardware paths are skipped
+  then, and say so. Xvnc has no vertical blank: what renders there must present in mailbox or
+  immediate mode, as FIFO stalls.
 - **The box has its own CA.** The relay pod's `keys` init container makes it and the relay's
   certificate once, in the volume `mic-testbox-keys`; clients trust the CA. `down --wipe`
   removes it.
 
 ## What the host needs
 
+- For the GPU: `/dev/dri/renderD128` readable and writable by your user (mode 0666, or the
+  `render` group), and an AMD GPU for VA-API; otherwise `up --no-gpu`.
 - Linux with Podman, rootless: your user needs a subuid and subgid range (`/etc/subuid`,
   `/etc/subgid`). Netavark makes the internal bridge, so the kernel's `bridge` and `veth` modules
   must load.
@@ -94,5 +102,5 @@ in `target/testbox-record/<phase>/`. `cargo testbox down` stops the pods.
 
 | Phase | What it checks |
 |---|---|
-| `box` | The network is internal; a pod resolves no outside name and opens no outside connection; an unchanged box starts without a build; a second build of an unchanged tree is a no-op; a binary from the builder runs in the client image; a client's display, through its socket, shows what it draws |
+| `box` | The network is internal; a pod resolves no outside name and opens no outside connection; an unchanged box starts without a build; a second build of an unchanged tree is a no-op; a binary from the builder runs in the client image; the probe window renders on RADV (llvmpipe with `--no-gpu`); a client's display, through its socket, shows what it draws; VA-API decodes VP9 |
 | `relay` | Frames pass through the relay between moq's own publisher and subscriber; a client without the box's CA is refused. If this fails, the box is broken, not `mic` |

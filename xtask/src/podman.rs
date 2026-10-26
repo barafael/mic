@@ -103,13 +103,27 @@ pub fn podman(args: &[&str]) -> Command {
 
 pub struct TestBox {
     repo: PathBuf,
+    /// Whether client pods get the host's GPU (`up --no-gpu` says no).
+    gpu: bool,
 }
+
+/// The marker of the pod files' lines that pass the host's GPU through.
+const GPU: &str = "# @GPU@ ";
+/// The host's render node.
+pub const RENDER_NODE: &str = "/dev/dri/renderD128";
 
 impl TestBox {
     pub fn new(repo: &Path) -> Self {
         Self {
             repo: repo.to_owned(),
+            gpu: true,
         }
+    }
+
+    /// Client pods without the host's GPU: llvmpipe and lavapipe, and software codecs.
+    pub fn without_gpu(mut self) -> Self {
+        self.gpu = false;
+        self
     }
 
     pub fn repo(&self) -> &Path {
@@ -119,6 +133,11 @@ impl TestBox {
     /// Builds the images that are missing and what the box runs, makes the network, and plays
     /// every pod of the box.
     pub fn up(&self) -> Result<()> {
+        if self.gpu && !Path::new(RENDER_NODE).exists() {
+            return Err(Error::Failed(format!(
+                "no {RENDER_NODE} on this host: `cargo testbox up --no-gpu`"
+            )));
+        }
         self.images()?;
         crate::builder::build(self)?;
         self.network()?;
@@ -270,7 +289,7 @@ impl TestBox {
                 .ok_or_else(|| Error::Failed(format!("{}: no image {name}", source.display())))?
                 .tag(&self.repo)
         })?;
-        Ok(rendered.replace("@NAME@", pod.name()))
+        Ok(gpu_lines(&rendered, self.gpu).replace("@NAME@", pod.name()))
     }
 
     /// Stops and removes the box's pods; `wipe` also removes their volumes, and the builder with
@@ -393,6 +412,20 @@ impl TestBox {
     }
 }
 
+/// `source` with the lines that pass the GPU through kept, without their marker, or left out.
+fn gpu_lines(source: &str, gpu: bool) -> String {
+    source
+        .lines()
+        .filter_map(|line| match line.split_once(GPU) {
+            Some((indent, rest)) if line.trim_start().starts_with(GPU) => {
+                gpu.then(|| format!("{indent}{rest}"))
+            }
+            _ => Some(line.to_owned()),
+        })
+        .map(|line| line + "\n")
+        .collect()
+}
+
 /// `source` with `@REPO@` replaced by `repo`, and each `@IMAGE:<name>@` by `tag(name)`.
 fn render(source: &str, repo: &Path, tag: impl Fn(&str) -> Result<String>) -> Result<String> {
     let mut rendered = String::with_capacity(source.len());
@@ -425,6 +458,13 @@ mod tests {
             rendered,
             "image: \"localhost/tools:1\"\npath: \"/repo/target\"\nother: \"localhost/relay:1\""
         );
+    }
+
+    #[test]
+    fn the_gpu_lines_are_kept_or_left_out() {
+        let source = "a\n  # @GPU@ { gpu },\nb\n";
+        assert_eq!(gpu_lines(source, true), "a\n  { gpu },\nb\n");
+        assert_eq!(gpu_lines(source, false), "a\nb\n");
     }
 
     #[test]

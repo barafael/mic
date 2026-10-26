@@ -1,6 +1,6 @@
 //! The `box` phase: the box itself. Its network reaches nothing outside, an unchanged box starts
-//! without building an image, the builder's binaries run in the client image, and a client's
-//! display shows what it draws.
+//! without building an image, the builder's binaries run in the client image, a client renders on
+//! the host's GPU (or on llvmpipe without it), and its display shows what it draws.
 
 use crate::builder;
 use crate::error::{Error, Result};
@@ -46,15 +46,92 @@ pub fn testbox(checks: &mut Checks, the_box: &TestBox) -> Result<()> {
     checks.record("a binary from the builder runs in the client image", || {
         probe_runs(the_box)
     });
+    let client = crate::podman::CLIENTS[0];
+    let gpu = has_gpu(the_box, client)?;
+    let expected = if gpu { "RADV" } else { "llvmpipe" };
+    checks.record(&format!("the probe window renders on {expected}"), || {
+        adapter(the_box, client, expected)
+    });
     let directory = checks.record_directory().to_owned();
     checks.record("a client's display shows what it draws", || {
         display_shows(the_box, &directory)
     });
+    if gpu {
+        checks.record("VA-API decodes VP9 in a client", || {
+            vp9_decode(the_box, client)
+        });
+    } else {
+        checks.skip("VA-API decodes VP9 in a client", "no GPU (`up --no-gpu`)");
+    }
     Ok(())
 }
 
-/// The colour testbox/pods/client.yaml has a client's display show, until it runs something.
-const BACKGROUND: [u8; 3] = [0x2a, 0x6f, 0x97];
+/// What the probe window clears its window to (testbox/probe/src/main.rs, `COLOUR`).
+const BACKGROUND: [u8; 3] = [0xc0, 0x39, 0x2b];
+/// How long the probe window may take to present its first frame after `up`.
+const PRESENT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Whether `client`'s pod has the host's render node.
+fn has_gpu(the_box: &TestBox, client: &'static str) -> Result<bool> {
+    let found = the_box.exec(
+        &view::container(client),
+        &["test", "-c", crate::podman::RENDER_NODE],
+    )?;
+    Ok(found.status.success())
+}
+
+/// Once the probe window has presented a frame, the adapter it says it got is `expected`'s.
+fn adapter(the_box: &TestBox, client: &'static str, expected: &str) -> Result<()> {
+    let container = view::container(client);
+    let deadline = std::time::Instant::now() + PRESENT;
+    loop {
+        let log = the_box.log(&container)?;
+        if log.lines().any(|line| line == "probe: presented") {
+            let adapter = log
+                .lines()
+                .find(|line| line.starts_with("probe: adapter "))
+                .ok_or("presented, but named no adapter")?;
+            return if adapter.contains(expected) {
+                Ok(())
+            } else {
+                Err(Error::Failed(format!("{adapter:?}")))
+            };
+        }
+        if std::time::Instant::now() > deadline {
+            return Err(Error::Failed(format!(
+                "no frame presented within {}s: {:?}",
+                PRESENT.as_secs(),
+                log.lines().last().unwrap_or_default()
+            )));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+}
+
+/// `vainfo` in `client` lists VP9 profile 0 for decoding (`VAEntrypointVLD`).
+fn vp9_decode(the_box: &TestBox, client: &'static str) -> Result<()> {
+    let listed = the_box.exec(
+        &view::container(client),
+        &[
+            "vainfo",
+            "--display",
+            "drm",
+            "--device",
+            crate::podman::RENDER_NODE,
+        ],
+    )?;
+    let listed = String::from_utf8_lossy(&listed.stdout);
+    if listed
+        .lines()
+        .any(|line| line.contains("VAProfileVP9Profile0") && line.contains("VAEntrypointVLD"))
+    {
+        Ok(())
+    } else {
+        Err(Error::Failed(format!(
+            "vainfo lists no VP9 decoding: {listed}"
+        )))
+    }
+}
 /// Its size there.
 const DISPLAY: (u32, u32) = (1280, 720);
 /// How long a display may take to serve after `up`.

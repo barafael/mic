@@ -52,6 +52,11 @@ impl Checks {
         self.report(name, check());
     }
 
+    /// A check that doesn't apply to this box, and why: said, not tallied.
+    pub fn skip(&mut self, name: &str, why: &str) {
+        println!("check {name}: skipped: {why}");
+    }
+
     /// Where the phase's record is, for a check that keeps a file there.
     pub fn record_directory(&self) -> &std::path::Path {
         self.kept.directory()

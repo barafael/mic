@@ -5,3 +5,8 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
+
+[dependencies]
+pollster = "1.0.1"
+wgpu = "30"
+winit = "0.30"

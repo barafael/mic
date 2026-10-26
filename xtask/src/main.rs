@@ -32,8 +32,13 @@ struct Cli {
 
 #[derive(clap::Subcommand)]
 enum Command {
-    /// Builds the images that are missing, and plays the pods.
-    Up,
+    /// Builds the images that are missing and what the box runs, and plays the pods.
+    Up {
+        /// Client pods without the host's GPU: llvmpipe and lavapipe, and software codecs, as
+        /// in CI. Phases that measure the hardware paths skip them, and say so.
+        #[arg(long)]
+        no_gpu: bool,
+    },
     /// Compiles what the box runs, in the builder pod, into target/testbox-bin.
     Build,
     /// Runs a phase's checks against the box; its record is in target/testbox-record/<phase>/.
@@ -93,7 +98,8 @@ fn main() -> ExitCode {
     let repo = repo_root();
     let the_box = TestBox::new(&repo);
     let outcome = match Cli::parse().command {
-        Command::Up => the_box.up(),
+        Command::Up { no_gpu: false } => the_box.up(),
+        Command::Up { no_gpu: true } => TestBox::new(&repo).without_gpu().up(),
         Command::Build => builder::build(&the_box).map(|_| ()),
         Command::Test { phase, screenshots } => test(&the_box, phase, screenshots),
         Command::Vnc { interactive } => view::vnc(&the_box, interactive),

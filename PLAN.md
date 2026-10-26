@@ -165,12 +165,15 @@ container needs no extra groups.
 
 - **Every client container gets the render node** (`/dev/dri/renderD128`, not `card1`: no
   display or mode setting, only rendering and video). With `podman kube play`, that's a
-  `hostPath` volume of type `CharDevice` **⚠ unverified**.
+  `hostPath` volume of type `CharDevice`, which works rootless with every capability dropped
+  (commit 8).
 - **Images carry Mesa's userspace drivers** (radeonsi for VA-API, RADV for Vulkan) at a version
   close to the host's kernel driver (Mesa 26.2 on the host). The client image's base is chosen
   for a recent Mesa, not for the oldest glibc.
-- **wgpu renders on RADV**, so Slint and `mic-render` run as on a desktop. Xvnc reads back the
-  frames, which costs a copy per frame and is fine at box resolutions **⚠ unverified**.
+- **wgpu renders on RADV**, so Slint and `mic-render` run as on a desktop, and its frames reach
+  Xvnc (commit 8). **But not with FIFO presentation:** Xvnc has no vertical blank, and 120
+  frames of `vkcube` in FIFO took a minute, against a second in mailbox or immediate. Everything
+  in the box presents without waiting for vblank.
 - **VP9 decodes on VA-API** once `moq-video` has a VA-API VP9 decoder **⚠ unverified** (M6).
   VP9 encoding is software everywhere: AMD has no VP9 encoder.
 - **Without a GPU** (CI, other hosts), `cargo testbox up --no-gpu` uses llvmpipe and lavapipe, and
@@ -285,10 +288,10 @@ Each numbered item below is about one commit. Box phases are in **bold**.
    second build of an unchanged tree is a no-op, and a built binary runs in the client image.
 7. `testbox: displays`. `with-display`, the VNC and web viewers and `shot`, carried over from beep.
    **`box`**: a display comes up and `shot` returns its pixels.
-8. `testbox: the GPU in client pods`. The render node passed through **⚠ unverified**, Mesa in
+8. `testbox: the GPU in client pods`. The render node passed through, Mesa in
    the client image, and `--no-gpu` for llvmpipe and lavapipe. **`box`**: a tiny `wgpu` probe
-   window reports its adapter (RADV, or llvmpipe with `--no-gpu`) and shows up in a `shot`;
-   `vainfo` lists VP9 decode.
+   window reports its adapter (RADV, or llvmpipe with `--no-gpu`) and its colour shows up in a
+   `shot`; `vainfo` lists VP9 decode.
 9. `testbox: run, jobs and dev`. Readiness by `Ping`, `run --jobs`, `run --fresh`, the box-wide
    measurement lock, `dev`. **`relay`**: `dev relay` is timed, and the target is under 10 s from
    an unchanged box to a result.
@@ -479,8 +482,7 @@ Each is checked by the commit named, which settles it in its body and in the des
 
 | Assumption | Checked in | If it's wrong |
 |---|---|---|
-| `podman kube play` passes `/dev/dri/renderD128` into a container as a device, from a `hostPath` of type `CharDevice` | 8 | The xtask starts client pods with `podman run --device` |
-| wgpu on RADV renders into an Xvnc display at box resolutions without trouble | 8 | Clients render on llvmpipe in the box; the GPU is only used for VA-API |
+| Slint's wgpu backend can present in mailbox or immediate mode, not only FIFO, which stalls on Xvnc | 23 | Slint's software renderer in the box, or a present mode set through `WGPUConfiguration::Manual` |
 | The `keyring` crate's backends work on Windows, macOS and a Linux Secret Service, including in CI and in the box | 11, 23 | Linux CI and the box run a Secret Service explicitly; what `mic` does with no keyring at all is an open point |
 | `moq-relay` can run inside a test process | 12 | moq-lite's in-memory origin (no QUIC), or the pinned relay binary, which only Linux CI has |
 | `moq-e2ee` encrypts the hang catalog like any other track | 14 | `mic` encrypts the catalog's payload itself, with a key derived the same way |

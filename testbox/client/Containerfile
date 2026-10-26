@@ -5,8 +5,12 @@
 ARG ARCH
 FROM ${ARCH}
 ARG ARCH_SNAPSHOT
-# TigerVNC's Xvnc, the display `with-display` runs a client on, and its `vncconfig`; xsetroot.
+# TigerVNC's Xvnc, the display `with-display` runs a client on, and its `vncconfig`. Mesa's
+# userspace drivers, close to the host's kernel driver: radeonsi for VA-API and GL, RADV for
+# Vulkan, and llvmpipe and lavapipe for a box without the GPU (`up --no-gpu`); vainfo. The X
+# libraries winit loads at run time.
 RUN --mount=type=cache,target=/var/cache/pacman/pkg \
     echo "Server = https://archive.archlinux.org/repos/${ARCH_SNAPSHOT}/\$repo/os/\$arch" \
         > /etc/pacman.d/mirrorlist \
-    && pacman -Syu --noconfirm --needed tigervnc xorg-xsetroot
+    && pacman -Syu --noconfirm --needed tigervnc mesa vulkan-radeon vulkan-swrast libva-utils \
+        libxkbcommon-x11 libxcursor libxi libxrandr
