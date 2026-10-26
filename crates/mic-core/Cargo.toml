@@ -17,8 +17,11 @@ keyring-core = "1.0.1"
 moq-e2ee = "=0.0.17"
 moq-net = "=0.3.16"
 moq-tokio = { version = "=0.19.29", default-features = false, features = ["noq", "aws-lc-rs", "websocket"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
 sha2 = "0.11.1"
 tokio = { version = "1.54.1", features = ["rt", "time", "sync", "macros"] }
+tracing = "0.1.44"
 url = "2"
 zeroize = { version = "1.9.1", features = ["derive"] }
 

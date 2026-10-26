@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use mic_core::secrets::InMemory;
 use mic_core::session::Error;
-use mic_core::{Client, Config, Invite, Trust};
+use mic_core::{Client, Config, Invite, Profile, Trust};
 use mic_testrelay::TestRelay;
 
 /// A client of `relay`, trusting its certificate by fingerprint.
@@ -25,7 +25,10 @@ async fn a_client_joins_a_room_and_leaves_it() {
     let relay = TestRelay::start().await.unwrap();
     let client = client(&relay, Duration::from_secs(10));
     let invite = Invite::new_room();
-    let room = client.join(invite.clone()).await.unwrap();
+    let room = client
+        .join(invite.clone(), Profile::new("someone"))
+        .await
+        .unwrap();
     assert_eq!(room.invite(), &invite);
     room.leave().await.unwrap();
 }
@@ -35,10 +38,13 @@ async fn a_room_keeps_the_devices_key_across_joins() {
     let relay = TestRelay::start().await.unwrap();
     let client = client(&relay, Duration::from_secs(10));
     let invite = Invite::new_room();
-    let first = client.join(invite.clone()).await.unwrap();
+    let first = client
+        .join(invite.clone(), Profile::new("someone"))
+        .await
+        .unwrap();
     let key = first.key().public();
     first.leave().await.unwrap();
-    let again = client.join(invite).await.unwrap();
+    let again = client.join(invite, Profile::new("someone")).await.unwrap();
     assert_eq!(again.key().public(), key);
     again.leave().await.unwrap();
 }
@@ -49,7 +55,10 @@ async fn a_relay_that_isnt_there_is_said_so_in_time() {
     let client = client(&relay, Duration::from_secs(2));
     relay.stop().await.unwrap();
     let started = std::time::Instant::now();
-    match client.join(Invite::new_room()).await {
+    match client
+        .join(Invite::new_room(), Profile::new("someone"))
+        .await
+    {
         Err(Error::Unreachable { after, .. }) => assert_eq!(after, Duration::from_secs(2)),
         Err(other) => panic!("not unreachable: {other}"),
         Ok(_) => panic!("joined a relay that isn't there"),
@@ -69,7 +78,10 @@ async fn a_relay_with_another_certificate_is_refused() {
         tokio::runtime::Handle::current(),
     )
     .unwrap();
-    match client.join(Invite::new_room()).await {
+    match client
+        .join(Invite::new_room(), Profile::new("someone"))
+        .await
+    {
         Err(Error::Unreachable { why, .. }) => {
             assert!(
                 why.contains("fingerprint"),

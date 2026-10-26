@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use mic_core::secrets::InMemory;
 use mic_core::tracks::{PeerEvent, RoomCrypto};
-use mic_core::{Client, Config, Invite, Room, Trust};
+use mic_core::{Client, Config, Invite, Profile, Room, Trust};
 use mic_testrelay::TestRelay;
 
 const PATIENCE: Duration = Duration::from_secs(10);
@@ -52,9 +52,15 @@ async fn first_peer(room: &Room) -> mic_core::tracks::Peer {
 async fn a_participant_reads_anothers_track_decrypted() {
     let relay = TestRelay::start().await.unwrap();
     let invite = Invite::new_room();
-    let mut alice = client(&relay).join(invite.clone()).await.unwrap();
+    let mut alice = client(&relay)
+        .join(invite.clone(), Profile::new("someone"))
+        .await
+        .unwrap();
     let _note = publish_note(&mut alice);
-    let bob = client(&relay).join(invite).await.unwrap();
+    let bob = client(&relay)
+        .join(invite, Profile::new("someone"))
+        .await
+        .unwrap();
 
     let peer = first_peer(&bob).await;
     assert_eq!(peer.path(), alice.path());
@@ -72,15 +78,24 @@ async fn a_participant_reads_anothers_track_decrypted() {
 async fn another_room_sees_nothing_of_it() {
     let relay = TestRelay::start().await.unwrap();
     let invite = Invite::new_room();
-    let mut alice = client(&relay).join(invite.clone()).await.unwrap();
+    let mut alice = client(&relay)
+        .join(invite.clone(), Profile::new("someone"))
+        .await
+        .unwrap();
     let _note = publish_note(&mut alice);
     // Another room, and the same room's id with another secret: neither finds alice.
-    let elsewhere = client(&relay).join(Invite::new_room()).await.unwrap();
+    let elsewhere = client(&relay)
+        .join(Invite::new_room(), Profile::new("someone"))
+        .await
+        .unwrap();
     let forged = Invite {
         room: invite.room,
         secret: mic_core::RoomSecret::random(),
     };
-    let guessing = client(&relay).join(forged).await.unwrap();
+    let guessing = client(&relay)
+        .join(forged, Profile::new("someone"))
+        .await
+        .unwrap();
     for room in [&elsewhere, &guessing] {
         let mut peers = room.peers();
         let found = tokio::time::timeout(Duration::from_secs(1), peers.next()).await;
@@ -92,7 +107,10 @@ async fn another_room_sees_nothing_of_it() {
 async fn the_relay_sees_only_opaque_names_and_ciphertext() {
     let relay = TestRelay::start().await.unwrap();
     let invite = Invite::new_room();
-    let mut alice = client(&relay).join(invite.clone()).await.unwrap();
+    let mut alice = client(&relay)
+        .join(invite.clone(), Profile::new("someone"))
+        .await
+        .unwrap();
     let _note = publish_note(&mut alice);
 
     // A snoop on the relay: a plain moq client subscribing to every announcement.

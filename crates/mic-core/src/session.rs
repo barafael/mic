@@ -13,6 +13,7 @@ use derive_more::{Display, Error, From};
 
 use crate::invite::Invite;
 use crate::keys::{DeviceSecret, RoomKey};
+use crate::roster::{self, ParticipantKey, Profile, Roster};
 use crate::secrets::{self, SecretError, SecretStore};
 use crate::tracks::{Peers, Publication, RoomCrypto, TrackError};
 
@@ -130,20 +131,21 @@ impl Client {
         &self.inner.config
     }
 
-    /// Joins the room `invite` names: a session with the relay for it, with this device's key
-    /// in the room. Fails if the relay can't be reached within the configured timeout.
-    pub async fn join(&self, invite: Invite) -> Result<Room, Error> {
+    /// Joins the room `invite` names as `profile`: a session with the relay for it, with this
+    /// device's key in the room. Fails if the relay can't be reached within the configured
+    /// timeout.
+    pub async fn join(&self, invite: Invite, profile: Profile) -> Result<Room, Error> {
         let inner = self.inner.clone();
         self.inner
             .runtime
-            .spawn(async move { inner.join(invite).await })
+            .spawn(async move { inner.join(invite, profile).await })
             .await
             .map_err(|_| Error::Stopped)?
     }
 }
 
 impl Inner {
-    async fn join(&self, invite: Invite) -> Result<Room, Error> {
+    async fn join(&self, invite: Invite, profile: Profile) -> Result<Room, Error> {
         let key = self.secret.room_key(&invite.room);
         let crypto = RoomCrypto::new(&invite)?;
         // The session is rooted at the room's prefix on the relay, by its URL's path, as a
@@ -167,12 +169,27 @@ impl Inner {
                 after: self.config.connect_timeout,
                 why: error.to_string(),
             })?;
+        let mut publication = Publication::new(generation, broadcast);
+        // The profile first: the broadcast is announced with it, so whoever finds the
+        // participant finds its name.
+        let participant = ParticipantKey::from_bytes(key.public().to_bytes());
+        let mut profile_track = publication.track(roster::PROFILE)?;
+        roster::write_profile(&mut profile_track, &profile, &participant)?;
+        let path = path.as_str().to_owned();
+        let (roster, watched) = tokio::sync::watch::channel(Roster::new());
+        let peers = Peers::new(crypto.clone(), path.clone(), origin.consume());
+        let following = Task(tokio::spawn(roster::follow(peers, roster)));
         Ok(Room {
             invite,
             key,
+            participant,
             crypto,
-            path: path.as_str().to_owned(),
-            publication: Publication::new(generation, broadcast),
+            path,
+            publication,
+            profile,
+            profile_track,
+            roster: watched,
+            following,
             connection,
             origin,
             runtime: self.runtime.clone(),
@@ -203,10 +220,17 @@ fn connect_config(config: &Config) -> moq_tokio::connect::Config {
 pub struct Room {
     invite: Invite,
     key: RoomKey,
+    /// The key as others know this participant by.
+    participant: ParticipantKey,
     crypto: RoomCrypto,
     /// This participant's broadcast's path under the room's prefix.
     path: String,
     publication: Publication,
+    profile: Profile,
+    profile_track: moq_e2ee::track::Producer,
+    /// The others in the room, as `roster::follow` keeps them.
+    roster: tokio::sync::watch::Receiver<Roster>,
+    following: Task,
     connection: moq_tokio::Connection,
     /// The session's origin: its paths are relative to the room's prefix.
     origin: moq_net::origin::Producer,
@@ -228,6 +252,27 @@ impl Room {
         &self.path
     }
 
+    /// The key others know this participant by.
+    pub fn participant(&self) -> ParticipantKey {
+        self.participant
+    }
+
+    pub fn profile(&self) -> &Profile {
+        &self.profile
+    }
+
+    /// Changes this participant's profile, for everyone in the room.
+    pub fn set_profile(&mut self, profile: Profile) -> Result<(), Error> {
+        roster::write_profile(&mut self.profile_track, &profile, &self.participant)?;
+        self.profile = profile;
+        Ok(())
+    }
+
+    /// The others in the room, kept up to date.
+    pub fn roster(&self) -> tokio::sync::watch::Receiver<Roster> {
+        self.roster.clone()
+    }
+
     /// A track `semantic` of this participant's broadcast, encrypted. The broadcast is announced
     /// with its first track.
     pub fn publish(&mut self, semantic: &str) -> Result<moq_e2ee::track::Producer, Error> {
@@ -244,12 +289,33 @@ impl Room {
     }
 
     /// Ends the session with the relay.
+    /// Its own tracks finish and its broadcast closes first, so the others see it go at once.
+    /// The session then closes once what it queued is delivered, for up to a second; one that
+    /// doesn't drain in time is closed all the same, and that's no failure to leave.
     pub async fn leave(self) -> Result<(), Error> {
+        drop(self.following);
+        if let Err(error) = self.profile_track.finish() {
+            tracing::debug!(%error, "finishing the profile track");
+        }
+        self.publication.close();
         let connection = self.connection;
-        self.runtime
+        let closed = self
+            .runtime
             .spawn(async move { connection.close().await })
             .await
-            .map_err(|_| Error::Stopped)?
-            .map_err(moq)
+            .map_err(|_| Error::Stopped)?;
+        if let Err(error) = closed {
+            tracing::debug!(%error, "the session didn't drain before it closed");
+        }
+        Ok(())
+    }
+}
+
+/// A task of a room's, stopped with it.
+struct Task(tokio::task::JoinHandle<()>);
+
+impl Drop for Task {
+    fn drop(&mut self) {
+        self.0.abort();
     }
 }

@@ -327,8 +327,11 @@ Each numbered item below is about one commit. Box phases are in **bold**.
     track; another room, or the same room with another secret, sees nothing; a snoop on the
     relay sees only opaque names and ciphertext; a wrong secret is an error, not garbage.
 15. `mic-core: the roster`. Each participant publishes a broadcast under the room prefix with an
-    encrypted `profile` JSON track (display name); the roster comes from announcements (§1.5,
-    §5.2). Tests: two clients see each other arrive and leave.
+    encrypted `profile` JSON track (display name and key, its first track, so the announcement
+    finds it); the roster comes from announcements (§1.5, §5.2), in the order of joining (each
+    broadcast's epoch is a UUIDv7), the same for everyone. Leaving finishes the own tracks first,
+    so the others see it at once. Tests: participants see each other arrive and leave; a new
+    name reaches the others; a second session of one device is one participant.
 16. `mic-core: room state, commands and events`. `RoomState` behind `watch`, `Event` as a stream,
     and `Command` with `Leave` as its first variant. Tests drive two clients by commands only.
 17. `mic-core: reconnecting`. moq-tokio's connection already redials with backoff, but gives up

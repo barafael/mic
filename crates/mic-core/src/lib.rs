@@ -7,12 +7,14 @@
 
 pub mod invite;
 pub mod keys;
+pub mod roster;
 pub mod secrets;
 pub mod session;
 pub mod tracks;
 
 pub use invite::{Invite, RoomId, RoomSecret};
 pub use keys::{DeviceSecret, RoomKey};
+pub use roster::{Participant, ParticipantKey, Profile, Roster};
 pub use secrets::{SecretStore, device_secret};
 pub use session::{Client, Config, Room, Trust};
 

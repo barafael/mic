@@ -145,6 +145,11 @@ impl Publication {
         }
         Ok(track)
     }
+
+    /// Ends the broadcast: it's unannounced, and its tracks end.
+    pub fn close(&self) {
+        self.broadcast.close();
+    }
 }
 
 /// What happened to a participant's broadcast in the room.
