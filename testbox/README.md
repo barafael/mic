@@ -115,8 +115,10 @@ on its harness. No fixed sleeps.
 
 Each check prints `check <what>: passed` or `failed: <why>` (or `skipped: <why>`, for a check
 that doesn't apply to this box); `test` fails if any failed. The last check of every phase is
-that no container crashed. The phase's record, every container's log, is in
-`target/testbox-record/<phase>/`. `cargo testbox down` stops the pods.
+that no container crashed, or stopped. The phase's record is in `target/testbox-record/<phase>/`:
+every container's log, each line with its time, and all of them merged in time order in
+`timeline.log`; after a failed check, each client's harness snapshot (`<nn>-<check>-<client>.json`)
+and each display (`.png`), screenshots asked for or not. `cargo testbox down` stops the pods.
 
 Phases don't need a fresh box: each check uses rooms and broadcasts of its own. So:
 

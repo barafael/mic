@@ -35,6 +35,8 @@
           "--web-http-listen", "[::]:4443",
           "--auth-public", "**",
         ],
+        # Plain logs: the record merges them into one timeline.
+        env: [{ name: "NO_COLOR", value: "1" }],
         securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: ["ALL"] } },
         volumeMounts: [{ name: "keys", mountPath: "/keys", readOnly: true }],
       },

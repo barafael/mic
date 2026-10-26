@@ -22,7 +22,8 @@
           "--harness", "/run/mic",
           "@NAME@",
         ],
-        env: [{ name: "RUST_LOG", value: "info" }],
+        # Plain logs: the record merges them into one timeline.
+        env: [{ name: "RUST_LOG", value: "info" }, { name: "NO_COLOR", value: "1" }],
         securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: ["ALL"] } },
         volumeMounts: [
           { name: "bin", mountPath: "/opt/mic", readOnly: true },

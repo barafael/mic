@@ -6729,6 +6729,7 @@ dependencies = [
  "mic-harness",
  "png",
  "serde",
+ "serde_json",
  "sha2",
 ]
 

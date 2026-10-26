@@ -20,8 +20,12 @@ const PATIENCE: Duration = Duration::from_secs(15);
 const RELAY: &str = "http://mic-testbox-relay:4443";
 
 pub fn e2ee(checks: &mut Checks, the_box: &TestBox) -> Result<()> {
-    let mut alice = Participant::connect(the_box, "alice")?;
-    let mut bob = Participant::connect(the_box, "bob")?;
+    let (mut alice, mut bob) = checks.require("alice and bob answer", || {
+        Ok((
+            Participant::connect(the_box, "alice")?,
+            Participant::connect(the_box, "bob")?,
+        ))
+    })?;
     let invite = Invite::new_room();
     let crypto = RoomCrypto::new(&invite).map_err(|error| Error::Failed(error.to_string()))?;
     let (alice_key, bob_key) = checks.require("alice and bob are in a room", || {

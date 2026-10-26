@@ -67,6 +67,7 @@ pub fn phase(
     run: impl FnOnce(&mut Checks) -> Result<()>,
 ) -> Result<()> {
     let mut checks = Checks {
+        the_box,
         failed: Vec::new(),
         kept: record,
         prefix: prefix.to_owned(),
@@ -83,14 +84,15 @@ pub fn phase(
     checks.finish()
 }
 
-pub struct Checks {
+pub struct Checks<'a> {
+    the_box: &'a TestBox,
     failed: Vec<String>,
     kept: Record,
     /// What each line of output starts with: the phase's name, when phases run at once.
     prefix: String,
 }
 
-impl Checks {
+impl Checks<'_> {
     /// A check later checks depend on: its failure ends the run (the caller's `?`).
     pub fn require<Found>(
         &mut self,
@@ -118,7 +120,7 @@ impl Checks {
 
     /// Prints the outcome; a failure is tallied and yields `None`.
     fn report<Found>(&mut self, name: &str, outcome: Result<Found>) -> Option<Found> {
-        self.kept.shoot(name);
+        self.kept.checked(self.the_box, name, outcome.is_err());
         match outcome {
             Ok(found) => {
                 println!("{}check {name}: passed", self.prefix);

@@ -408,6 +408,37 @@ impl TestBox {
         Ok(log)
     }
 
+    /// The container `name`'s log so far, stdout and stderr alike, each line with the time
+    /// podman took it at, in order.
+    pub fn log_timestamped(&self, name: &str) -> Result<Vec<(Timestamp, String)>> {
+        let logs = podman(&["logs", "--timestamps", name])
+            .output()
+            .map_err(|source| Error::Io {
+                what: format!("podman logs {name}"),
+                source,
+            })?;
+        if !logs.status.success() {
+            return Err(Error::Failed(format!(
+                "podman logs {name}: {}",
+                String::from_utf8_lossy(&logs.stderr)
+            )));
+        }
+        let mut lines: Vec<(Timestamp, String)> = [logs.stdout, logs.stderr]
+            .iter()
+            .flat_map(|out| {
+                String::from_utf8_lossy(out)
+                    .lines()
+                    .map(|line| match line.split_once(' ') {
+                        Some((time, rest)) => (Timestamp::parse(time), rest.to_owned()),
+                        None => (Timestamp::default(), line.to_owned()),
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        lines.sort_by(|left, right| left.0.cmp(&right.0));
+        Ok(lines)
+    }
+
     /// Prints the logs of the containers named, or of every container of the pods named.
     pub fn logs(&self, names: &[String]) -> Result<()> {
         let containers = self.containers();
@@ -513,6 +544,18 @@ mod tests {
     }
 
     #[test]
+    fn timestamps_sort_by_time_whatever_their_fraction() {
+        let short = Timestamp::parse("2026-10-26T23:34:06.12345+01:00");
+        let long = Timestamp::parse("2026-10-26T23:34:06.9+01:00");
+        assert!(
+            short < long,
+            "0.12345 s is before 0.9 s, though its text is longer"
+        );
+        assert_eq!(long.as_str(), "2026-10-26T23:34:06.900000000+01:00");
+        assert!(Timestamp::parse("2026-10-26T23:34:06+01:00") < short);
+    }
+
+    #[test]
     fn the_gpu_lines_are_kept_or_left_out() {
         let source = "a\n  # @GPU@ { gpu },\nb\n";
         assert_eq!(gpu_lines(source, true), "a\n  { gpu },\nb\n");
@@ -549,5 +592,25 @@ mod tests {
             })
             .unwrap();
         }
+    }
+}
+
+/// When podman took a log line, as it prints it with `--timestamps` (RFC 3339, nanoseconds with
+/// their trailing zeros dropped), made to sort by time: the fraction padded to nine digits. One
+/// offset for all lines, the host's.
+#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Timestamp(String);
+
+impl Timestamp {
+    pub fn parse(text: &str) -> Self {
+        // `2026-10-26T23:34:06.12+01:00`: the seconds, the fraction, the offset.
+        let (seconds, rest) = text.split_once('.').unwrap_or((text, ""));
+        let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+        let offset = &rest[digits.len()..];
+        Self(format!("{seconds}.{digits:0<9}{offset}"))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
     }
 }

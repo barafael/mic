@@ -17,8 +17,12 @@ use super::Checks;
 const PATIENCE: Duration = Duration::from_secs(15);
 
 pub fn roster(checks: &mut Checks, the_box: &TestBox) -> Result<()> {
-    let mut alice = Participant::connect(the_box, "alice")?;
-    let mut bob = Participant::connect(the_box, "bob")?;
+    let (mut alice, mut bob) = checks.require("alice and bob answer", || {
+        Ok((
+            Participant::connect(the_box, "alice")?,
+            Participant::connect(the_box, "bob")?,
+        ))
+    })?;
     // A room of its own: no former run's or concurrent phase's participants in it.
     let invite = Invite::new_room();
     checks.require("alice and bob see each other", || {
