@@ -1,0 +1,31 @@
+# The box's display tooling: `with-display`, which runs a client on an Xvnc display of its own in
+# its pod, and on the host `shot` (screenshots), `viewer` (`cargo testbox vnc`) and `web`
+# (`cargo testbox web`), over the VNC client in `vnc`. A workspace of its own, out of mic's: it is
+# Linux only (Unix sockets, Landlock), and mic's builds on every platform.
+#
+# Carried over from beep's testbox (github.com/barafael/beep), where it is AGPL-3.0-only, under
+# mic's MIT OR Apache-2.0.
+[workspace]
+members = ["common", "with-display", "vnc", "shot", "viewer", "web"]
+resolver = "3"
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[workspace.dependencies]
+testbox-view = { path = "common" }
+testbox-vnc = { path = "vnc" }
+derive_more = { version = "2", features = ["display", "error"] }
+serde_json = "1"
+strum = { version = "0.27", features = ["derive"] }
+tokio = "1"
+
+# As mic's: `with-display` is built by the box's builder in this profile (xtask/src/builder.rs).
+[profile.testbox]
+inherits = "release"
+incremental = true
+codegen-units = 256
+debug = "line-tables-only"

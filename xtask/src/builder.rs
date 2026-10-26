@@ -10,8 +10,12 @@ use crate::process;
 /// Where the binaries land on the host; the clients mount it read-only.
 pub const BIN: &str = "target/testbox-bin";
 
-/// The packages the box runs, and their binaries.
-const BINARIES: [(&str, &str); 1] = [("probe", "probe")];
+/// What the box runs, by workspace: mic's, and the display tools' (testbox/view), whose
+/// `with-display` runs each client on its display.
+const WORKSPACES: [(&str, &[&str]); 2] = [
+    ("Cargo.toml", &["probe"]),
+    ("testbox/view/Cargo.toml", &["with-display"]),
+];
 
 /// What a build did.
 pub struct Built {
@@ -29,15 +33,27 @@ pub fn build(the_box: &TestBox) -> Result<Built> {
     if !the_box.running(&builder) || the_box.image_of(&builder).as_deref() != Some(tag.as_str()) {
         the_box.play(Pod::Builder)?;
     }
-    let mut cargo = vec!["cargo", "build", "--profile", "testbox", "--locked"];
-    for (package, _) in BINARIES {
-        cargo.extend(["-p", package]);
+    let mut compiled = false;
+    for (manifest, packages) in WORKSPACES {
+        let mut cargo = vec![
+            "cargo",
+            "build",
+            "--profile",
+            "testbox",
+            "--locked",
+            "--manifest-path",
+            manifest,
+        ];
+        for package in packages {
+            cargo.extend(["-p", package]);
+        }
+        let mut exec = crate::podman::podman(&["exec", &builder]);
+        exec.args(&cargo);
+        compiled |= process::run_watching(exec, "Compiling ")?;
     }
-    let mut exec = crate::podman::podman(&["exec", &builder]);
-    exec.args(&cargo);
-    let compiled = process::run_watching(exec, "Compiling ")?;
     let mut updated = Vec::new();
-    for (_, binary) in BINARIES {
+    // Each package's binary is named as the package.
+    for &binary in WORKSPACES.iter().flat_map(|(_, packages)| packages.iter()) {
         // Replaced by a rename, and only when it differs: a client restarts only for a change.
         let install = format!(
             "if ! cmp -s /target/testbox/{binary} /out/{binary}; then \

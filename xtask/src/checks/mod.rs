@@ -17,19 +17,23 @@ pub use self::testbox::testbox;
 /// into the phase's [`Record`].
 pub fn phase(
     the_box: &TestBox,
-    record: &Record,
+    record: Record,
     run: impl FnOnce(&mut Checks) -> Result<()>,
 ) -> Result<()> {
-    let mut checks = Checks { failed: Vec::new() };
+    let mut checks = Checks {
+        failed: Vec::new(),
+        kept: record,
+    };
     let ran = run(&mut checks);
     checks.record("no container crashed", || crashed::none(the_box));
-    record.keep_logs(the_box);
+    checks.kept.keep_logs(the_box);
     ran?;
     checks.finish()
 }
 
 pub struct Checks {
     failed: Vec<String>,
+    kept: Record,
 }
 
 impl Checks {
@@ -48,8 +52,14 @@ impl Checks {
         self.report(name, check());
     }
 
+    /// Where the phase's record is, for a check that keeps a file there.
+    pub fn record_directory(&self) -> &std::path::Path {
+        self.kept.directory()
+    }
+
     /// Prints the outcome; a failure is tallied and yields `None`.
     fn report<Found>(&mut self, name: &str, outcome: Result<Found>) -> Option<Found> {
+        self.kept.shoot(name);
         match outcome {
             Ok(found) => {
                 println!("check {name}: passed");

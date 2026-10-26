@@ -14,6 +14,7 @@ flowchart LR
     subgraph host["Host"]
         xtask["cargo testbox"]
         bin[("target/testbox-bin")]
+        view[("target/testbox-view<br/>display sockets")]
     end
     subgraph default["podman's default network"]
         builder["pod mic-testbox-builder<br/>cargo, mold; target and registry volumes"]
@@ -26,11 +27,17 @@ flowchart LR
         subgraph ptools["pod mic-testbox-tools"]
             tools["tools<br/>probes, moq's clock"]
         end
+        subgraph palice["pod mic-testbox-alice"]
+            alice["client<br/>with-display: Xvnc"]
+        end
         ca[("volume mic-testbox-keys")]
     end
     xtask -- "podman exec" --> tools
     xtask -- "cargo testbox build" --> builder
     builder --> bin
+    bin -. "read-only" .-> alice
+    alice --- view
+    view -. "cargo testbox vnc / web, shot" .- xtask
     keys --> ca
     ca -. "read-only" .-> relay
     ca -. "read-only" .-> tools
@@ -54,6 +61,13 @@ flowchart LR
   into `target/testbox-bin` only when it changed, by a rename, and client pods mount that
   directory read-only. The builder fetches crates, so it's on podman's default network, outside
   the box; `down` leaves it running, `down --wipe` removes it and its caches.
+- **Each client has a display of its own**: `with-display` runs it on TigerVNC's Xvnc, served on
+  a Unix socket only, in `target/testbox-view/<client>/` (the owner's only), with the viewer's
+  input and the clipboard off. `cargo testbox vnc` shows the displays in a window, `cargo testbox
+  web` as a page on loopback; `--interactive` lets keys and pointer through, where they race a
+  running check's. `test --screenshots` keeps each display after each check in the phase's
+  record. These tools are a workspace of their own in `testbox/view/`, Linux only, carried over
+  from beep's testbox.
 - **The box has its own CA.** The relay pod's `keys` init container makes it and the relay's
   certificate once, in the volume `mic-testbox-keys`; clients trust the CA. `down --wipe`
   removes it.
@@ -80,5 +94,5 @@ in `target/testbox-record/<phase>/`. `cargo testbox down` stops the pods.
 
 | Phase | What it checks |
 |---|---|
-| `box` | The network is internal; a pod resolves no outside name and opens no outside connection; an unchanged box starts without a build; a second build of an unchanged tree is a no-op; a binary from the builder runs in the client image |
+| `box` | The network is internal; a pod resolves no outside name and opens no outside connection; an unchanged box starts without a build; a second build of an unchanged tree is a no-op; a binary from the builder runs in the client image; a client's display, through its socket, shows what it draws |
 | `relay` | Frames pass through the relay between moq's own publisher and subscriber; a client without the box's CA is refused. If this fails, the box is broken, not `mic` |

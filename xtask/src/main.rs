@@ -11,6 +11,7 @@ mod images;
 mod pins;
 mod podman;
 mod process;
+mod view;
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -36,7 +37,25 @@ enum Command {
     /// Compiles what the box runs, in the builder pod, into target/testbox-bin.
     Build,
     /// Runs a phase's checks against the box; its record is in target/testbox-record/<phase>/.
-    Test { phase: Phase },
+    Test {
+        phase: Phase,
+        /// Also takes each client's display after each check, into the phase's record.
+        #[arg(long)]
+        screenshots: bool,
+    },
+    /// Shows the clients' displays in a window.
+    Vnc {
+        /// Lets the window's keys and pointer through to the clients, where they race a running
+        /// check's.
+        #[arg(long)]
+        interactive: bool,
+    },
+    /// Serves the clients' displays as a page on loopback, and prints its address.
+    Web {
+        /// As for `vnc`.
+        #[arg(long)]
+        interactive: bool,
+    },
     /// Lists the images' current tags, content-hashed.
     Images {
         /// Removes the box's images that no current tag names: former states of the images.
@@ -76,7 +95,9 @@ fn main() -> ExitCode {
     let outcome = match Cli::parse().command {
         Command::Up => the_box.up(),
         Command::Build => builder::build(&the_box).map(|_| ()),
-        Command::Test { phase } => test(&the_box, phase),
+        Command::Test { phase, screenshots } => test(&the_box, phase, screenshots),
+        Command::Vnc { interactive } => view::vnc(&the_box, interactive),
+        Command::Web { interactive } => view::web(&the_box, interactive),
         Command::Images { prune } => the_box.list_images(prune),
         Command::Down { wipe } => the_box.down(wipe),
         Command::Logs { names } => the_box.logs(&names),
@@ -97,9 +118,9 @@ fn repo_root() -> PathBuf {
         .to_owned()
 }
 
-fn test(the_box: &TestBox, phase: Phase) -> Result<()> {
-    let record = checks::Record::new(the_box.repo(), &phase.name())?;
-    checks::phase(the_box, &record, |checks| match phase {
+fn test(the_box: &TestBox, phase: Phase, screenshots: bool) -> Result<()> {
+    let record = checks::Record::new(the_box, &phase.name(), screenshots)?;
+    checks::phase(the_box, record, |checks| match phase {
         Phase::Box => checks::testbox(checks, the_box),
         Phase::Relay => checks::relay(checks, the_box),
     })

@@ -20,6 +20,11 @@ pub const PREFIX: &str = "mic-testbox-";
 pub const RECORD: &str = "target/testbox-record";
 /// The pod files with their images and paths filled in, which `kube down` needs again.
 const RENDERED: &str = "target/testbox-pods";
+/// A directory per client for its display's socket, which only that client mounts: no client
+/// reaches another's display.
+pub const VIEW: &str = "target/testbox-view";
+/// The clients `up` plays, each a pod of its own from testbox/pods/client.yaml.
+pub const CLIENTS: [&str; 1] = ["alice"];
 
 /// A pod of the box, from `testbox/pods/<name>.yaml`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -28,6 +33,8 @@ pub enum Pod {
     Relay,
     /// The checks' tools inside the network.
     Tools,
+    /// A participant, by name, with a display of its own.
+    Client(&'static str),
     /// Builds what the box runs (`crate::builder`). Not part of the box: it fetches crates, so
     /// it's on podman's default network, and it outlives `down`.
     Builder,
@@ -35,20 +42,34 @@ pub enum Pod {
 
 impl Pod {
     /// The box's pods, in the order they're played: the relay makes the keys the others read.
-    pub const ALL: [Pod; 2] = [Pod::Relay, Pod::Tools];
+    pub fn all() -> Vec<Pod> {
+        [Pod::Relay, Pod::Tools]
+            .into_iter()
+            .chain(CLIENTS.map(Pod::Client))
+            .collect()
+    }
 
     pub fn name(self) -> &'static str {
         match self {
             Pod::Relay => "relay",
             Pod::Tools => "tools",
+            Pod::Client(name) => name,
             Pod::Builder => "builder",
+        }
+    }
+
+    /// Its pod file's name under testbox/pods: every client is played from one.
+    fn source(self) -> &'static str {
+        match self {
+            Pod::Client(_) => "client",
+            other => other.name(),
         }
     }
 
     /// The network it's played on.
     fn network(self) -> &'static str {
         match self {
-            Pod::Relay | Pod::Tools => NETWORK,
+            Pod::Relay | Pod::Tools | Pod::Client(_) => NETWORK,
             Pod::Builder => "podman",
         }
     }
@@ -60,7 +81,7 @@ impl Pod {
 
     pub fn file(self, repo: &Path) -> PathBuf {
         repo.join("testbox/pods")
-            .join(format!("{}.yaml", self.name()))
+            .join(format!("{}.yaml", self.source()))
     }
 
     /// Its name under Podman.
@@ -95,14 +116,43 @@ impl TestBox {
         &self.repo
     }
 
-    /// Builds the images that are missing, makes the network and plays every pod of the box.
+    /// Builds the images that are missing and what the box runs, makes the network, and plays
+    /// every pod of the box.
     pub fn up(&self) -> Result<()> {
         self.images()?;
+        crate::builder::build(self)?;
         self.network()?;
-        for pod in Pod::ALL {
+        self.view_directories()?;
+        for pod in Pod::all() {
             self.play(pod)?;
         }
         Ok(())
+    }
+
+    /// Each client's directory for its display's socket: the owner's only, whatever is in it,
+    /// so a link a container plants there leads nowhere.
+    fn view_directories(&self) -> Result<()> {
+        for client in CLIENTS {
+            let directory = self.view_socket(client).with_file_name("");
+            error::create_dir_all(&directory)?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                for each in [self.repo.join(VIEW), directory.clone()] {
+                    std::fs::set_permissions(&each, std::fs::Permissions::from_mode(0o700))
+                        .map_err(|source| Error::Io {
+                            what: each.display().to_string(),
+                            source,
+                        })?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Where `client`'s display serves on the host (with-display's socket, /run/view/vnc).
+    pub fn view_socket(&self, client: &str) -> PathBuf {
+        self.repo.join(VIEW).join(client).join("vnc")
     }
 
     /// Plays `pod`, replacing what runs under its name.
@@ -211,26 +261,27 @@ impl TestBox {
         Ok(internal.trim() == "true")
     }
 
-    /// `testbox/pods/<pod>.yaml` with `@REPO@` and each `@IMAGE:<name>@` filled in.
+    /// `testbox/pods/<pod>.yaml` with `@REPO@`, `@NAME@` (the pod's name) and each
+    /// `@IMAGE:<name>@` filled in.
     fn render(&self, pod: Pod) -> Result<String> {
         let source = pod.file(&self.repo);
-        render(&error::read_to_string(&source)?, &self.repo, |name| {
+        let rendered = render(&error::read_to_string(&source)?, &self.repo, |name| {
             images::find(name)
                 .ok_or_else(|| Error::Failed(format!("{}: no image {name}", source.display())))?
                 .tag(&self.repo)
-        })
+        })?;
+        Ok(rendered.replace("@NAME@", pod.name()))
     }
 
     /// Stops and removes the box's pods; `wipe` also removes their volumes, and the builder with
     /// its caches. A pod never played from here is left alone: `kube down` needs the file it was
     /// played from.
     pub fn down(&self, wipe: bool) -> Result<()> {
-        let pods: &[Pod] = if wipe {
-            &[Pod::Relay, Pod::Tools, Pod::Builder]
-        } else {
-            &Pod::ALL
-        };
-        for &pod in pods {
+        let mut pods = Pod::all();
+        if wipe {
+            pods.push(Pod::Builder);
+        }
+        for pod in pods {
             let file = pod.rendered(&self.repo);
             if !file.exists() {
                 continue;
@@ -384,9 +435,11 @@ mod tests {
     #[test]
     fn every_pod_has_a_pod_file_naming_known_images() {
         let repo = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-        for pod in [Pod::Relay, Pod::Tools, Pod::Builder] {
+        for pod in [Pod::Relay, Pod::Tools, Pod::Client("alice"), Pod::Builder] {
             let file = pod.file(repo);
-            let source = std::fs::read_to_string(&file).unwrap();
+            let source = std::fs::read_to_string(&file)
+                .unwrap()
+                .replace("@NAME@", pod.name());
             assert!(
                 source.contains(&format!("name: \"{}\"", pod.podman_name())),
                 "{file:?}"

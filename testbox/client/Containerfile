@@ -5,5 +5,8 @@
 ARG ARCH
 FROM ${ARCH}
 ARG ARCH_SNAPSHOT
-RUN echo "Server = https://archive.archlinux.org/repos/${ARCH_SNAPSHOT}/\$repo/os/\$arch" \
-        > /etc/pacman.d/mirrorlist
+# TigerVNC's Xvnc, the display `with-display` runs a client on, and its `vncconfig`; xsetroot.
+RUN --mount=type=cache,target=/var/cache/pacman/pkg \
+    echo "Server = https://archive.archlinux.org/repos/${ARCH_SNAPSHOT}/\$repo/os/\$arch" \
+        > /etc/pacman.d/mirrorlist \
+    && pacman -Syu --noconfirm --needed tigervnc xorg-xsetroot

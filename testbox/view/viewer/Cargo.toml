@@ -1,0 +1,18 @@
+[package]
+name = "testbox-viewer"
+description = "The box's displays in a window (`cargo testbox vnc`)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+testbox-view.workspace = true
+testbox-vnc.workspace = true
+slint = { version = "1.18.1", default-features = false, features = [
+    "std",
+    "compat-1-2",
+    "backend-winit",
+    "renderer-software",
+] }
+tokio = { workspace = true, features = ["rt-multi-thread", "sync"] }

@@ -1,0 +1,12 @@
+[package]
+name = "testbox-view"
+description = "What the box's display tools share: errors, the viewer's input, the socket check."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+derive_more.workspace = true
+serde_json.workspace = true
+strum.workspace = true

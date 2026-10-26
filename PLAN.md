@@ -494,8 +494,8 @@ Each is checked by the commit named, which settles it in its body and in the des
 
 ## Open points for this plan
 
-1. **Display tooling.** Copy beep's `with-display`, viewers and `shot` into `mic`, or move them to
-   a crate both projects use? Copying is faster now. A shared crate is cleaner once both are
+1. **Display tooling.** Copied from beep into `testbox/view/` (commit 7), relicensed MIT OR
+   Apache-2.0 from beep's AGPL-3.0-only. A crate both projects share is cleaner once both are
    stable.
 2. **moq crates.** crates.io releases where they have what we need, and git pins on upstream `main`
    (for `vpx`) until releases catch up (design §8.1, item 7).

@@ -1,0 +1,14 @@
+[package]
+name = "with-display"
+description = "Runs a command on an Xvnc display of its own, served on a Unix socket only."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+testbox-view.workspace = true
+# The stop signals, handed on to the client it runs.
+signal-hook = "0.4"
+libc = "0.2"
+strum.workspace = true

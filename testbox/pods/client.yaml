@@ -1,0 +1,36 @@
+# A participant, @NAME@, in a pod of its own: all containers of a pod share a network namespace,
+# so shaping one participant's network takes a pod of its own. `cargo testbox up` plays one per
+# client from this file, filling in its name and the image placeholders.
+{
+  apiVersion: "v1",
+  kind: "Pod",
+  metadata: {
+    name: "mic-testbox-@NAME@",
+  },
+  spec: {
+    restartPolicy: "Always",
+    containers: [
+      # On a display of its own (testbox/view/with-display), served on a socket in
+      # target/testbox-view/@NAME@ for `cargo testbox vnc` and `shot`. For now the display only
+      # shows its colour, which the `box` phase reads back.
+      {
+        name: "client",
+        image: "@IMAGE:client@",
+        args: [
+          "/opt/mic/with-display", "/run/view/vnc", "1280x720", "--",
+          "bash", "-c", "xsetroot -solid '#2a6f97' && trap 'exit 0' TERM; sleep infinity & wait",
+        ],
+        securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: ["ALL"] } },
+        volumeMounts: [
+          { name: "bin", mountPath: "/opt/mic", readOnly: true },
+          { name: "view", mountPath: "/run/view" },
+        ],
+      },
+    ],
+    volumes: [
+      # What the builder built (`cargo testbox build`): a change is a restart, not an image build.
+      { name: "bin", hostPath: { path: "@REPO@/target/testbox-bin", type: "Directory" } },
+      { name: "view", hostPath: { path: "@REPO@/target/testbox-view/@NAME@", type: "Directory" } },
+    ],
+  },
+}
