@@ -1,0 +1,16 @@
+[package]
+name = "mic-core"
+description = "mic's toolkit-agnostic core: rooms, keys, the session, room state and commands"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+base64 = "0.23.1"
+derive_more = { version = "2.1.1", features = ["display", "error"] }
+ed25519-dalek = "3.0.0"
+getrandom = "0.4.3"
+hkdf = "0.13.0"
+sha2 = "0.11.1"
+zeroize = { version = "1.9.1", features = ["derive"] }
