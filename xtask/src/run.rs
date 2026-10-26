@@ -3,7 +3,7 @@
 //! (`process::unique`), so phases run one after another, or at once (`--jobs`), on one box.
 
 use std::collections::VecDeque;
-use std::sync::Mutex;
+use std::sync::{Mutex, PoisonError, RwLock};
 use std::time::Instant;
 
 use crate::builder;
@@ -22,8 +22,25 @@ pub fn test(
     prefix: &str,
 ) -> Result<()> {
     let record = Record::new(the_box, record, screenshots)?;
+    // Alone, or beside the other phases that don't disrupt the box.
+    let _alone = phase
+        .runs_alone()
+        .then(|| THE_BOX.write().unwrap_or_else(PoisonError::into_inner));
+    let _beside =
+        (!phase.runs_alone()).then(|| THE_BOX.read().unwrap_or_else(PoisonError::into_inner));
+    let _clients = phase.uses_clients().then(|| {
+        CLIENTS_IN_USE
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    });
     checks::phase(the_box, record, prefix, |checks| phase.run(checks, the_box))
 }
+
+/// Held by a phase while it drives the box's clients (`Phase::uses_clients`).
+static CLIENTS_IN_USE: Mutex<()> = Mutex::new(());
+/// Held for writing by a phase that disrupts the box (`Phase::runs_alone`), for reading by the
+/// rest.
+static THE_BOX: RwLock<()> = RwLock::new(());
 
 /// Each of `phases`, or all, `rounds` times, up to `jobs` at once; then how each went. Fails if
 /// any did. `fresh` restarts every client before each round, as `Reset` can let state leak from
@@ -101,8 +118,8 @@ fn next(queue: &Mutex<VecDeque<Phase>>) -> Option<Phase> {
     queue.lock().ok()?.pop_front()
 }
 
-/// The inner loop: the box up if it isn't, what the box runs built, the clients restarted if a
-/// binary they run changed, then `phase`; the box stays up. Says how long it all took.
+/// The inner loop: the box up if it isn't, what the box runs built, the pods restarted whose
+/// binary changed, then `phase`; the box stays up. Says how long it all took.
 pub fn dev(the_box: &TestBox, phase: Phase) -> Result<()> {
     let started = Instant::now();
     let rebuilt_images = !the_box.images()?.is_empty();
@@ -116,8 +133,17 @@ pub fn dev(the_box: &TestBox, phase: Phase) -> Result<()> {
         the_box.up()?;
     } else {
         let built = builder::build(the_box)?;
-        if !built.updated.is_empty() {
-            restart_clients(the_box)?;
+        let mut pods: Vec<Pod> = built
+            .updated
+            .iter()
+            .flat_map(|binary| builder::pods_running(binary))
+            .collect();
+        pods.dedup();
+        if !pods.is_empty() {
+            for pod in pods {
+                the_box.play(pod)?;
+            }
+            ready::all(the_box)?;
         }
     }
     let ready = started.elapsed();
@@ -131,10 +157,11 @@ pub fn dev(the_box: &TestBox, phase: Phase) -> Result<()> {
     outcome
 }
 
-/// Plays every client's pod again, and waits until each is up.
+/// Plays every client's pod, and the probe's, again, and waits until each is up.
 fn restart_clients(the_box: &TestBox) -> Result<()> {
     for client in CLIENTS {
         the_box.play(Pod::Client(client))?;
     }
+    the_box.play(Pod::Probe)?;
     ready::all(the_box)
 }

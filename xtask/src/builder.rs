@@ -11,11 +11,20 @@ use crate::process;
 pub const BIN: &str = "target/testbox-bin";
 
 /// What the box runs, by workspace: mic's, and the display tools' (testbox/view), whose
-/// `with-display` runs each client on its display.
+/// `with-display` runs a program on its display.
 const WORKSPACES: [(&str, &[&str]); 2] = [
-    ("Cargo.toml", &["probe"]),
+    ("Cargo.toml", &["mic-crowd", "probe"]),
     ("testbox/view/Cargo.toml", &["with-display"]),
 ];
+
+/// The pods that run `binary`, which a change to it restarts.
+pub fn pods_running(binary: &str) -> Vec<Pod> {
+    match binary {
+        "mic-crowd" => crate::podman::CLIENTS.map(Pod::Client).to_vec(),
+        "probe" | "with-display" => vec![Pod::Probe],
+        _ => Vec::new(),
+    }
+}
 
 /// What the build script says, on stderr, for a binary it put into place.
 const UPDATED: &str = "testbox-builder: updated ";

@@ -29,7 +29,21 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      - run: cargo test --workspace --locked
+      # The system keyring's tests run too (MIC_TEST_KEYRING): Keychain and Credential Manager
+      # are there on the runners; on Linux, GNOME Keyring in a D-Bus session of its own, unlocked
+      # with a password, which makes its default collection.
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y gnome-keyring dbus
+      - if: runner.os == 'Linux'
+        env:
+          MIC_TEST_KEYRING: "1"
+        run: |
+          dbus-run-session -- bash -c \
+            'echo ci | gnome-keyring-daemon --unlock --components=secrets >/dev/null && cargo test --workspace --locked'
+      - if: runner.os != 'Linux'
+        env:
+          MIC_TEST_KEYRING: "1"
+        run: cargo test --workspace --locked
 
   # The box's display tooling, a workspace of its own: Linux only (Unix sockets, Landlock).
   testbox-view:

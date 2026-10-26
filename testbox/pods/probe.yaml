@@ -1,0 +1,38 @@
+# The box's probe window (testbox/probe) on a display of its own, with the host's GPU: what the
+# `box` phase checks rendering, the display and VA-API with, apart from the participants.
+# `cargo testbox up` fills in the image placeholders.
+{
+  apiVersion: "v1",
+  kind: "Pod",
+  metadata: {
+    name: "mic-testbox-probe",
+  },
+  spec: {
+    restartPolicy: "Always",
+    containers: [
+      # On a display of its own (testbox/view/with-display), served on a socket in
+      # target/testbox-view/probe for `cargo testbox vnc` and `shot`.
+      {
+        name: "probe",
+        image: "@IMAGE:client@",
+        args: ["/opt/mic/with-display", "/run/view/vnc", "1280x720", "--", "/opt/mic/probe", "window"],
+        # Vulkan's loader and Mesa want a runtime directory.
+        env: [{ name: "XDG_RUNTIME_DIR", value: "/tmp" }],
+        securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: ["ALL"] } },
+        volumeMounts: [
+          { name: "bin", mountPath: "/opt/mic", readOnly: true },
+          { name: "view", mountPath: "/run/view" },
+          # The host's GPU, for rendering and video only: the render node, not the card's
+          # node (no display, no mode setting). Left out with `up --no-gpu`.
+          # @GPU@ { name: "render", mountPath: "/dev/dri/renderD128" },
+        ],
+      },
+    ],
+    volumes: [
+      # What the builder built (`cargo testbox build`): a change is a restart, not an image build.
+      { name: "bin", hostPath: { path: "@REPO@/target/testbox-bin", type: "Directory" } },
+      { name: "view", hostPath: { path: "@REPO@/target/testbox-view/probe", type: "Directory" } },
+      # @GPU@ { name: "render", hostPath: { path: "/dev/dri/renderD128", type: "CharDevice" } },
+    ],
+  },
+}

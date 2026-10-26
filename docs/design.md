@@ -418,9 +418,15 @@ graph TD
   path.
 - So `mic` publishes every participant's broadcast under a **room-level opaque
   prefix**: `<room_prefix>/<opaque>/<epoch>`, with
-  `room_prefix = HKDF(room_secret, "mic/v1/room-prefix")`.
+  `room_prefix = HKDF(room_secret, "mic/v1/room-prefix" || room_id)`.
   - `moq-e2ee` allows remounting under a prefix, since the outer path isn't
     part of its derivation.
+  - A room's session is rooted at the prefix by its URL's path
+    (`<relay>/<room_prefix>`), as a relay roots every session: the session
+    publishes under it, and hears of no other room's broadcasts. Scoping the
+    session's origin instead only renames paths on the client's side; on the
+    wire they're unprefixed, and every room's participants would see each
+    other's broadcasts (found in commit 14).
 - Clients discover participants from announcements under `room_prefix/`, then
   open their signed catalogs.
 - The relay learns which broadcasts form one room, but not who is in it.
@@ -442,9 +448,9 @@ names or participant keys.
 - **Every track is encrypted**, with no exceptions: media, `catalog.json`,
   `profile`, chat, reactions, participant state and `sig`. The relay sees
   only ciphertext and opaque names. In `mic-core`, there's no API to publish
-  or subscribe a track in the clear **(unverified: that `moq-e2ee` wraps the
-  hang catalog like any other track; if not, `mic` encrypts the catalog
-  payload itself with a key derived the same way)**.
+  or subscribe a track in the clear. `moq-e2ee` wraps any moq track, the
+  catalog included: it works per track (`Generation::produce`/`consume`), so
+  `mic` writes its catalog to an encrypted track of its own.
 - **How `moq-e2ee-00` keys work** (re-checked against the draft):
   - The application supplies a credential `{context, kid, secret}`.
     - Rotating the secret means a new `kid`.

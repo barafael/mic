@@ -10,30 +10,34 @@
   spec: {
     restartPolicy: "Always",
     containers: [
-      # On a display of its own (testbox/view/with-display), served on a socket in
-      # target/testbox-view/@NAME@ for `cargo testbox vnc` and `shot`. For now it runs the box's
-      # probe window (testbox/probe), whose colour and adapter the `box` phase reads back.
+      # Headless for now (crates/mic-crowd, one participant): driven by its harness, on a socket
+      # in target/testbox-run/@NAME@. It trusts the relay by the box's CA. M4 gives it a window.
       {
         name: "client",
         image: "@IMAGE:client@",
-        args: ["/opt/mic/with-display", "/run/view/vnc", "1280x720", "--", "/opt/mic/probe", "window"],
-        # Vulkan's loader and Mesa want a runtime directory.
-        env: [{ name: "XDG_RUNTIME_DIR", value: "/tmp" }],
+        args: [
+          "/opt/mic/mic-crowd",
+          "--relay", "https://mic-testbox-relay:4443/",
+          "--ca", "/keys/ca.pem",
+          "--harness", "/run/mic",
+          "@NAME@",
+        ],
+        # Plain logs: the record merges them into one timeline.
+        env: [{ name: "RUST_LOG", value: "info" }, { name: "NO_COLOR", value: "1" }],
         securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: ["ALL"] } },
         volumeMounts: [
           { name: "bin", mountPath: "/opt/mic", readOnly: true },
-          { name: "view", mountPath: "/run/view" },
-          # The host's GPU, for rendering and video only: the render node, not the card's
-          # node (no display, no mode setting). Left out with `up --no-gpu`.
-          # @GPU@ { name: "render", mountPath: "/dev/dri/renderD128" },
+          { name: "keys", mountPath: "/keys", readOnly: true },
+          { name: "run", mountPath: "/run/mic" },
         ],
       },
     ],
     volumes: [
       # What the builder built (`cargo testbox build`): a change is a restart, not an image build.
       { name: "bin", hostPath: { path: "@REPO@/target/testbox-bin", type: "Directory" } },
-      { name: "view", hostPath: { path: "@REPO@/target/testbox-view/@NAME@", type: "Directory" } },
-      # @GPU@ { name: "render", hostPath: { path: "/dev/dri/renderD128", type: "CharDevice" } },
+      { name: "keys", persistentVolumeClaim: { claimName: "mic-testbox-keys" } },
+      # The harness's socket, which only this client mounts: no client reaches another's.
+      { name: "run", hostPath: { path: "@REPO@/target/testbox-run/@NAME@", type: "Directory" } },
     ],
   },
 }

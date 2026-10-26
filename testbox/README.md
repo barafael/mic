@@ -15,6 +15,7 @@ flowchart LR
         xtask["cargo testbox"]
         bin[("target/testbox-bin")]
         view[("target/testbox-view<br/>display sockets")]
+        run[("target/testbox-run<br/>harness sockets")]
     end
     subgraph default["podman's default network"]
         builder["pod mic-testbox-builder<br/>cargo, mold; target and registry volumes"]
@@ -27,17 +28,24 @@ flowchart LR
         subgraph ptools["pod mic-testbox-tools"]
             tools["tools<br/>probes, moq's clock"]
         end
-        subgraph palice["pod mic-testbox-alice"]
-            alice["client<br/>with-display: Xvnc<br/>probe window: wgpu"]
+        subgraph pprobe["pod mic-testbox-probe"]
+            probe["probe<br/>with-display: Xvnc<br/>probe window: wgpu"]
+        end
+        subgraph palice["pods mic-testbox-alice, -bob"]
+            alice["client<br/>mic-crowd: one participant<br/>harness"]
         end
         ca[("volume mic-testbox-keys")]
     end
     xtask -- "podman exec" --> tools
     xtask -- "cargo testbox build" --> builder
     builder --> bin
+    bin -. "read-only" .-> probe
     bin -. "read-only" .-> alice
-    alice --- view
+    probe --- view
     view -. "cargo testbox vnc / web, shot" .- xtask
+    alice --- run
+    run -- "join, act, snapshot" --- xtask
+    alice -- "moq, the box's CA" --> relay
     keys --> ca
     ca -. "read-only" .-> relay
     ca -. "read-only" .-> tools
@@ -61,13 +69,18 @@ flowchart LR
   into `target/testbox-bin` only when it changed, by a rename, and client pods mount that
   directory read-only. The builder fetches crates, so it's on podman's default network, outside
   the box; `down` leaves it running, `down --wipe` removes it and its caches.
-- **Each client has a display of its own**: `with-display` runs it on TigerVNC's Xvnc, served on
+- **Clients are `mic` participants**, a pod each (`alice`, `bob`), headless for now:
+  `mic-crowd` with one participant, trusting the relay by the box's CA. A check drives each
+  through its harness (crates/mic-harness), on a socket in `target/testbox-run/<client>/`
+  (the owner's only): it joins a fresh room, acts as a click would, and reads the room's state.
+  M4 gives them windows.
+- **A display shows what runs on it**: `with-display` runs a program on TigerVNC's Xvnc, served on
   a Unix socket only, in `target/testbox-view/<client>/` (the owner's only), with the viewer's
   input and the clipboard off. `cargo testbox vnc` shows the displays in a window, `cargo testbox
   web` as a page on loopback; `--interactive` lets keys and pointer through, where they race a
   running check's. `test --screenshots` keeps each display after each check in the phase's
-  record. These tools are a workspace of their own in `testbox/view/`, Linux only, carried over
-  from beep's testbox.
+  record. The probe pod's display shows the probe window, for the `box` phase. These tools are
+  a workspace of their own in `testbox/view/`, Linux only, carried over from beep's testbox.
 - **Clients use the host's GPU**: each client pod gets the render node, `/dev/dri/renderD128`
   (rendering and video only, no mode setting), and the client image carries Mesa's userspace
   drivers: RADV for Vulkan, radeonsi for GL and VA-API. Without a GPU, `up --no-gpu` leaves the
@@ -97,25 +110,34 @@ cargo testbox test box
 ```
 
 `up` builds what's missing (images, then what the box runs), plays the pods, and returns once
-the box says it's ready: the relay answers, and every client has logged that it's up. No fixed
-sleeps.
+the box says it's ready: the relay answers, the probe has drawn, and every client answers `Ping`
+on its harness. No fixed sleeps.
 
 Each check prints `check <what>: passed` or `failed: <why>` (or `skipped: <why>`, for a check
 that doesn't apply to this box); `test` fails if any failed. The last check of every phase is
-that no container crashed. The phase's record, every container's log, is in
-`target/testbox-record/<phase>/`. `cargo testbox down` stops the pods.
+that no container crashed, or stopped. The phase's record is in `target/testbox-record/<phase>/`:
+every container's log, each line with its time, and all of them merged in time order in
+`timeline.log`; after a failed check, each client's harness snapshot (`<nn>-<check>-<client>.json`)
+and each display (`.png`), screenshots asked for or not. `cargo testbox down` stops the pods.
 
 Phases don't need a fresh box: each check uses rooms and broadcasts of its own. So:
 
 - **`cargo testbox dev <phase>`** is the inner loop: the box up if it isn't, what it runs built,
-  the clients restarted only if a binary they run changed, then the phase. It says how long that
+  only the pods restarted whose binary changed, then the phase. It says how long that
   took: from an unchanged box, `dev relay` takes about 7 s.
 - **`cargo testbox run [<phase>...]`** runs phases (all if none) in rounds (`--rounds n`), up to
-  `--jobs n` at once, their lines prefixed with their names, and sums up; `--fresh` restarts
+  `--jobs n` at once, their lines prefixed with their names, and sums up (phases that drive the
+  clients take turns, and one that disrupts the box, as `roster` restarts the relay, runs
+  alone); `--fresh` restarts
   every client before each round. Each run's records are in `target/testbox-record/run/<run>/`.
 - **`down --wipe`** is for when something is wrong with the box itself.
 
+`up` keeps its flags in `target/testbox-pods/box.settings`, and whatever plays pods again later
+(`dev`, `run --fresh`) plays the same box: after `up --no-gpu`, still without the GPU.
+
 | Phase | What it checks |
 |---|---|
-| `box` | The network is internal; a pod resolves no outside name and opens no outside connection; an unchanged box starts without a build; a second build of an unchanged tree is a no-op; a binary from the builder runs in the client image; the probe window renders on RADV (llvmpipe with `--no-gpu`); a client's display, through its socket, shows what it draws; VA-API decodes VP9 |
+| `box` | The network is internal; a pod resolves no outside name and opens no outside connection; an unchanged box starts without a build; a second build of an unchanged tree is a no-op; a binary from the builder runs in the client image; the probe window renders on RADV (llvmpipe with `--no-gpu`); a client's display, through its socket, shows what it draws; VA-API decodes VP9; every binary from the builder finds its libraries in the client image |
 | `relay` | Frames pass through the relay between moq's own publisher and subscriber; a client without the box's CA is refused. If this fails, the box is broken, not `mic` |
+| `roster` | alice and bob join a room and see each other; a new name reaches the other; bob leaves and alice sees him go; after the relay restarts, both are connected again and see each other once |
+| `e2ee` | What a stranger on the relay sees (its HTTP interface: what's announced, a track's latest group): no room id, participant key or name, only ciphertext; a participant without the room's secret finds nobody |

@@ -1,0 +1,16 @@
+[package]
+name = "mic-crowd"
+description = "Headless mic participants, one or many in one process, each driven by its harness"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+clap = { version = "4.6.7", features = ["derive"] }
+mic-core = { version = "0.1.0", path = "../mic-core" }
+mic-harness = { version = "0.1.0", path = "../mic-harness" }
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "signal"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+url = "2"

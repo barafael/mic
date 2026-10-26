@@ -1,6 +1,13 @@
 [workspace]
 # Members are listed explicitly: a glob such as "crates/*" fails while it matches nothing.
-members = ["testbox/probe", "xtask"]
+members = [
+    "crates/mic-core",
+    "crates/mic-crowd",
+    "crates/mic-harness",
+    "crates/mic-testrelay",
+    "testbox/probe",
+    "xtask",
+]
 resolver = "3"
 # Spikes are measurements, not part of the app (PLAN.md, M4).
 exclude = ["spikes"]

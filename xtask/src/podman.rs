@@ -11,6 +11,7 @@ use std::process::Command;
 use crate::error::{self, Error, Result};
 use crate::images;
 use crate::process;
+use crate::settings::Settings;
 
 /// The box's network: `--internal`, so nothing in it reaches the host's network or beyond.
 pub const NETWORK: &str = "mic-testbox";
@@ -20,11 +21,16 @@ pub const PREFIX: &str = "mic-testbox-";
 pub const RECORD: &str = "target/testbox-record";
 /// The pod files with their images and paths filled in, which `kube down` needs again.
 const RENDERED: &str = "target/testbox-pods";
-/// A directory per client for its display's socket, which only that client mounts: no client
-/// reaches another's display.
+/// A directory per pod with a display, for its display's socket, which only that pod mounts: no
+/// client reaches another's display.
 pub const VIEW: &str = "target/testbox-view";
-/// The clients `up` plays, each a pod of its own from testbox/pods/client.yaml.
-pub const CLIENTS: [&str; 1] = ["alice"];
+/// A directory per client for its harness's socket, which only that client mounts.
+pub const RUN: &str = "target/testbox-run";
+/// The clients `up` plays, each a pod of its own from testbox/pods/client.yaml: headless until
+/// M4 gives them windows.
+pub const CLIENTS: [&str; 2] = ["alice", "bob"];
+/// The pods with a display: the probe's, for now.
+pub const DISPLAYS: [&str; 1] = ["probe"];
 
 /// A pod of the box, from `testbox/pods/<name>.yaml`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -33,7 +39,9 @@ pub enum Pod {
     Relay,
     /// The checks' tools inside the network.
     Tools,
-    /// A participant, by name, with a display of its own.
+    /// The probe window on a display of its own, with the host's GPU (testbox/probe).
+    Probe,
+    /// A participant, by name.
     Client(&'static str),
     /// Builds what the box runs (`crate::builder`). Not part of the box: it fetches crates, so
     /// it's on podman's default network, and it outlives `down`.
@@ -43,7 +51,7 @@ pub enum Pod {
 impl Pod {
     /// The box's pods, in the order they're played: the relay makes the keys the others read.
     pub fn all() -> Vec<Pod> {
-        [Pod::Relay, Pod::Tools]
+        [Pod::Relay, Pod::Tools, Pod::Probe]
             .into_iter()
             .chain(CLIENTS.map(Pod::Client))
             .collect()
@@ -53,6 +61,7 @@ impl Pod {
         match self {
             Pod::Relay => "relay",
             Pod::Tools => "tools",
+            Pod::Probe => "probe",
             Pod::Client(name) => name,
             Pod::Builder => "builder",
         }
@@ -69,7 +78,7 @@ impl Pod {
     /// The network it's played on.
     fn network(self) -> &'static str {
         match self {
-            Pod::Relay | Pod::Tools | Pod::Client(_) => NETWORK,
+            Pod::Relay | Pod::Tools | Pod::Probe | Pod::Client(_) => NETWORK,
             Pod::Builder => "podman",
         }
     }
@@ -103,8 +112,8 @@ pub fn podman(args: &[&str]) -> Command {
 
 pub struct TestBox {
     repo: PathBuf,
-    /// Whether client pods get the host's GPU (`up --no-gpu` says no).
-    gpu: bool,
+    /// How it was brought up, or is to be.
+    settings: Settings,
 }
 
 /// The marker of the pod files' lines that pass the host's GPU through.
@@ -113,17 +122,17 @@ const GPU: &str = "# @GPU@ ";
 pub const RENDER_NODE: &str = "/dev/dri/renderD128";
 
 impl TestBox {
-    pub fn new(repo: &Path) -> Self {
-        Self {
-            repo: repo.to_owned(),
-            gpu: true,
-        }
+    /// The box as `up` last brought it up here, or with the defaults.
+    pub fn new(repo: &Path) -> Result<Self> {
+        Ok(Self::with(repo, Settings::saved(repo)?))
     }
 
-    /// Client pods without the host's GPU: llvmpipe and lavapipe, and software codecs.
-    pub fn without_gpu(mut self) -> Self {
-        self.gpu = false;
-        self
+    /// The box with these settings, which `up` keeps for what plays it again later.
+    pub fn with(repo: &Path, settings: Settings) -> Self {
+        Self {
+            repo: repo.to_owned(),
+            settings,
+        }
     }
 
     pub fn repo(&self) -> &Path {
@@ -133,45 +142,67 @@ impl TestBox {
     /// Builds the images that are missing and what the box runs, makes the network, and plays
     /// every pod of the box.
     pub fn up(&self) -> Result<()> {
-        if self.gpu && !Path::new(RENDER_NODE).exists() {
+        if self.settings.gpu && !Path::new(RENDER_NODE).exists() {
             return Err(Error::Failed(format!(
                 "no {RENDER_NODE} on this host: `cargo testbox up --no-gpu`"
             )));
         }
+        self.settings.save(&self.repo)?;
         self.images()?;
         crate::builder::build(self)?;
         self.network()?;
         self.view_directories()?;
+        self.run_directories()?;
         for pod in Pod::all() {
             self.play(pod)?;
         }
         crate::ready::all(self)
     }
 
-    /// Each client's directory for its display's socket: the owner's only, whatever is in it,
-    /// so a link a container plants there leads nowhere.
+    /// Each display's directory for its socket.
     fn view_directories(&self) -> Result<()> {
+        for display in DISPLAYS {
+            self.private_directory(&self.repo.join(VIEW), display)?;
+        }
+        Ok(())
+    }
+
+    /// Each client's directory for its harness's socket.
+    fn run_directories(&self) -> Result<()> {
         for client in CLIENTS {
-            let directory = self.view_socket(client).with_file_name("");
-            error::create_dir_all(&directory)?;
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                for each in [self.repo.join(VIEW), directory.clone()] {
-                    std::fs::set_permissions(&each, std::fs::Permissions::from_mode(0o700))
-                        .map_err(|source| Error::Io {
-                            what: each.display().to_string(),
-                            source,
-                        })?;
-                }
+            self.private_directory(&self.repo.join(RUN), client)?;
+        }
+        Ok(())
+    }
+
+    /// `parent/name`, and `parent`, the owner's only, whatever is in them, so a link a container
+    /// plants there leads nowhere.
+    fn private_directory(&self, parent: &Path, name: &str) -> Result<()> {
+        let directory = parent.join(name);
+        error::create_dir_all(&directory)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            for each in [parent.to_owned(), directory] {
+                std::fs::set_permissions(&each, std::fs::Permissions::from_mode(0o700)).map_err(
+                    |source| Error::Io {
+                        what: each.display().to_string(),
+                        source,
+                    },
+                )?;
             }
         }
         Ok(())
     }
 
-    /// Where `client`'s display serves on the host (with-display's socket, /run/view/vnc).
-    pub fn view_socket(&self, client: &str) -> PathBuf {
-        self.repo.join(VIEW).join(client).join("vnc")
+    /// Where `display`'s display serves on the host (with-display's socket, /run/view/vnc).
+    pub fn view_socket(&self, display: &str) -> PathBuf {
+        self.repo.join(VIEW).join(display).join("vnc")
+    }
+
+    /// Where `client`'s harness serves on the host (mic-crowd's `--harness`, /run/mic).
+    pub fn harness_socket(&self, client: &str) -> PathBuf {
+        self.repo.join(RUN).join(client).join(client)
     }
 
     /// Plays `pod`, replacing what runs under its name.
@@ -289,7 +320,7 @@ impl TestBox {
                 .ok_or_else(|| Error::Failed(format!("{}: no image {name}", source.display())))?
                 .tag(&self.repo)
         })?;
-        Ok(gpu_lines(&rendered, self.gpu).replace("@NAME@", pod.name()))
+        Ok(gpu_lines(&rendered, self.settings.gpu).replace("@NAME@", pod.name()))
     }
 
     /// Stops and removes the box's pods; `wipe` also removes the builder, and then every volume
@@ -375,6 +406,37 @@ impl TestBox {
         let mut log = String::from_utf8_lossy(&logs.stdout).into_owned();
         log.push_str(&String::from_utf8_lossy(&logs.stderr));
         Ok(log)
+    }
+
+    /// The container `name`'s log so far, stdout and stderr alike, each line with the time
+    /// podman took it at, in order.
+    pub fn log_timestamped(&self, name: &str) -> Result<Vec<(Timestamp, String)>> {
+        let logs = podman(&["logs", "--timestamps", name])
+            .output()
+            .map_err(|source| Error::Io {
+                what: format!("podman logs {name}"),
+                source,
+            })?;
+        if !logs.status.success() {
+            return Err(Error::Failed(format!(
+                "podman logs {name}: {}",
+                String::from_utf8_lossy(&logs.stderr)
+            )));
+        }
+        let mut lines: Vec<(Timestamp, String)> = [logs.stdout, logs.stderr]
+            .iter()
+            .flat_map(|out| {
+                String::from_utf8_lossy(out)
+                    .lines()
+                    .map(|line| match line.split_once(' ') {
+                        Some((time, rest)) => (Timestamp::parse(time), rest.to_owned()),
+                        None => (Timestamp::default(), line.to_owned()),
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        lines.sort_by(|left, right| left.0.cmp(&right.0));
+        Ok(lines)
     }
 
     /// Prints the logs of the containers named, or of every container of the pods named.
@@ -482,6 +544,18 @@ mod tests {
     }
 
     #[test]
+    fn timestamps_sort_by_time_whatever_their_fraction() {
+        let short = Timestamp::parse("2026-10-26T23:34:06.12345+01:00");
+        let long = Timestamp::parse("2026-10-26T23:34:06.9+01:00");
+        assert!(
+            short < long,
+            "0.12345 s is before 0.9 s, though its text is longer"
+        );
+        assert_eq!(long.as_str(), "2026-10-26T23:34:06.900000000+01:00");
+        assert!(Timestamp::parse("2026-10-26T23:34:06+01:00") < short);
+    }
+
+    #[test]
     fn the_gpu_lines_are_kept_or_left_out() {
         let source = "a\n  # @GPU@ { gpu },\nb\n";
         assert_eq!(gpu_lines(source, true), "a\n  { gpu },\nb\n");
@@ -496,7 +570,13 @@ mod tests {
     #[test]
     fn every_pod_has_a_pod_file_naming_known_images() {
         let repo = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-        for pod in [Pod::Relay, Pod::Tools, Pod::Client("alice"), Pod::Builder] {
+        for pod in [
+            Pod::Relay,
+            Pod::Tools,
+            Pod::Probe,
+            Pod::Client("alice"),
+            Pod::Builder,
+        ] {
             let file = pod.file(repo);
             let source = std::fs::read_to_string(&file)
                 .unwrap()
@@ -512,5 +592,25 @@ mod tests {
             })
             .unwrap();
         }
+    }
+}
+
+/// When podman took a log line, as it prints it with `--timestamps` (RFC 3339, nanoseconds with
+/// their trailing zeros dropped), made to sort by time: the fraction padded to nine digits. One
+/// offset for all lines, the host's.
+#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Timestamp(String);
+
+impl Timestamp {
+    pub fn parse(text: &str) -> Self {
+        // `2026-10-26T23:34:06.12+01:00`: the seconds, the fraction, the offset.
+        let (seconds, rest) = text.split_once('.').unwrap_or((text, ""));
+        let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+        let offset = &rest[digits.len()..];
+        Self(format!("{seconds}.{digits:0<9}{offset}"))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
     }
 }

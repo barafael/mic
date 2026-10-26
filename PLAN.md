@@ -154,8 +154,8 @@ flowchart LR
 - Records in `target/testbox-record/<phase>/`; checks that print `check <what>: passed`; and a
   last check in every phase that no client crashed.
 - An agent harness crate, `mic-harness`: JSON lines over a Unix socket (`Ping`, `Snapshot`,
-  `Subscribe`, `Act`, `Screenshot`, `Reset`). Every frontend and `mic-crowd` embed its server
-  when built with the `harness` feature.
+  `Subscribe`, `Join`, `Act`, `Reset`). Every frontend and `mic-crowd` embed its server when
+  built with the `harness` feature.
 
 ### The host's GPU in the box
 
@@ -243,9 +243,11 @@ box aims for an edit-to-running-conference loop of seconds.
   A check can then say "bob decodes alice's camera at ≥ 25 fps, and hears 440 Hz from her and
   nothing else". No host kernel modules are needed (no v4l2loopback). The same generators and
   analyzers serve `cargo test`.
-- **A real keyring in windowed clients.** The client image runs a Secret Service (GNOME Keyring,
-  unlocked, in the pod's D-Bus session) **⚠ unverified**, so the keyring path is what the box
-  exercises. `mic-crowd` keeps its participants' secrets in memory.
+- **A real keyring in windowed clients.** The client image runs a Secret Service: GNOME Keyring
+  in the pod's D-Bus session, as a user that isn't root (as root it aborts, failing to drop
+  capabilities the container doesn't have), unlocked with a password, which makes its default
+  collection (both found in commit 11). So the keyring path is what the box exercises.
+  `mic-crowd` keeps its participants' secrets in memory.
 - **Real audio devices, later.** PipeWire inside the container, with a loopback from speaker to
   mic, exercises `cpal` and lets a check measure echo cancellation: alice must not hear her own
   tone come back from bob **⚠ unverified**.
@@ -304,36 +306,59 @@ Each numbered item below is about one commit. Box phases are in **bold**.
     `HKDF(device_secret, room_id)` to an Ed25519 key (D16), with the device secret passed in.
     Unit tests.
 11. `mic-core: the device secret in the system keyring`. 32 bytes from the OS's random
-    generator on first start, stored through `keyring` and read on every later one; a store
-    trait with an in-memory implementation for tests and the crowd. CI exercises the keyring on
-    Windows and macOS, and on Linux with a Secret Service in the job **⚠ unverified**.
-12. `mic-testrelay: a relay in the test process`, for `cargo test`. Its first test publishes and
-    subscribes a track through it **⚠ unverified** that `moq-relay` embeds.
-13. `mic-core: an async client and session`. `Client::new(config, handle)` and
-    `join(invite).await`; `moq-tokio` connect with the relay URL and CA from configuration (D8).
-    Tests: join and leave against `mic-testrelay`.
+    generator on first start, stored through `keyring-core` (Secret Service over zbus, Keychain,
+    Credential Manager) and read on every later one; a store trait with an in-memory
+    implementation for tests and the crowd. Tested against GNOME Keyring in a container; CI
+    exercises the keyring on Windows, macOS and Linux **⚠ unverified until CI runs**.
+12. `mic-testrelay: a relay in the test process`, for `cargo test`: `moq-relay` embedded, at the
+    box's pin, with one TLS identity for its life, so a restart comes back on the same port with
+    the same certificate. Its first test publishes and subscribes a track through it, before and
+    after a restart. A test holds mic's moq crates to the box relay's versions.
+13. `mic-core: an async client and session`. `Client::new(config, store, handle)` and
+    `join(invite).await`, run on the handle's runtime; `moq-tokio` connect with the relay URL and
+    its trust (system roots, a CA, or a fingerprint) from configuration (D8). A join that can't
+    reach the relay fails after the connect timeout with the last attempt's reason (no answer, a
+    fingerprint mismatch). Tests: join and leave against `mic-testrelay`; the same key across
+    joins; an absent relay and a wrong certificate, each said so.
 14. `mic-core: moq-e2ee on every track` (D17). The track layer every later commit publishes and
-    subscribes through: catalogs, `profile`, and every track to come. There's no API for a
-    track in the clear **⚠ unverified** that `moq-e2ee` wraps the hang catalog like any other
-    track. Tests: a subscriber without the secret gets only ciphertext; a wrong secret is an
-    error, not garbage.
+    subscribes through: catalogs, `profile`, and every track to come; moq-e2ee works per track,
+    so the catalog is wrapped like any other. There's no API for a track in the clear. A room's
+    session is rooted at its prefix by the URL's path. Tests: a participant reads another's
+    track; another room, or the same room with another secret, sees nothing; a snoop on the
+    relay sees only opaque names and ciphertext; a wrong secret is an error, not garbage.
 15. `mic-core: the roster`. Each participant publishes a broadcast under the room prefix with an
-    encrypted `profile` JSON track (display name); the roster comes from announcements (§1.5,
-    §5.2). Tests: two clients see each other arrive and leave.
-16. `mic-core: room state, commands and events`. `RoomState` behind `watch`, `Event` as a stream,
-    and `Command` with `Leave` as its first variant. Tests drive two clients by commands only.
-17. `mic-core: reconnecting`. When the session drops, the client reconnects with backoff,
-    announces its broadcast again and resubscribes; `RoomState` shows `Reconnecting` meanwhile.
-    It sits here because it needs the roster and the state, and before any media, so every
-    track is born with it. Tests: `mic-testrelay` restarts mid-call; the roster comes back with
-    no duplicates. Each media commit adds "and the media resumes" to this test.
-18. `mic-harness: the protocol and its server`. `Snapshot` is `RoomState` with the `ui` section;
-    `Act` is a `Command`; `Screenshot` asks the display; `Reset` leaves and forgets. The server
-    takes a `mic-core` client. Unit tests on the protocol.
+    encrypted `profile` JSON track (display name and key, its first track, so the announcement
+    finds it); the roster comes from announcements (§1.5, §5.2), in the order of joining (each
+    broadcast's epoch is a UUIDv7), the same for everyone. Leaving finishes the own tracks first,
+    so the others see it at once. Tests: participants see each other arrive and leave; a new
+    name reaches the others; a second session of one device is one participant.
+16. `mic-core: room state, commands and events`. A `Room` is a cheap handle to a task of the
+    room's own; `RoomState` behind `watch`, `Event`s (arrivals, departures), and `Command`
+    (`Leave`, `SetName`), answered over a oneshot, so any executor awaits it. Dropping every
+    handle leaves the room. Tests drive clients by commands only, one from a thread without
+    tokio.
+17. `mic-core: reconnecting`. moq-tokio's connection redials with backoff and gives up after its
+    redial window (the connect timeout); the room then dials a new connection on the same
+    origin, and so on until it's left, so its broadcast comes back as it was (same path, same
+    epoch: no duplicates). `RoomState` shows `Reconnecting` meanwhile. A first join still fails
+    after the timeout, with its reason. Tests: the test relay stops for longer than the window
+    and restarts; both rooms show `Reconnecting`, then `Connected`, and each other once. Each
+    media commit adds "and the media resumes" to this test.
+18. `mic-harness: the protocol and its server`. JSON lines over a Unix socket: `Ping`,
+    `Snapshot` (the `RoomState` with the frontend's `ui` section), `Subscribe` (pushes on every
+    change), `Join` (an invite and a name: each check picks a fresh room), `Act` (a `Command`),
+    `Reset` (leaves and forgets). Screenshots come from the display, not the harness. The server
+    takes a `mic-core` client; a blocking client comes with it, for the xtask. Tests drive two
+    participants through their harnesses against `mic-testrelay`.
 19. `mic-crowd: headless participants`, one or many per process, each with a harness socket.
-    `testbox: clients`, and the snoop. **`roster`**: alice and bob join and see each other; bob
-    leaves and alice sees him go; a restarted relay is rejoined. **`e2ee`**: the snoop receives
-    every track and can decrypt none; a client with the wrong secret says it can't.
+    `testbox: clients`: alice and bob as headless pods of their own, ready once they answer
+    `Ping`; the probe window moves to a pod of its own; the snoop is the relay's own HTTP
+    interface, asked from the tools pod. **`roster`**: alice and bob join and see each other; a
+    new name reaches the other; bob leaves and alice sees him go; a restarted relay is rejoined.
+    **`e2ee`**: the relay's announcements and a track's latest group carry no room id, key or
+    name, only ciphertext; a participant with the wrong secret finds nobody (a wrong secret
+    derives another prefix, so there is no garbage to show). Phases that drive the clients take
+    turns under `--jobs`, and `roster`, which restarts the relay, runs alone.
 
 ### M3: Signatures
 
@@ -486,9 +511,7 @@ Each is checked by the commit named, which settles it in its body and in the des
 | Assumption | Checked in | If it's wrong |
 |---|---|---|
 | Slint's wgpu backend can present in mailbox or immediate mode, not only FIFO, which stalls on Xvnc | 23 | Slint's software renderer in the box, or a present mode set through `WGPUConfiguration::Manual` |
-| The `keyring` crate's backends work on Windows, macOS and a Linux Secret Service, including in CI and in the box | 11, 23 | Linux CI and the box run a Secret Service explicitly; what `mic` does with no keyring at all is an open point |
-| `moq-relay` can run inside a test process | 12 | moq-lite's in-memory origin (no QUIC), or the pinned relay binary, which only Linux CI has |
-| `moq-e2ee` encrypts the hang catalog like any other track | 14 | `mic` encrypts the catalog's payload itself, with a key derived the same way |
+| The keyring works on GitHub's Windows and macOS runners, and GNOME Keyring on its Linux one (it does in a container here) | 11 (CI) | The keyring test is skipped in CI where it can't run, and the box's clients cover Linux |
 | PipeWire runs in a rootless container with a speaker-to-mic loopback | 28 | A virtual sink and source in the `cpal` test path only, without PipeWire |
 | libvpx builds and links on the Windows and macOS CI runners | 32 | A vendored static build through the binding's build script |
 | lavapipe renders offscreen in GitHub's Linux runners | 34 | `mic-render`'s pixel tests run in the box only |
