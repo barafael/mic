@@ -274,10 +274,12 @@ Each numbered item below is about one commit. Box phases are in **bold**.
 4. `xtask: cargo testbox up, down, logs and test`. The internal network, `pins.rs`, image tags from
    content hashes, records, and checks. **`box`**: a pod can't reach the outside, and `up` on
    an unchanged box runs no `podman build`.
-5. `testbox: moq-relay at a pin, with a self-signed certificate`. A `keys` init container makes the
-   certificate. Clients trust it through a CA file, or a fingerprint if `moq-tokio` takes one
-   **⚠ unverified**. **`relay`**: a pinned moq CLI publisher and subscriber pass frames through
-   the relay. This phase is the baseline for every later failure.
+5. `testbox: moq-relay at a pin, with the box's own CA`. A `keys` init container makes a CA and
+   the relay's certificate; clients trust the CA (`--connect-tls-root`), as they would a real
+   one. (`moq-tokio` also takes a fingerprint, `--connect-tls-fingerprint`.) **`relay`**:
+   moq-tokio's `clock` example, built at the relay's pin, publishes and subscribes through the
+   relay; a client without the CA is refused. This phase is the baseline for every later
+   failure.
 6. `testbox: the builder`. The long-lived builder container with persistent `target/` and
    registry volumes and mold; `cargo testbox build` writes `target/testbox-bin/`. **`box`**: a
    second build of an unchanged tree is a no-op, and a built binary runs in the client image.
@@ -479,7 +481,6 @@ Each is checked by the commit named, which settles it in its body and in the des
 |---|---|---|
 | `podman kube play` passes `/dev/dri/renderD128` into a container as a device, from a `hostPath` of type `CharDevice` | 8 | The xtask starts client pods with `podman run --device` |
 | wgpu on RADV renders into an Xvnc display at box resolutions without trouble | 8 | Clients render on llvmpipe in the box; the GPU is only used for VA-API |
-| `moq-tokio` accepts a certificate fingerprint instead of a CA | 5 | The `keys` container writes a CA file that clients trust |
 | The `keyring` crate's backends work on Windows, macOS and a Linux Secret Service, including in CI and in the box | 11, 23 | Linux CI and the box run a Secret Service explicitly; what `mic` does with no keyring at all is an open point |
 | `moq-relay` can run inside a test process | 12 | moq-lite's in-memory origin (no QUIC), or the pinned relay binary, which only Linux CI has |
 | `moq-e2ee` encrypts the hang catalog like any other track | 14 | `mic` encrypts the catalog's payload itself, with a key derived the same way |

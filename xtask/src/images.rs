@@ -25,10 +25,10 @@ pub struct Image {
 }
 
 pub const IMAGES: [Image; 1] = [
-    // What the checks run inside the network: probes, and the moq tools.
+    // moq's relay, and its clock example as a stock publisher and subscriber.
     Image {
-        name: "tools",
-        pins: &[pins::ARCH],
+        name: "moq",
+        pins: &[pins::ARCH, pins::ARCH_SNAPSHOT, pins::MOQ_REV],
     },
 ];
 

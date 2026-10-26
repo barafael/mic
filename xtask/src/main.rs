@@ -55,6 +55,8 @@ enum Command {
 enum Phase {
     /// The box itself: no egress, and no build when nothing changed.
     Box,
+    /// Frames pass through the relay between a stock moq publisher and subscriber.
+    Relay,
 }
 
 impl Phase {
@@ -95,5 +97,6 @@ fn test(the_box: &TestBox, phase: Phase) -> Result<()> {
     let record = checks::Record::new(the_box.repo(), &phase.name())?;
     checks::phase(the_box, &record, |checks| match phase {
         Phase::Box => checks::testbox(checks, the_box),
+        Phase::Relay => checks::relay(checks, the_box),
     })
 }

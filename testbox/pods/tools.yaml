@@ -10,14 +10,18 @@
   spec: {
     restartPolicy: "Always",
     containers: [
-      # Idles; the checks run their probes in it with `podman exec`. As PID 1, `sleep` would
-      # ignore the TERM that stops it, and every `up` and `down` would wait out podman's timeout.
+      # Idles; the checks run their probes and moq's clock in it with `podman exec`. As PID 1,
+      # `sleep` would ignore the TERM that stops it, and every `up` and `down` would wait out
+      # podman's timeout.
       {
         name: "tools",
-        image: "@IMAGE:tools@",
+        image: "@IMAGE:moq@",
         args: ["bash", "-c", "trap 'exit 0' TERM; sleep infinity & wait"],
         securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: ["ALL"] } },
+        # The box's CA, which clients trust the relay by.
+        volumeMounts: [{ name: "keys", mountPath: "/keys", readOnly: true }],
       },
     ],
+    volumes: [{ name: "keys", persistentVolumeClaim: { claimName: "mic-testbox-keys" } }],
   },
 }

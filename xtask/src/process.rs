@@ -58,3 +58,16 @@ pub fn succeeds(mut command: Command) -> Result<bool> {
         .context(describe(&command))?;
     Ok(status.success())
 }
+
+/// A name no other run of the box shares: nanoseconds since the epoch, and the process. For rooms
+/// and broadcasts, so a former run's or a concurrent phase's never answers for a check's.
+pub fn unique(what: &str) -> Result<String> {
+    let since = std::time::SystemTime::now()
+        .duration_since(std::time::SystemTime::UNIX_EPOCH)
+        .map_err(|error| Error::Failed(format!("the clock is before 1970: {error}")))?;
+    Ok(format!(
+        "{what}-{}-{}",
+        since.as_nanos(),
+        std::process::id()
+    ))
+}

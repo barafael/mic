@@ -2,12 +2,14 @@
 
 mod crashed;
 mod record;
+mod relay;
 mod testbox;
 
 use crate::error::{Error, Result};
 use crate::podman::TestBox;
 
 pub use self::record::Record;
+pub use self::relay::relay;
 pub use self::testbox::testbox;
 
 /// Runs a phase's checks on a fresh tally, then fails if any of them failed. Last, also after a
@@ -32,7 +34,6 @@ pub struct Checks {
 
 impl Checks {
     /// A check later checks depend on: its failure ends the run (the caller's `?`).
-    #[expect(dead_code, reason = "the relay phase is the first to need one")]
     pub fn require<Found>(
         &mut self,
         name: &str,

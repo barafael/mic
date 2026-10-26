@@ -16,6 +16,20 @@ pub const ARCH: Pin = Pin {
     value: "docker.io/library/archlinux:base-20261018.0.612668@sha256:52dfbd5afb23a220d5ee92dafcb4c788d96c026ed04179890c23adef4c897fa0",
 };
 
+/// The day of the Arch Linux Archive that pacman installs from, so packages are pinned too:
+/// <https://archive.archlinux.org/repos/>`ARCH_SNAPSHOT`.
+pub const ARCH_SNAPSHOT: Pin = Pin {
+    name: "ARCH_SNAPSHOT",
+    value: "2026/10/25",
+};
+
+/// moq-dev/moq at the commit of its release `moq-relay-v0.17.8`: the relay, and moq-tokio's
+/// `clock` example, built with that commit's Cargo.lock.
+pub const MOQ_REV: Pin = Pin {
+    name: "MOQ_REV",
+    value: "225ab82a401b5731f726cd9bfbece08162bd63f5",
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -25,5 +39,20 @@ mod tests {
         let (_, digest) = ARCH.value.split_once("@sha256:").expect("a digest");
         assert_eq!(digest.len(), 64);
         assert!(digest.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn the_snapshot_is_a_day() {
+        let parts: Vec<&str> = ARCH_SNAPSHOT.value.split('/').collect();
+        assert_eq!(
+            parts.iter().map(|part| part.len()).collect::<Vec<_>>(),
+            [4, 2, 2]
+        );
+    }
+
+    #[test]
+    fn moq_is_pinned_by_commit() {
+        assert_eq!(MOQ_REV.value.len(), 40);
+        assert!(MOQ_REV.value.chars().all(|c| c.is_ascii_hexdigit()));
     }
 }

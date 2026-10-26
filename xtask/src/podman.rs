@@ -24,15 +24,19 @@ const RENDERED: &str = "target/testbox-pods";
 /// A pod of the box, from `testbox/pods/<name>.yaml`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Pod {
+    /// moq-relay, with the box's TLS.
+    Relay,
     /// The checks' tools inside the network.
     Tools,
 }
 
 impl Pod {
-    pub const ALL: [Pod; 1] = [Pod::Tools];
+    /// In the order they're played: the relay makes the keys the others read.
+    pub const ALL: [Pod; 2] = [Pod::Relay, Pod::Tools];
 
     pub fn name(self) -> &'static str {
         match self {
+            Pod::Relay => "relay",
             Pod::Tools => "tools",
         }
     }
