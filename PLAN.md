@@ -263,8 +263,10 @@ Each numbered item below is about one commit. Box phases are in **bold**.
 ### M0: Repository
 
 1. `docs: the design and the ideas bin`. `docs/design.md` and `docs/ideas_bin.md` as they are now.
-2. `Workspace and licenses`. A Cargo workspace (`crates/`, with `spikes/*` excluded), MIT and
-   Apache-2.0 license files, a README stub, `.gitignore`, `rust-toolchain.toml`, `deny.toml`.
+2. `Workspace and licenses`. A Cargo workspace (crates under `crates/`, `spikes/` excluded) with
+   an empty `xtask` as its first member, since a workspace needs one, and the `cargo testbox`
+   alias. MIT and Apache-2.0 license files, a README stub, `.gitignore`, `rust-toolchain.toml`,
+   `deny.toml`.
 3. `ci: fmt, clippy, test on Linux, Windows and macOS`. GitHub Actions.
 
 ### M1: The empty box

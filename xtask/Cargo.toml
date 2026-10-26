@@ -1,0 +1,7 @@
+[package]
+name = "xtask"
+description = "The test box's commands, run as `cargo testbox`"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
