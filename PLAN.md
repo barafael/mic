@@ -351,9 +351,14 @@ Each numbered item below is about one commit. Box phases are in **bold**.
     takes a `mic-core` client; a blocking client comes with it, for the xtask. Tests drive two
     participants through their harnesses against `mic-testrelay`.
 19. `mic-crowd: headless participants`, one or many per process, each with a harness socket.
-    `testbox: clients`, and the snoop. **`roster`**: alice and bob join and see each other; bob
-    leaves and alice sees him go; a restarted relay is rejoined. **`e2ee`**: the snoop receives
-    every track and can decrypt none; a client with the wrong secret says it can't.
+    `testbox: clients`: alice and bob as headless pods of their own, ready once they answer
+    `Ping`; the probe window moves to a pod of its own; the snoop is the relay's own HTTP
+    interface, asked from the tools pod. **`roster`**: alice and bob join and see each other; a
+    new name reaches the other; bob leaves and alice sees him go; a restarted relay is rejoined.
+    **`e2ee`**: the relay's announcements and a track's latest group carry no room id, key or
+    name, only ciphertext; a participant with the wrong secret finds nobody (a wrong secret
+    derives another prefix, so there is no garbage to show). Phases that drive the clients take
+    turns under `--jobs`, and `roster`, which restarts the relay, runs alone.
 
 ### M3: Signatures
 

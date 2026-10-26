@@ -2758,6 +2758,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "mic-crowd"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "mic-core",
+ "mic-harness",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "url",
+]
+
+[[package]]
 name = "mic-harness"
 version = "0.1.0"
 dependencies = [
@@ -6712,7 +6725,10 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "derive_more",
+ "mic-core",
+ "mic-harness",
  "png",
+ "serde",
  "sha2",
 ]
 

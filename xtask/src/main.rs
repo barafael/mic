@@ -4,28 +4,46 @@
 // Every outcome is handled: a discarded `Result` would hide a failed step.
 #![deny(clippy::let_underscore_must_use, clippy::let_underscore_untyped)]
 
+#[cfg(unix)]
 mod builder;
+#[cfg(unix)]
 mod checks;
+#[cfg(unix)]
 mod error;
+#[cfg(unix)]
+mod harness;
+#[cfg(unix)]
 mod images;
+#[cfg(unix)]
 mod pins;
+#[cfg(unix)]
 mod podman;
+#[cfg(unix)]
 mod process;
+#[cfg(unix)]
 mod ready;
+#[cfg(unix)]
 mod run;
+#[cfg(unix)]
 mod settings;
+#[cfg(unix)]
 mod view;
 
+#[cfg(unix)]
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+#[cfg(unix)]
 use clap::Parser;
 
+#[cfg(unix)]
 use checks::Phase;
+#[cfg(unix)]
 use podman::TestBox;
 
 /// Checks mic in a box of Podman pods on an internal network: nothing in it reaches anything
 /// outside. Every upstream is pinned, and images take network only while they build.
+#[cfg(unix)]
 #[derive(Parser)]
 #[command(bin_name = "cargo testbox")]
 struct Cli {
@@ -33,6 +51,7 @@ struct Cli {
     command: Command,
 }
 
+#[cfg(unix)]
 #[derive(clap::Subcommand)]
 enum Command {
     /// Builds the images that are missing and what the box runs, and plays the pods.
@@ -98,6 +117,14 @@ enum Command {
     Logs { names: Vec<String> },
 }
 
+/// The box is Podman on Linux, its sockets Unix sockets: elsewhere, there's no box.
+#[cfg(not(unix))]
+fn main() -> ExitCode {
+    eprintln!("cargo testbox: the box runs on Linux only");
+    ExitCode::FAILURE
+}
+
+#[cfg(unix)]
 fn main() -> ExitCode {
     let repo = repo_root();
     let command = Cli::parse().command;
@@ -142,6 +169,7 @@ fn main() -> ExitCode {
     }
 }
 
+#[cfg(unix)]
 fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()

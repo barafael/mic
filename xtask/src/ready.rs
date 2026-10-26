@@ -1,21 +1,26 @@
 //! When the box is ready, said by the box itself rather than waited for with fixed sleeps: the
-//! relay answers, and every client says it's up in its log. (With the harness, from M2 on, a
-//! client is up once it answers `Ping`.)
+//! relay answers, every display's program says it's up in its log, and every client answers
+//! `Ping` on its harness.
 
 use std::time::{Duration, Instant};
 
 use crate::error::{Error, Result};
-use crate::podman::{CLIENTS, Pod, TestBox};
+use crate::harness::Participant;
+use crate::podman::{CLIENTS, DISPLAYS, Pod, TestBox};
 use crate::view;
 
 /// How long the relay and each client may take after their pods were played.
 pub const START: Duration = Duration::from_secs(30);
-/// What a client logs once it's up: the probe window's first frame (testbox/probe, `PRESENTED`).
-pub const CLIENT_UP: &str = "probe: presented";
+/// What a display's program logs once it's up: the probe window's first frame (testbox/probe,
+/// `PRESENTED`).
+pub const DISPLAY_UP: &str = "probe: presented";
 
-/// Waits until the relay answers and every client is up.
+/// Waits until the relay answers, and every display and client is up.
 pub fn all(the_box: &TestBox) -> Result<()> {
     relay(the_box)?;
+    for display in DISPLAYS {
+        display_up(the_box, display)?;
+    }
     for client in CLIENTS {
         client_up(the_box, client)?;
     }
@@ -52,22 +57,40 @@ pub fn relay(the_box: &TestBox) -> Result<()> {
     }
 }
 
-/// `client` has logged [`CLIENT_UP`]; returns its log.
-pub fn client_up(the_box: &TestBox, client: &'static str) -> Result<String> {
-    let container = view::container(client);
+/// `display` has logged [`DISPLAY_UP`]; returns its log.
+pub fn display_up(the_box: &TestBox, display: &'static str) -> Result<String> {
+    let container = view::container(display);
     let deadline = Instant::now() + START;
     loop {
         let log = the_box.log(&container)?;
-        if log.lines().any(|line| line == CLIENT_UP) {
+        if log.lines().any(|line| line == DISPLAY_UP) {
             return Ok(log);
         }
         if Instant::now() > deadline {
             return Err(Error::Failed(format!(
-                "{client} wasn't up within {}s: {:?}",
+                "{display} wasn't up within {}s: {:?}",
                 START.as_secs(),
                 log.lines().last().unwrap_or_default()
             )));
         }
         std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+/// `client` answers `Ping` on its harness.
+pub fn client_up(the_box: &TestBox, client: &'static str) -> Result<()> {
+    let deadline = Instant::now() + START;
+    loop {
+        let pinged = Participant::connect(the_box, client).and_then(|mut client| client.ping());
+        match pinged {
+            Ok(_) => return Ok(()),
+            Err(error) if Instant::now() > deadline => {
+                return Err(Error::Failed(format!(
+                    "{client} didn't answer within {}s: {error}",
+                    START.as_secs()
+                )));
+            }
+            Err(_) => std::thread::sleep(Duration::from_millis(100)),
+        }
     }
 }

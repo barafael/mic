@@ -46,14 +46,14 @@ pub fn testbox(checks: &mut Checks, the_box: &TestBox) -> Result<()> {
     checks.record("a binary from the builder runs in the client image", || {
         probe_runs(the_box)
     });
-    let client = crate::podman::CLIENTS[0];
+    let client = "probe";
     let gpu = has_gpu(the_box, client)?;
     let expected = if gpu { "RADV" } else { "llvmpipe" };
     checks.record(&format!("the probe window renders on {expected}"), || {
         adapter(the_box, client, expected)
     });
     let directory = checks.record_directory().to_owned();
-    checks.record("a client's display shows what it draws", || {
+    checks.record("a display shows what is drawn on it", || {
         display_shows(the_box, &directory)
     });
     if gpu {
@@ -80,7 +80,7 @@ fn has_gpu(the_box: &TestBox, client: &'static str) -> Result<bool> {
 
 /// Once the probe window has presented a frame, the adapter it says it got is `expected`'s.
 fn adapter(the_box: &TestBox, client: &'static str, expected: &str) -> Result<()> {
-    let log = crate::ready::client_up(the_box, client)?;
+    let log = crate::ready::display_up(the_box, client)?;
     let adapter = log
         .lines()
         .find(|line| line.starts_with("probe: adapter "))
@@ -121,10 +121,10 @@ const DISPLAY: (u32, u32) = (1280, 720);
 /// How long a display may take to serve after `up`.
 const DISPLAY_START: std::time::Duration = std::time::Duration::from_secs(30);
 
-/// A screenshot of the first client's display, through its socket, is the size the pod gives it,
+/// A screenshot of the probe's display, through its socket, is the size the pod gives it,
 /// and every pixel is the colour it was set to.
 fn display_shows(the_box: &TestBox, directory: &std::path::Path) -> Result<()> {
-    let client = crate::podman::CLIENTS[0];
+    let client = "probe";
     let socket = the_box.view_socket(client);
     let deadline = std::time::Instant::now() + DISPLAY_START;
     while !socket.exists() {

@@ -1,8 +1,10 @@
 //! `cargo testbox test <phase>`'s checks. Each phase is a file of its own.
 
 mod crashed;
+mod e2ee;
 mod record;
 mod relay;
+mod roster;
 mod testbox;
 
 use crate::error::{Error, Result};
@@ -17,10 +19,14 @@ pub enum Phase {
     Box,
     /// Frames pass through the relay between a stock moq publisher and subscriber.
     Relay,
+    /// Participants see each other come and go, and rejoin a restarted relay.
+    Roster,
+    /// A stranger on the relay sees only opaque names and ciphertext.
+    E2ee,
 }
 
 impl Phase {
-    pub const ALL: [Phase; 2] = [Phase::Box, Phase::Relay];
+    pub const ALL: [Phase; 4] = [Phase::Box, Phase::Relay, Phase::Roster, Phase::E2ee];
 
     pub fn name(self) -> String {
         clap::ValueEnum::to_possible_value(&self)
@@ -28,10 +34,25 @@ impl Phase {
             .unwrap_or_default()
     }
 
+    /// Whether it drives the box's clients: such phases run one at a time, even with `--jobs`,
+    /// as two driving alice at once would take each other's rooms. (Leasing clients to phases
+    /// lifts that, once there are more phases with clients.)
+    pub fn uses_clients(self) -> bool {
+        matches!(self, Phase::Roster | Phase::E2ee)
+    }
+
+    /// Whether it disrupts the whole box (`roster` restarts the relay): such a phase runs alone,
+    /// with no other phase at once.
+    pub fn runs_alone(self) -> bool {
+        matches!(self, Phase::Roster)
+    }
+
     pub fn run(self, checks: &mut Checks, the_box: &TestBox) -> Result<()> {
         match self {
             Phase::Box => testbox::testbox(checks, the_box),
             Phase::Relay => relay::relay(checks, the_box),
+            Phase::Roster => roster::roster(checks, the_box),
+            Phase::E2ee => e2ee::e2ee(checks, the_box),
         }
     }
 }

@@ -21,11 +21,16 @@ pub const PREFIX: &str = "mic-testbox-";
 pub const RECORD: &str = "target/testbox-record";
 /// The pod files with their images and paths filled in, which `kube down` needs again.
 const RENDERED: &str = "target/testbox-pods";
-/// A directory per client for its display's socket, which only that client mounts: no client
-/// reaches another's display.
+/// A directory per pod with a display, for its display's socket, which only that pod mounts: no
+/// client reaches another's display.
 pub const VIEW: &str = "target/testbox-view";
-/// The clients `up` plays, each a pod of its own from testbox/pods/client.yaml.
-pub const CLIENTS: [&str; 1] = ["alice"];
+/// A directory per client for its harness's socket, which only that client mounts.
+pub const RUN: &str = "target/testbox-run";
+/// The clients `up` plays, each a pod of its own from testbox/pods/client.yaml: headless until
+/// M4 gives them windows.
+pub const CLIENTS: [&str; 2] = ["alice", "bob"];
+/// The pods with a display: the probe's, for now.
+pub const DISPLAYS: [&str; 1] = ["probe"];
 
 /// A pod of the box, from `testbox/pods/<name>.yaml`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -34,7 +39,9 @@ pub enum Pod {
     Relay,
     /// The checks' tools inside the network.
     Tools,
-    /// A participant, by name, with a display of its own.
+    /// The probe window on a display of its own, with the host's GPU (testbox/probe).
+    Probe,
+    /// A participant, by name.
     Client(&'static str),
     /// Builds what the box runs (`crate::builder`). Not part of the box: it fetches crates, so
     /// it's on podman's default network, and it outlives `down`.
@@ -44,7 +51,7 @@ pub enum Pod {
 impl Pod {
     /// The box's pods, in the order they're played: the relay makes the keys the others read.
     pub fn all() -> Vec<Pod> {
-        [Pod::Relay, Pod::Tools]
+        [Pod::Relay, Pod::Tools, Pod::Probe]
             .into_iter()
             .chain(CLIENTS.map(Pod::Client))
             .collect()
@@ -54,6 +61,7 @@ impl Pod {
         match self {
             Pod::Relay => "relay",
             Pod::Tools => "tools",
+            Pod::Probe => "probe",
             Pod::Client(name) => name,
             Pod::Builder => "builder",
         }
@@ -70,7 +78,7 @@ impl Pod {
     /// The network it's played on.
     fn network(self) -> &'static str {
         match self {
-            Pod::Relay | Pod::Tools | Pod::Client(_) => NETWORK,
+            Pod::Relay | Pod::Tools | Pod::Probe | Pod::Client(_) => NETWORK,
             Pod::Builder => "podman",
         }
     }
@@ -144,36 +152,57 @@ impl TestBox {
         crate::builder::build(self)?;
         self.network()?;
         self.view_directories()?;
+        self.run_directories()?;
         for pod in Pod::all() {
             self.play(pod)?;
         }
         crate::ready::all(self)
     }
 
-    /// Each client's directory for its display's socket: the owner's only, whatever is in it,
-    /// so a link a container plants there leads nowhere.
+    /// Each display's directory for its socket.
     fn view_directories(&self) -> Result<()> {
+        for display in DISPLAYS {
+            self.private_directory(&self.repo.join(VIEW), display)?;
+        }
+        Ok(())
+    }
+
+    /// Each client's directory for its harness's socket.
+    fn run_directories(&self) -> Result<()> {
         for client in CLIENTS {
-            let directory = self.view_socket(client).with_file_name("");
-            error::create_dir_all(&directory)?;
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                for each in [self.repo.join(VIEW), directory.clone()] {
-                    std::fs::set_permissions(&each, std::fs::Permissions::from_mode(0o700))
-                        .map_err(|source| Error::Io {
-                            what: each.display().to_string(),
-                            source,
-                        })?;
-                }
+            self.private_directory(&self.repo.join(RUN), client)?;
+        }
+        Ok(())
+    }
+
+    /// `parent/name`, and `parent`, the owner's only, whatever is in them, so a link a container
+    /// plants there leads nowhere.
+    fn private_directory(&self, parent: &Path, name: &str) -> Result<()> {
+        let directory = parent.join(name);
+        error::create_dir_all(&directory)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            for each in [parent.to_owned(), directory] {
+                std::fs::set_permissions(&each, std::fs::Permissions::from_mode(0o700)).map_err(
+                    |source| Error::Io {
+                        what: each.display().to_string(),
+                        source,
+                    },
+                )?;
             }
         }
         Ok(())
     }
 
-    /// Where `client`'s display serves on the host (with-display's socket, /run/view/vnc).
-    pub fn view_socket(&self, client: &str) -> PathBuf {
-        self.repo.join(VIEW).join(client).join("vnc")
+    /// Where `display`'s display serves on the host (with-display's socket, /run/view/vnc).
+    pub fn view_socket(&self, display: &str) -> PathBuf {
+        self.repo.join(VIEW).join(display).join("vnc")
+    }
+
+    /// Where `client`'s harness serves on the host (mic-crowd's `--harness`, /run/mic).
+    pub fn harness_socket(&self, client: &str) -> PathBuf {
+        self.repo.join(RUN).join(client).join(client)
     }
 
     /// Plays `pod`, replacing what runs under its name.
@@ -498,7 +527,13 @@ mod tests {
     #[test]
     fn every_pod_has_a_pod_file_naming_known_images() {
         let repo = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-        for pod in [Pod::Relay, Pod::Tools, Pod::Client("alice"), Pod::Builder] {
+        for pod in [
+            Pod::Relay,
+            Pod::Tools,
+            Pod::Probe,
+            Pod::Client("alice"),
+            Pod::Builder,
+        ] {
             let file = pod.file(repo);
             let source = std::fs::read_to_string(&file)
                 .unwrap()

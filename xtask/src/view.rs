@@ -6,22 +6,25 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::error::{Error, Result};
-use crate::podman::{CLIENTS, Pod, TestBox};
+use crate::podman::{DISPLAYS, Pod, TestBox};
 use crate::process;
 
 const MANIFEST: &str = "testbox/view/Cargo.toml";
 
-/// The container a client's display is in.
-pub fn container(client: &'static str) -> String {
-    Pod::Client(client).container("client")
+/// The container a display is in: the probe's, or a windowed client's (from M4).
+pub fn container(display: &'static str) -> String {
+    match display {
+        "probe" => Pod::Probe.container("probe"),
+        client => Pod::Client(client).container("client"),
+    }
 }
 
-/// `<name>=<socket>` of each running client's display, as the tools take them.
+/// `<name>=<socket>` of each running display, as the tools take them.
 pub fn displays(the_box: &TestBox) -> Vec<String> {
-    CLIENTS
+    DISPLAYS
         .into_iter()
-        .filter(|client| the_box.running(&container(client)))
-        .map(|client| format!("{client}={}", the_box.view_socket(client).display()))
+        .filter(|display| the_box.running(&container(display)))
+        .map(|display| format!("{display}={}", the_box.view_socket(display).display()))
         .collect()
 }
 
@@ -67,21 +70,21 @@ fn viewer(the_box: &TestBox, package: &str, interactive: bool) -> Result<()> {
     let displays = displays(the_box);
     if displays.is_empty() {
         return Err(Error::Failed(
-            "no client with a display runs: `cargo testbox up` first".to_owned(),
+            "no display runs: `cargo testbox up` first".to_owned(),
         ));
     }
     let input = if interactive { "on" } else { "off" };
-    for client in CLIENTS
+    for display in DISPLAYS
         .into_iter()
-        .filter(|client| the_box.running(&container(client)))
+        .filter(|display| the_box.running(&container(display)))
     {
         let set = the_box.exec(
-            &container(client),
+            &container(display),
             &["/opt/mic/with-display", "input", input],
         )?;
         if !set.status.success() {
             return Err(Error::Failed(format!(
-                "{client}'s input: {}",
+                "{display}'s input: {}",
                 String::from_utf8_lossy(&set.stderr)
             )));
         }
