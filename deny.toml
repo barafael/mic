@@ -5,6 +5,13 @@ all-features = true
 # Direct dependencies only; `cargo audit` still lists transitive ones.
 unmaintained = "workspace"
 yanked = "deny"
+ignore = [
+    # The Marvin attack on rsa's private-key operations (no fixed release). rsa reaches mic only
+    # through moq-auth in the embedded test relay (mic-testrelay), which uses it to verify RS256
+    # tokens: public-key operations, which the attack isn't about. Revisit if mic itself ever
+    # signs or decrypts with RSA.
+    { id = "RUSTSEC-2023-0071", reason = "only RSA verification, in the test relay's auth" },
+]
 
 [licenses]
 # mic is MIT OR Apache-2.0 (D24), so only permissive licenses. Slint's royalty-free license joins
@@ -17,6 +24,8 @@ allow = [
     "BSD-3-Clause",
     "BSL-1.0",
     "CC0-1.0",
+    # webpki-roots and webpki-root-certs: Mozilla's root certificates, as data.
+    "CDLA-Permissive-2.0",
     "ISC",
     "MIT",
     "Unicode-3.0",

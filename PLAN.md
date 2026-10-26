@@ -310,8 +310,10 @@ Each numbered item below is about one commit. Box phases are in **bold**.
     Credential Manager) and read on every later one; a store trait with an in-memory
     implementation for tests and the crowd. Tested against GNOME Keyring in a container; CI
     exercises the keyring on Windows, macOS and Linux **⚠ unverified until CI runs**.
-12. `mic-testrelay: a relay in the test process`, for `cargo test`. Its first test publishes and
-    subscribes a track through it **⚠ unverified** that `moq-relay` embeds.
+12. `mic-testrelay: a relay in the test process`, for `cargo test`: `moq-relay` embedded, at the
+    box's pin, with one TLS identity for its life, so a restart comes back on the same port with
+    the same certificate. Its first test publishes and subscribes a track through it, before and
+    after a restart. A test holds mic's moq crates to the box relay's versions.
 13. `mic-core: an async client and session`. `Client::new(config, handle)` and
     `join(invite).await`; `moq-tokio` connect with the relay URL and CA from configuration (D8).
     Tests: join and leave against `mic-testrelay`.
@@ -490,7 +492,6 @@ Each is checked by the commit named, which settles it in its body and in the des
 |---|---|---|
 | Slint's wgpu backend can present in mailbox or immediate mode, not only FIFO, which stalls on Xvnc | 23 | Slint's software renderer in the box, or a present mode set through `WGPUConfiguration::Manual` |
 | The keyring works on GitHub's Windows and macOS runners, and GNOME Keyring on its Linux one (it does in a container here) | 11 (CI) | The keyring test is skipped in CI where it can't run, and the box's clients cover Linux |
-| `moq-relay` can run inside a test process | 12 | moq-lite's in-memory origin (no QUIC), or the pinned relay binary, which only Linux CI has |
 | `moq-e2ee` encrypts the hang catalog like any other track | 14 | `mic` encrypts the catalog's payload itself, with a key derived the same way |
 | PipeWire runs in a rootless container with a speaker-to-mic loopback | 28 | A virtual sink and source in the `cpal` test path only, without PipeWire |
 | libvpx builds and links on the Windows and macOS CI runners | 32 | A vendored static build through the binding's build script |

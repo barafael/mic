@@ -1,0 +1,20 @@
+[package]
+name = "mic-testrelay"
+description = "A MoQ relay inside a test process, for mic's `cargo test`: moq-relay, embedded"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+anyhow = "1.0.104"
+moq-auth = "=0.2.2"
+moq-relay = { version = "=0.17.8", default-features = false, features = ["noq"] }
+moq-tokio = "=0.19.29"
+tokio = { version = "1.54.1", features = ["rt", "macros", "time"] }
+url = "2"
+
+[dev-dependencies]
+anyhow = "1.0.104"
+moq-net = "=0.3.16"
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "time"] }

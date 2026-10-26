@@ -41,6 +41,15 @@ pub const RUST: Pin = Pin {
 mod tests {
     use super::*;
 
+    /// The versions of moq's crates at `MOQ_REV`, which mic's own crates use: the box's relay and
+    /// `mic-testrelay`'s are then the same code, and mic speaks to the relay it's tested against. A
+    /// test holds Cargo.lock to them.
+    const MOQ_CRATES: [(&str, &str); 3] = [
+        ("moq-relay", "0.17.8"),
+        ("moq-tokio", "0.19.29"),
+        ("moq-net", "0.3.16"),
+    ];
+
     #[test]
     fn the_base_image_is_pinned_by_digest() {
         let (_, digest) = ARCH.value.split_once("@sha256:").expect("a digest");
@@ -61,6 +70,23 @@ mod tests {
     fn moq_is_pinned_by_commit() {
         assert_eq!(MOQ_REV.value.len(), 40);
         assert!(MOQ_REV.value.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn mic_uses_the_moq_crates_of_the_boxs_relay() {
+        let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap();
+        let lock = std::fs::read_to_string(repo.join("Cargo.lock")).unwrap();
+        for (name, version) in MOQ_CRATES {
+            let locked: Vec<&str> = lock
+                .split("[[package]]")
+                .filter(|package| package.contains(&format!("name = \"{name}\"\n")))
+                .filter_map(|package| package.split("version = \"").nth(1))
+                .filter_map(|rest| rest.split('"').next())
+                .collect();
+            assert_eq!(locked, [version], "{name} in Cargo.lock");
+        }
     }
 
     #[test]
