@@ -513,8 +513,10 @@ fn run(cli: Cli) -> Result<(), String> {
     window
         .run()
         .map_err(|error| format!("the window: {error}"))?;
+    // The timeout is made inside the runtime: its timer needs the runtime's clock, and one made
+    // outside panics, and the room is never left.
     if runtime
-        .block_on(tokio::time::timeout(LEAVING, app.leave()))
+        .block_on(async { tokio::time::timeout(LEAVING, app.leave()).await })
         .is_err()
     {
         tracing::warn!("leaving the room took longer than {LEAVING:?}");
