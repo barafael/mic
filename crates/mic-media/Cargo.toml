@@ -1,0 +1,15 @@
+[package]
+name = "mic-media"
+description = "mic's media: audio and video sources and sinks, devices and synthetic, and their codecs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+derive_more = { version = "2.1.1", features = ["display", "error"] }
+ringbuf = "0.5.1"
+tokio = { version = "1.54.1", features = ["time"] }
+
+[dev-dependencies]
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "time"] }

@@ -4065,6 +4065,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "mic-media"
+version = "0.1.0"
+dependencies = [
+ "derive_more",
+ "ringbuf",
+ "tokio",
+]
+
+[[package]]
 name = "mic-slint"
 version = "0.1.0"
 dependencies = [
@@ -6090,6 +6099,17 @@ dependencies = [
  "libc",
  "untrusted 0.9.0",
  "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "ringbuf"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b58b631e416dd7d84549d7e6a50f767e111f9b03e30d04f40072f6618f386aaf"
+dependencies = [
+ "crossbeam-utils",
+ "portable-atomic",
+ "portable-atomic-util",
 ]
 
 [[package]]
