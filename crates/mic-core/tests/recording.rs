@@ -1,6 +1,6 @@
-//! Recording through `mic-testrelay`: one who records writes a WebM file of each participant,
-//! itself among them, everyone sees that it records, and the files play: their camera in VP9 and
-//! their voice in Opus, as ffprobe reads them where it's installed.
+//! Recording through `mic-testrelay`: one who records writes the call into a WebM file, and
+//! everyone sees that it records. Where ffmpeg is installed, the file plays, VP9 and Opus, and
+//! while only alice speaks it shows her camera.
 
 use std::time::Duration;
 
@@ -82,6 +82,11 @@ async fn one_who_records_writes_everyone_and_everyone_sees_it() {
     .await
     .unwrap()
     .unwrap();
+    // Only alice speaks.
+    bob.room
+        .command(Command::SetMuted { muted: true })
+        .await
+        .unwrap();
     // What there is to record has arrived.
     tokio::time::sleep(Duration::from_secs(2)).await;
     bob.room
@@ -113,53 +118,65 @@ async fn one_who_records_writes_everyone_and_everyone_sees_it() {
     .expect("alice sees bob stop")
     .unwrap();
 
-    let directories: Vec<_> = std::fs::read_dir(&recordings).unwrap().flatten().collect();
-    assert_eq!(directories.len(), 1, "one recording");
-    let mut files: Vec<String> = std::fs::read_dir(directories[0].path())
-        .unwrap()
-        .flatten()
-        .map(|file| file.file_name().to_string_lossy().into_owned())
-        .collect();
-    files.sort();
-    assert_eq!(files.len(), 2, "{files:?}");
+    let files: Vec<_> = std::fs::read_dir(&recordings).unwrap().flatten().collect();
+    assert_eq!(files.len(), 1, "one recording");
+    let path = files[0].path();
+    let written = std::fs::read(&path).unwrap();
+    assert!(written.len() > 20_000, "{} bytes", written.len());
+    let Ok(probed) = std::process::Command::new("ffprobe")
+        .args([
+            "-v",
+            "error",
+            "-count_frames",
+            "-show_entries",
+            "stream=codec_name,width,nb_read_frames",
+            "-of",
+            "csv=p=0",
+        ])
+        .arg(&path)
+        .output()
+    else {
+        std::fs::remove_dir_all(&recordings).unwrap();
+        return;
+    };
+    let said = String::from_utf8_lossy(&probed.stdout);
     assert!(
-        files[0].starts_with("Alice-") && files[1].starts_with("Bob-"),
-        "{files:?}"
+        probed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&probed.stderr)
     );
-    for file in &files {
-        let path = directories[0].path().join(file);
-        let written = std::fs::read(&path).unwrap();
-        assert!(written.len() > 20_000, "{file}: {} bytes", written.len());
-        let Ok(probed) = std::process::Command::new("ffprobe")
-            .args([
-                "-v",
-                "error",
-                "-count_frames",
-                "-show_entries",
-                "stream=codec_name,nb_read_frames",
-                "-of",
-                "csv=p=0",
-            ])
-            .arg(&path)
-            .output()
-        else {
-            continue;
-        };
-        let said = String::from_utf8_lossy(&probed.stdout);
-        assert!(
-            probed.status.success(),
-            "{file}: {}",
-            String::from_utf8_lossy(&probed.stderr)
-        );
-        // About three seconds: at 15 a second, and 50 packets.
-        let frames = |codec: &str| -> u64 {
-            said.lines()
-                .find_map(|line| line.strip_prefix(&format!("{codec},")))
-                .and_then(|count| count.trim().parse().ok())
-                .unwrap_or(0)
-        };
-        assert!(frames("vp9") >= 30, "{file}: {said}");
-        assert!(frames("opus") >= 100, "{file}: {said}");
-    }
+    // About three seconds: 15 pictures a second, and 50 packets.
+    let frames = |codec: &str| -> u64 {
+        said.lines()
+            .find(|line| line.starts_with(&format!("{codec},")))
+            .and_then(|line| line.rsplit(',').next())
+            .and_then(|count| count.trim().parse().ok())
+            .unwrap_or(0)
+    };
+    assert!(said.contains("vp9,1280"), "{said}");
+    assert!(frames("vp9") >= 30, "{said}");
+    assert!(frames("opus") >= 100, "{said}");
+    // Two seconds in, only alice has spoken: it shows her camera.
+    let frame = std::process::Command::new("ffmpeg")
+        .args(["-v", "error", "-ss", "2", "-i"])
+        .arg(&path)
+        .args([
+            "-frames:v",
+            "1",
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "yuv420p",
+            "-",
+        ])
+        .output()
+        .unwrap();
+    let picture = mic_media::video::Picture {
+        width: 1280,
+        height: 720,
+        data: frame.stdout,
+    };
+    let read = mic_media::video::read_pattern(&picture);
+    assert_eq!(read.map(|pattern| pattern.sender), Some(1), "{read:?}");
     std::fs::remove_dir_all(&recordings).unwrap();
 }

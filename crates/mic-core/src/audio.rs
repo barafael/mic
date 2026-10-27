@@ -47,7 +47,7 @@ fn codec(error: moq_audio::Error) -> TrackError {
 }
 
 /// What a subscriber decodes a publisher's voice with: the same settings, so the same rendition.
-fn decoder() -> Result<Decoder, TrackError> {
+pub(crate) fn decoder() -> Result<Decoder, TrackError> {
     let catalog = Encoder::new(&settings()).map_err(codec)?.catalog();
     Decoder::new(&catalog, &moq_audio::decode::Config::new()).map_err(codec)
 }
@@ -60,7 +60,7 @@ pub(crate) async fn publish(
     mut track: SignedTrack,
     muted: tokio::sync::watch::Receiver<bool>,
     mut noise: tokio::sync::watch::Receiver<NoiseSuppression>,
-    tapping: crate::recording::Tapping,
+    (tap, me): (crate::recording::Tap, crate::roster::ParticipantKey),
 ) {
     let mut suppressor = Suppressor::new(*noise.borrow_and_update());
     let mut encoder = match Encoder::new(&settings()) {
@@ -111,11 +111,7 @@ pub(crate) async fn publish(
                 return;
             }
         };
-        tapping.give(|| crate::recording::Frame {
-            timestamp,
-            payload: bytes::Bytes::copy_from_slice(&packet.payload),
-            keyframe: true,
-        });
+        tap.give(me, || bytes::Bytes::copy_from_slice(&packet.payload));
         if let Some(open) = group.as_mut()
             && let Err(error) = open.write_frame(timestamp, &packet.payload)
         {
@@ -138,7 +134,7 @@ pub(crate) async fn play(
     mixer: Mixer,
     whose: crate::roster::ParticipantKey,
     voices: crate::speaker::Voices,
-    tapping: crate::recording::Tapping,
+    tap: crate::recording::Tap,
 ) {
     let mut decoder = match decoder() {
         Ok(decoder) => decoder,
@@ -166,11 +162,7 @@ pub(crate) async fn play(
                     break;
                 }
             };
-            tapping.give(|| crate::recording::Frame {
-                timestamp: frame.timestamp,
-                payload: frame.plaintext.clone(),
-                keyframe: true,
-            });
+            tap.give(whose, || frame.plaintext.clone());
             // Decoded all the same, so the decoder's state follows the stream.
             match decoder.decode(&frame.plaintext) {
                 Ok(decoded) => {

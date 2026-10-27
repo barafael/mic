@@ -108,9 +108,9 @@ pub enum Command {
     SetHand { raised: bool },
     /// Share the screen the screen source captures, or stop.
     ShareScreen { on: bool },
-    /// Record the room into a new directory of recordings (`Config::recordings`), each
-    /// participant's camera and voice a WebM file, or stop, once they're written out. Everyone
-    /// is told; every camera is watched while it records.
+    /// Record the call into a new WebM file in the recordings (`Config::recordings`), or stop,
+    /// once it's written out: a shared screen, else the active speaker, else a grid of
+    /// everyone, and every voice. Everyone is told.
     Record { on: bool },
     /// Show the cameras of these participants only, as a frontend's visible tiles do; every
     /// camera with none (as at the start). Only those are subscribed to and decoded (§5.8).
@@ -199,7 +199,7 @@ pub(crate) struct Joined {
     pub camera_on: watch::Sender<bool>,
     /// What a screenshare captures, if this participant can share one.
     pub screen: Option<crate::video::ScreenSource>,
-    /// What a recording takes this participant's voice and camera from, and the others'.
+    /// What a recording takes this participant's voice from, and the others'.
     pub tap: crate::recording::Tap,
     /// Where recordings go.
     pub recordings: std::path::PathBuf,
@@ -290,7 +290,11 @@ impl Room {
             tap: joined.tap,
             recordings: joined.recordings,
             recording: None,
-            asked_watch: None,
+            sources: crate::recording::Sources {
+                board: shared.board.clone(),
+                screens: shared.screens.clone(),
+                preview: shared.preview.clone(),
+            },
             noise: joined.noise,
             roster: followed,
             state,
@@ -451,8 +455,8 @@ struct Task {
     recordings: std::path::PathBuf,
     /// The recording under way, if any.
     recording: Option<crate::recording::Recording>,
-    /// Whose cameras the frontend asked to watch: every one is, while it records.
-    asked_watch: Option<Vec<ParticipantKey>>,
+    /// What a recording's picture is made of.
+    sources: crate::recording::Sources,
     noise: watch::Sender<mic_media::audio::noise::NoiseSuppression>,
     roster: watch::Receiver<Roster>,
     state: watch::Sender<RoomState>,
@@ -641,43 +645,35 @@ impl Task {
                 Ok(())
             }
             Command::Watch { participants } => {
-                self.asked_watch = participants;
-                self.watch();
+                self.watching.send_if_modified(|watching| {
+                    let changed = *watching != participants;
+                    *watching = participants;
+                    changed
+                });
                 Ok(())
             }
             Command::Record { on } => {
                 if on && self.recording.is_none() {
                     let room = self.state.borrow().room.clone();
-                    self.recording = Some(crate::recording::Recording::start(
-                        &self.tap,
-                        &self.recordings,
-                        &room,
-                        self.state.subscribe(),
-                    )?);
+                    self.recording = Some(
+                        crate::recording::Recording::start(
+                            &self.tap,
+                            &self.recordings,
+                            &room,
+                            self.state.subscribe(),
+                            self.sources.clone(),
+                        )
+                        .await?,
+                    );
                 } else if !on && let Some(recording) = self.recording.take() {
                     recording.stop().await;
                 }
-                self.watch();
                 self.set_profile(Profile {
                     recording: on,
                     ..self.profile.clone()
                 })
             }
         }
-    }
-
-    /// The cameras watched: those the frontend asked for, or, while it records, every one.
-    fn watch(&self) {
-        let participants = if self.recording.is_some() {
-            None
-        } else {
-            self.asked_watch.clone()
-        };
-        self.watching.send_if_modified(|watching| {
-            let changed = *watching != participants;
-            *watching = participants;
-            changed
-        });
     }
 
     /// `said`, for everyone in the room, and in the state as anyone's is.

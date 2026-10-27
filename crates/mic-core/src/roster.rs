@@ -238,7 +238,7 @@ pub(crate) struct Playing {
     pub speaker: watch::Receiver<Option<ParticipantKey>>,
     /// Where what's said in chat and reactions goes.
     pub heard: mpsc::UnboundedSender<crate::chat::Heard>,
-    /// What a recording takes the voices and cameras from, while there's one.
+    /// What a recording takes the voices from, while there's one.
     pub tap: crate::recording::Tap,
 }
 
@@ -518,11 +518,7 @@ async fn read_peer(
                     mixer.clone(),
                     catalog.participant,
                     playing.voices.clone(),
-                    crate::recording::Tapping {
-                        tap: playing.tap.clone(),
-                        whose: catalog.participant,
-                        kind: crate::recording::Kind::Voice,
-                    },
+                    playing.tap.clone(),
                 )
                 .await;
             }
@@ -554,7 +550,6 @@ async fn read_peer(
                             track,
                             catalog.participant,
                             playing.screens.clone(),
-                            None,
                         ))));
                     }
                     Err(error) => tracing::debug!(%error, path = peer.path(), "no screen"),
@@ -573,7 +568,7 @@ async fn read_peer(
         };
         let shown = playing.shows(whose);
         if shown && camera.is_none() {
-            camera = play_camera(&peer, checked, whose, &playing.board, &playing.tap).await;
+            camera = play_camera(&peer, checked, whose, &playing.board).await;
         } else if !shown && let Some(unwatched) = camera.take() {
             unwatched.stop(checked);
         }
@@ -621,23 +616,13 @@ async fn play_camera(
     verification: &Verification,
     whose: ParticipantKey,
     board: &crate::video::Board,
-    tap: &crate::recording::Tap,
 ) -> Option<Camera> {
     match peer
         .verified_track_with_preferences(crate::video::CAMERA, verification)
         .await
     {
         Ok((track, preferences)) => Some(Camera {
-            playing: tokio::spawn(crate::video::play(
-                track,
-                whose,
-                board.clone(),
-                Some(crate::recording::Tapping {
-                    tap: tap.clone(),
-                    whose,
-                    kind: crate::recording::Kind::Camera,
-                }),
-            )),
+            playing: tokio::spawn(crate::video::play(track, whose, board.clone())),
             preferences,
             raised: false,
         }),
@@ -656,11 +641,11 @@ async fn play_voice(
     mixer: mic_media::audio::Mixer,
     whose: ParticipantKey,
     voices: crate::speaker::Voices,
-    tapping: crate::recording::Tapping,
+    tap: crate::recording::Tap,
 ) -> Option<Task> {
     match peer.verified_track(crate::audio::AUDIO, verification).await {
         Ok(track) => Some(Task(tokio::spawn(crate::audio::play(
-            track, mixer, whose, voices, tapping,
+            track, mixer, whose, voices, tap,
         )))),
         Err(error) => {
             tracing::debug!(%error, path = peer.path(), "no voice");

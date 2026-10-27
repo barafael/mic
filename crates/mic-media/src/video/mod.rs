@@ -7,6 +7,7 @@
 //! the choice is trivial now; a later one arrives without breaking v1 clients, which keep naming
 //! only what they decode, and ignore names they don't know.
 
+pub mod compose;
 mod pattern;
 #[cfg(feature = "screen")]
 pub mod screen;

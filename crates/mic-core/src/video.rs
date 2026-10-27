@@ -105,13 +105,8 @@ impl Recorded {
 /// Sends `camera` onto `track`, a group a second, each starting with a keyframe, until the
 /// camera or the track end. While `on` says it's off, nothing is sent, and the next picture
 /// after it's on again starts a group.
-pub(crate) async fn publish(
-    camera: Camera,
-    track: SignedTrack,
-    on: watch::Receiver<bool>,
-    tapping: crate::recording::Tapping,
-) {
-    let sending = Sending::new(track, CAMERA_SETTINGS.fps, Some(tapping));
+pub(crate) async fn publish(camera: Camera, track: SignedTrack, on: watch::Receiver<bool>) {
+    let sending = Sending::new(track, CAMERA_SETTINGS.fps);
     match camera {
         Camera::Live(pictures) => publish_live(pictures, sending, on, CAMERA_SETTINGS).await,
         Camera::Recorded(recorded) => publish_recorded(recorded, sending, on).await,
@@ -125,7 +120,7 @@ pub(crate) async fn publish_screen(
     track: SignedTrack,
     on: watch::Receiver<bool>,
 ) {
-    let sending = Sending::new(track, SCREEN_SETTINGS.fps, None);
+    let sending = Sending::new(track, SCREEN_SETTINGS.fps);
     publish_live(pictures, sending, on, SCREEN_SETTINGS).await;
 }
 
@@ -217,18 +212,15 @@ struct Sending {
     /// Pictures sent, and skipped while paused: where the timeline is.
     sent: u64,
     fps: u64,
-    /// What a recording of this participant's camera is given, if it's one.
-    tapping: Option<crate::recording::Tapping>,
 }
 
 impl Sending {
-    fn new(track: SignedTrack, fps: u32, tapping: Option<crate::recording::Tapping>) -> Self {
+    fn new(track: SignedTrack, fps: u32) -> Self {
         Self {
             track,
             group: None,
             sent: 0,
             fps: u64::from(fps.max(1)),
-            tapping,
         }
     }
 
@@ -249,8 +241,7 @@ impl Sending {
     /// The next picture's packets, encoded as [`Self::keyframe_next`] said; false once the track
     /// is over.
     fn send(&mut self, packets: &[Vec<u8>]) -> bool {
-        let keyframe = self.keyframe_next();
-        if keyframe {
+        if self.keyframe_next() {
             if let Some(full) = self.group.take()
                 && let Err(error) = crate::sig::SignedGroup::finish(full)
             {
@@ -271,15 +262,6 @@ impl Sending {
                 return false;
             }
         };
-        if let Some(tapping) = &self.tapping {
-            for (index, packet) in packets.iter().enumerate() {
-                tapping.give(|| crate::recording::Frame {
-                    timestamp,
-                    payload: bytes::Bytes::copy_from_slice(packet),
-                    keyframe: keyframe && index == 0,
-                });
-            }
-        }
         if let Some(open) = self.group.as_mut() {
             for packet in packets {
                 if let Err(error) = open.write_frame(timestamp, packet) {
@@ -293,14 +275,8 @@ impl Sending {
     }
 }
 
-/// Decodes `track`, `whose` camera or screen, onto `board`, until the track ends, giving a
-/// recording what it's given, if it records it.
-pub(crate) async fn play(
-    mut track: VerifiedTrack,
-    whose: ParticipantKey,
-    board: Board,
-    tapping: Option<crate::recording::Tapping>,
-) {
+/// Decodes `track`, `whose` camera or screen, onto `board`, until the track ends.
+pub(crate) async fn play(mut track: VerifiedTrack, whose: ParticipantKey, board: Board) {
     let mut decoder = match Vp9Decoder::new() {
         Ok(decoder) => Some(decoder),
         Err(error) => {
@@ -317,8 +293,6 @@ pub(crate) async fn play(
                 return;
             }
         };
-        // A group starts with a keyframe (`publish`).
-        let mut first = true;
         loop {
             let frame = match group.read_frame().await {
                 Ok(Some(frame)) => frame,
@@ -328,14 +302,6 @@ pub(crate) async fn play(
                     break;
                 }
             };
-            if let Some(tapping) = &tapping {
-                tapping.give(|| crate::recording::Frame {
-                    timestamp: frame.timestamp,
-                    payload: frame.plaintext.clone(),
-                    keyframe: first,
-                });
-            }
-            first = false;
             let Some(mut working) = decoder.take() else {
                 return;
             };
