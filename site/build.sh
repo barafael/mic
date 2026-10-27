@@ -7,6 +7,7 @@ out=$1
 here=$(dirname "$0")
 version=$(sed -n 's/^version = "\(.*\)"/\1/p' "$here/../Cargo.toml" | head -1)
 latest=${MIC_SITE_LATEST:-$version}
+[ -n "$latest" ] || { echo "site/build.sh: no version in Cargo.toml" >&2; exit 1; }
 mkdir -p "$out/j"
 cp "$here/index.html" "$here/style.css" "$here/invite.js" "$out/"
 cp "$here/j/index.html" "$out/j/"

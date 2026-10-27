@@ -38,55 +38,38 @@ pub fn all(the_box: &TestBox) -> Result<()> {
 /// The relay answers HTTP on TCP 4443 (`/announced`, what is announced), which it serves beside
 /// QUIC, as asked from inside the box.
 pub fn relay(the_box: &TestBox) -> Result<()> {
-    let deadline = Instant::now() + START;
-    loop {
-        let asked = the_box.exec(
-            &Pod::Tools.container("tools"),
-            &[
-                "curl",
-                "--silent",
-                "--fail",
-                "--max-time",
-                "2",
-                "http://mic-testbox-relay:4443/announced",
-            ],
-        )?;
-        if asked.status.success() {
-            return Ok(());
-        }
-        if Instant::now() > deadline {
-            return Err(Error::Failed(format!(
-                "the relay didn't answer within {}s: {}",
-                START.as_secs(),
-                String::from_utf8_lossy(&asked.stderr).trim()
-            )));
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    }
+    answers(
+        the_box,
+        "the relay",
+        "http://mic-testbox-relay:4443/announced",
+    )
 }
 
-/// The site serves `version.json`, as asked from inside the box, before any client checks it.
+/// The site serves `version.json`, as asked from inside the box.
 pub fn site(the_box: &TestBox) -> Result<()> {
+    answers(
+        the_box,
+        "the site",
+        "http://mic-testbox-site:8080/version.json",
+    )
+}
+
+/// `url` answers, asked from the tools pod, within [`START`].
+fn answers(the_box: &TestBox, what: &str, url: &str) -> Result<()> {
     let deadline = Instant::now() + START;
     loop {
         let asked = the_box.exec(
             &Pod::Tools.container("tools"),
-            &[
-                "curl",
-                "--silent",
-                "--fail",
-                "--max-time",
-                "2",
-                "http://mic-testbox-site:8080/version.json",
-            ],
+            &["curl", "--silent", "--fail", "--max-time", "2", url],
         )?;
         if asked.status.success() {
             return Ok(());
         }
         if Instant::now() > deadline {
             return Err(Error::Failed(format!(
-                "the site didn't answer within {}s",
-                START.as_secs()
+                "{what} didn't answer within {}s: {}",
+                START.as_secs(),
+                String::from_utf8_lossy(&asked.stderr).trim()
             )));
         }
         std::thread::sleep(Duration::from_millis(100));

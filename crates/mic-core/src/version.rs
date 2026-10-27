@@ -24,8 +24,7 @@ pub struct Published {
 }
 
 /// How this build stands against what's published.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(tag = "status", rename_all = "snake_case")]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Standing {
     /// The latest, or newer (a build from source).
     Latest,
@@ -61,14 +60,16 @@ pub fn standing(current: &str, published: &Published) -> Result<Standing, String
     })
 }
 
-/// Reads `url` (`version.json`) and says how this build stands, within 10 s.
+/// Reads `url` (`version.json`) and says how this build stands, within 10 s. Where to download
+/// it is said as a URL, a path on the site taken against `url`.
 pub async fn check(url: &str) -> Result<Standing, String> {
+    let base = url::Url::parse(url).map_err(|error| format!("{url}: {error}"))?;
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
         .build()
         .map_err(|error| error.to_string())?;
-    let published: Published = client
-        .get(url)
+    let mut published: Published = client
+        .get(base.clone())
         .send()
         .await
         .and_then(reqwest::Response::error_for_status)
@@ -76,6 +77,9 @@ pub async fn check(url: &str) -> Result<Standing, String> {
         .json()
         .await
         .map_err(|error| format!("{url}: {error}"))?;
+    if let Ok(download) = base.join(&published.download) {
+        published.download = download.into();
+    }
     standing(CURRENT, &published)
 }
 

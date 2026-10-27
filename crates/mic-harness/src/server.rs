@@ -85,7 +85,7 @@ impl Harness {
     /// Serves on a socket at `path` (one left there from before is replaced), the owner's only,
     /// until the listener fails. Logs [`LISTENING`] once it listens.
     pub async fn serve(&self, path: &Path) -> std::io::Result<()> {
-        let listener = bind_private(path)?;
+        let listener = mic_core::local::bind_private(path, |at| UnixListener::bind(at))?;
         let _following = Task(tokio::spawn(self.clone().follow()));
         tracing::info!(socket = %path.display(), "{LISTENING}");
         println!("{LISTENING}");
@@ -299,37 +299,6 @@ impl Harness {
             ok: self.inner.app.leave().await,
         }
     }
-}
-
-/// A listener at `path`, never reachable by anyone but the owner: bound inside a directory of
-/// its own, the owner's only, made private there, then moved into place. Binding at `path` and
-/// restricting it after would leave a moment in which anyone who can reach the directory could
-/// connect. The move replaces a socket left at `path` from before.
-fn bind_private(path: &Path) -> std::io::Result<UnixListener> {
-    use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
-    let parent = path.parent().unwrap_or(Path::new("."));
-    let name = path
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let staging = parent.join(format!(".{name}.{}.binding", std::process::id()));
-    // One left by a former process of this id, which can only be ours.
-    match std::fs::remove_dir_all(&staging) {
-        Ok(()) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => return Err(error),
-    }
-    std::fs::DirBuilder::new().mode(0o700).create(&staging)?;
-    let staged = staging.join("socket");
-    let bound = UnixListener::bind(&staged).and_then(|listener| {
-        std::fs::set_permissions(&staged, std::fs::Permissions::from_mode(0o600))?;
-        std::fs::rename(&staged, path)?;
-        Ok(listener)
-    });
-    let removed = std::fs::remove_dir_all(&staging);
-    let listener = bound?;
-    removed?;
-    Ok(listener)
 }
 
 fn reply<T>(id: u64, result: Result<T, String>) -> Reply<T> {

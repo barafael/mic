@@ -5,3 +5,5 @@ main { max-width: 40rem; margin: 0 auto; padding: 2rem 1rem; }
 a { color: var(--accent); }
 .button { display: inline-block; padding: .6rem 1.2rem; border-radius: .4rem; background: var(--accent); color: var(--bg); text-decoration: none; }
 .small { font-size: .875rem; opacity: .8; }
+/* `hidden` wins over a class's display, as the invite page hides its button with it. */
+[hidden] { display: none !important; }

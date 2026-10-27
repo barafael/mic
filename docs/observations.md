@@ -6,6 +6,19 @@ measurements, and things to revisit. Newest first within each milestone. Each sa
 
 ## M7: Invites, version check, site
 
+- **A link joins at once, leaving the call it's in** (open, decide). A link handed to a running
+  mic leaves its room and joins the link's, unmuted with the camera on, without asking: a page
+  that sets `location.href = 'mic://join/…'` (as the invite page does) with the browser's "always
+  open" on moves a user between rooms. A confirmation when already in a call, or keeping mute and
+  camera, would answer it. (review of M7)
+- **The window keeps the whole last profile for a link** (open, minor): only its name is used.
+- **The review of M7** (settled): the link socket was bound before it was made private, fell back
+  to a shared /tmp without `$XDG_RUNTIME_DIR`, took over another mic's live socket, and read
+  without a timeout; `--register` wrote Exec without the relay a link needs to start mic, could
+  wipe an unreadable mimeapps.list, and named an AppImage's temporary mount; the invite page's
+  button showed though `hidden`; version.json could be written empty; the version check ran once,
+  racing the box's site. All fixed in the review's commit.
+
 - **xdg-open's generic mode reads `Exec` naively** (settled). It takes a quoted path's quotes for
   part of the command, finds none, and falls back to a browser; and it looks for a scheme's
   handler only with a `$DISPLAY`. mic's desktop file quotes its path only when it must.

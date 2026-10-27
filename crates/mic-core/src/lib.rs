@@ -10,6 +10,7 @@ pub mod audio;
 pub mod catalog;
 pub mod invite;
 pub mod keys;
+pub mod local;
 pub mod room;
 pub mod roster;
 pub mod secrets;

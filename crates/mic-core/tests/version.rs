@@ -28,7 +28,7 @@ async fn a_newer_version_published_is_said() {
         check(&url).await,
         Ok(Standing::Newer {
             latest: "99.0.0".to_owned(),
-            download: "/#download".to_owned()
+            download: format!("{}/#download", url.trim_end_matches("/version.json"))
         })
     );
 }

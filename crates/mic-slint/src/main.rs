@@ -43,7 +43,8 @@ struct Cli {
     /// The relay, `https://…`.
     #[arg(long, env = "MIC_RELAY", required_unless_present = "register")]
     relay: Option<url::Url>,
-    /// Makes this binary what opens `mic://` links, for this user (Linux), and exits.
+    /// Makes this binary what opens `mic://` links, for this user (Linux), and exits. The
+    /// `--relay`, `--ca` and `--version-url` given with it are what a link starts mic with.
     #[arg(long)]
     register: bool,
     /// A CA's certificate (PEM) that the relay's is trusted by; the system's roots otherwise.
@@ -71,8 +72,8 @@ struct Cli {
     #[cfg(all(unix, feature = "harness"))]
     #[arg(long, value_parser = parse_decoders)]
     decoders: Option<Decoders>,
-    /// An invite to open, `mic://join/…`: as a link opens it, joining under the last name used,
-    /// or filling it in.
+    /// An invite to fill in, `mic://join/…`; handed to a mic already running, which joins it
+    /// under the last name it joined with.
     invite: Option<String>,
 }
 
@@ -84,11 +85,11 @@ fn notice_of(standing: &mic_core::version::Standing) -> Option<String> {
     use mic_core::version::{CURRENT, Standing};
     match standing {
         Standing::Latest => None,
-        Standing::Newer { latest, .. } => Some(format!(
-            "mic {latest} is out; this is {CURRENT}. Download it from the site."
+        Standing::Newer { latest, download } => Some(format!(
+            "mic {latest} is out; this is {CURRENT}. Download it: {download}"
         )),
-        Standing::Incompatible { latest, .. } => Some(format!(
-            "mic {latest} is out, and this {CURRENT} can't join rooms with it. Download it from the site."
+        Standing::Incompatible { latest, download } => Some(format!(
+            "mic {latest} is out, and this {CURRENT} can't join rooms with it. Download it: {download}"
         )),
     }
 }
@@ -112,6 +113,10 @@ fn parse_decoders(text: &str) -> Result<Decoders, String> {
         .map(Decoders)
 }
 
+/// How many times the version check is tried at start, and how long apart.
+const VERSION_TRIES: u32 = 5;
+const VERSION_RETRY: Duration = Duration::from_secs(3);
+
 /// How long leaving may take when the window closes.
 const LEAVING: Duration = Duration::from_secs(5);
 
@@ -122,17 +127,29 @@ fn main() -> ExitCode {
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
         )
         .init();
-    // A link opened while mic runs: the mic already there opens it (links.rs).
-    let arguments: Vec<String> = std::env::args().skip(1).collect();
-    if let [link] = arguments.as_slice()
+    // A link opened while mic runs: the mic already there opens it (links.rs). The link comes
+    // last, after whatever the desktop file passes before it.
+    if let Some(link) = std::env::args().skip(1).last()
         && link.starts_with("mic://")
-        && links::hand_over(link)
+        && links::hand_over(&link)
     {
         return ExitCode::SUCCESS;
     }
     let cli = Cli::parse();
     if cli.register {
-        return match links::register() {
+        // What this mic was started with, so that a link opened when none runs starts one on
+        // the same relay.
+        let mut passed = Vec::new();
+        if let Some(relay) = &cli.relay {
+            passed.extend(["--relay".to_owned(), relay.to_string()]);
+        }
+        if let Some(ca) = &cli.ca {
+            passed.extend(["--ca".to_owned(), ca.to_string_lossy().into_owned()]);
+        }
+        if let Some(url) = &cli.version_url {
+            passed.extend(["--version-url".to_owned(), url.clone()]);
+        }
+        return match links::register(&passed) {
             Ok(said) => {
                 println!("{said}");
                 ExitCode::SUCCESS
@@ -258,9 +275,9 @@ fn run(cli: Cli) -> Result<(), String> {
                 return;
             };
             window.set_invite(link.as_str().into());
-            match app.last_profile() {
-                Some(profile) => window.invoke_join(profile.name.as_str().into(), link.into()),
-                None => window.set_error("Enter your name to join.".into()),
+            // No name yet: the invite waits, filled in, for one.
+            if let Some(profile) = app.last_profile() {
+                window.invoke_join(profile.name.as_str().into(), link.into());
             }
         }
     };
@@ -405,13 +422,20 @@ fn run(cli: Cli) -> Result<(), String> {
         let window = window.as_weak();
         let noticed = notice.clone();
         runtime.spawn(async move {
-            let said = match mic_core::version::check(&url).await {
-                Ok(standing) => notice_of(&standing),
-                Err(error) => {
-                    tracing::info!(%error, "the version check");
-                    None
+            // A few tries: the network, or the site, may come up after mic does.
+            let mut said = None;
+            for attempt in 1..=VERSION_TRIES {
+                match mic_core::version::check(&url).await {
+                    Ok(standing) => {
+                        said = notice_of(&standing);
+                        break;
+                    }
+                    Err(error) => {
+                        tracing::info!(%error, attempt, "the version check");
+                        tokio::time::sleep(VERSION_RETRY).await;
+                    }
                 }
-            };
+            }
             *noticed.lock().unwrap_or_else(PoisonError::into_inner) = said.clone();
             let _shown = window.upgrade_in_event_loop(move |window| {
                 window.set_notice(said.unwrap_or_default().into());
