@@ -184,6 +184,9 @@ pub struct Ui {
     /// The tiles showing their participant's video, by key, as of the last second.
     #[serde(default)]
     pub video: Vec<String>,
+    /// What the window says of the version, if anything: a newer one is out.
+    #[serde(default)]
+    pub notice: Option<String>,
 }
 
 /// What drawing a frontend's video tiles costs, over the last second.

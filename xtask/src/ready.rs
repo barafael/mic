@@ -25,6 +25,7 @@ fn up_line(display: &str) -> &'static str {
 /// Waits until the relay answers, and every display and client is up.
 pub fn all(the_box: &TestBox) -> Result<()> {
     relay(the_box)?;
+    site(the_box)?;
     for display in DISPLAYS {
         display_up(the_box, display)?;
     }
@@ -58,6 +59,34 @@ pub fn relay(the_box: &TestBox) -> Result<()> {
                 "the relay didn't answer within {}s: {}",
                 START.as_secs(),
                 String::from_utf8_lossy(&asked.stderr).trim()
+            )));
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+/// The site serves `version.json`, as asked from inside the box, before any client checks it.
+pub fn site(the_box: &TestBox) -> Result<()> {
+    let deadline = Instant::now() + START;
+    loop {
+        let asked = the_box.exec(
+            &Pod::Tools.container("tools"),
+            &[
+                "curl",
+                "--silent",
+                "--fail",
+                "--max-time",
+                "2",
+                "http://mic-testbox-site:8080/version.json",
+            ],
+        )?;
+        if asked.status.success() {
+            return Ok(());
+        }
+        if Instant::now() > deadline {
+            return Err(Error::Failed(format!(
+                "the site didn't answer within {}s",
+                START.as_secs()
             )));
         }
         std::thread::sleep(Duration::from_millis(100));

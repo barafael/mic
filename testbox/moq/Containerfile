@@ -30,11 +30,12 @@ RUN --mount=type=cache,target=/root/.cargo/registry \
 ARG ARCH
 FROM ${ARCH}
 ARG ARCH_SNAPSHOT
-# libvpx, for the box's forger (testbox/forger), which the tools pod runs and which sends VP9.
+# libvpx, for the box's forger (testbox/forger), which the tools pod runs and which sends VP9;
+# busybox, whose httpd serves the box's site (testbox/pods/site.yaml).
 RUN --mount=type=cache,target=/var/cache/pacman/pkg \
     echo "Server = https://archive.archlinux.org/repos/${ARCH_SNAPSHOT}/\$repo/os/\$arch" \
         > /etc/pacman.d/mirrorlist \
-    && pacman -Syu --noconfirm --needed libvpx
+    && pacman -Syu --noconfirm --needed libvpx busybox
 COPY --from=build /out/ /usr/local/bin/
 
 COPY keys.sh /usr/local/bin/keys

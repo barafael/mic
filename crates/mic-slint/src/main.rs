@@ -10,6 +10,7 @@
 #![deny(clippy::let_underscore_must_use, clippy::let_underscore_untyped)]
 
 mod devices;
+mod links;
 mod videos;
 mod view;
 
@@ -40,11 +41,18 @@ use ui::{AppWindow, Tile};
 #[command(name = "mic", version, about)]
 struct Cli {
     /// The relay, `https://…`.
-    #[arg(long, env = "MIC_RELAY")]
-    relay: url::Url,
+    #[arg(long, env = "MIC_RELAY", required_unless_present = "register")]
+    relay: Option<url::Url>,
+    /// Makes this binary what opens `mic://` links, for this user (Linux), and exits.
+    #[arg(long)]
+    register: bool,
     /// A CA's certificate (PEM) that the relay's is trusted by; the system's roots otherwise.
     #[arg(long)]
     ca: Option<PathBuf>,
+    /// Where to read the latest version from (the site's `version.json`), at start. No check
+    /// without one, until mic has a domain.
+    #[arg(long, env = "MIC_VERSION_URL")]
+    version_url: Option<String>,
     /// Serves the box's harness on a Unix socket here, known by the socket's file name.
     #[cfg(all(unix, feature = "harness"))]
     #[arg(long)]
@@ -63,12 +71,27 @@ struct Cli {
     #[cfg(all(unix, feature = "harness"))]
     #[arg(long, value_parser = parse_decoders)]
     decoders: Option<Decoders>,
-    /// An invite to fill in, `mic://join/…`.
+    /// An invite to open, `mic://join/…`: as a link opens it, joining under the last name used,
+    /// or filling it in.
     invite: Option<String>,
 }
 
 /// What it prints once the window shows: mic-harness's `SHOWN`, which the box waits for.
 const SHOWN: &str = "the window shows";
+
+/// What the window says of how this build stands, if anything.
+fn notice_of(standing: &mic_core::version::Standing) -> Option<String> {
+    use mic_core::version::{CURRENT, Standing};
+    match standing {
+        Standing::Latest => None,
+        Standing::Newer { latest, .. } => Some(format!(
+            "mic {latest} is out; this is {CURRENT}. Download it from the site."
+        )),
+        Standing::Incompatible { latest, .. } => Some(format!(
+            "mic {latest} is out, and this {CURRENT} can't join rooms with it. Download it from the site."
+        )),
+    }
+}
 
 /// Video codecs, as `--decoders` takes them.
 #[cfg(all(unix, feature = "harness"))]
@@ -99,7 +122,27 @@ fn main() -> ExitCode {
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
         )
         .init();
+    // A link opened while mic runs: the mic already there opens it (links.rs).
+    let arguments: Vec<String> = std::env::args().skip(1).collect();
+    if let [link] = arguments.as_slice()
+        && link.starts_with("mic://")
+        && links::hand_over(link)
+    {
+        return ExitCode::SUCCESS;
+    }
     let cli = Cli::parse();
+    if cli.register {
+        return match links::register() {
+            Ok(said) => {
+                println!("{said}");
+                ExitCode::SUCCESS
+            }
+            Err(error) => {
+                eprintln!("mic: {error}");
+                ExitCode::FAILURE
+            }
+        };
+    }
     match run(cli) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
@@ -111,7 +154,7 @@ fn main() -> ExitCode {
 
 fn run(cli: Cli) -> Result<(), String> {
     let runtime = tokio::runtime::Runtime::new().map_err(|error| format!("a runtime: {error}"))?;
-    let mut config = Config::new(cli.relay);
+    let mut config = Config::new(cli.relay.clone().ok_or("no relay: --relay or MIC_RELAY")?);
     if let Some(ca) = cli.ca {
         config.trust = Trust::Roots(vec![ca]);
     }
@@ -150,14 +193,12 @@ fn run(cli: Cli) -> Result<(), String> {
     let gpu = select_backend()?;
     let window = AppWindow::new().map_err(|error| format!("the window: {error}"))?;
     window.set_version(env!("CARGO_PKG_VERSION").into());
-    if let Some(invite) = cli.invite {
-        window.set_invite(invite.into());
-    }
     let tiles = Rc::new(VecModel::<Tile>::default());
     window.set_tiles(ModelRc::from(tiles.clone()));
 
-    // What drawing the tiles costs, for the harness.
+    // What drawing the tiles costs, and the version's notice, for the harness.
     let cost = Arc::new(Mutex::new(videos::Cost::default()));
+    let notice: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
     // What the window shows, told to the harness with its feature, after each change.
     #[cfg_attr(not(all(unix, feature = "harness")), expect(unused_mut))]
     let mut shown: Box<dyn Fn(&View)> = Box::new(|_| {});
@@ -171,6 +212,7 @@ fn run(cli: Cli) -> Result<(), String> {
                 .as_ref()
                 .map(|synthetic| synthetic.analyzer.clone()),
             cost.clone(),
+            notice.clone(),
         );
     }
 
@@ -206,6 +248,38 @@ fn run(cli: Cli) -> Result<(), String> {
             });
         }
     });
+    // A link, handed over by another mic or given at start: joined under the last name used, as
+    // the Join button joins, or filled in for a name.
+    let open = {
+        let window = window.as_weak();
+        let app = app.clone();
+        move |link: String| {
+            let Some(window) = window.upgrade() else {
+                return;
+            };
+            window.set_invite(link.as_str().into());
+            match app.last_profile() {
+                Some(profile) => window.invoke_join(profile.name.as_str().into(), link.into()),
+                None => window.set_error("Enter your name to join.".into()),
+            }
+        }
+    };
+    {
+        let open = open.clone();
+        if let Err(error) = links::listen(move |link| {
+            let open = open.clone();
+            let _opened = slint::invoke_from_event_loop(move || open(link));
+        }) {
+            tracing::warn!(%error, "links opened elsewhere won't reach this window");
+        }
+    }
+    // Kept for as long as the window runs, so it fires once the event loop does.
+    let opening = slint::Timer::default();
+    if let Some(link) = cli.invite.clone() {
+        opening.start(slint::TimerMode::SingleShot, Duration::ZERO, move || {
+            open(link.clone());
+        });
+    }
     window.on_new_room({
         let window = window.as_weak();
         move || {
@@ -319,6 +393,29 @@ fn run(cli: Cli) -> Result<(), String> {
         tracing::debug!(%error, "no rendering notifier");
         shows.start(slint::TimerMode::SingleShot, Duration::ZERO, || {
             println!("{SHOWN}");
+        });
+    }
+
+    // Am I on the latest? Once, at start, said in a notice (D15).
+    if let Some(url) = cli
+        .version_url
+        .clone()
+        .or(mic_core::version::DEFAULT_URL.map(str::to_owned))
+    {
+        let window = window.as_weak();
+        let noticed = notice.clone();
+        runtime.spawn(async move {
+            let said = match mic_core::version::check(&url).await {
+                Ok(standing) => notice_of(&standing),
+                Err(error) => {
+                    tracing::info!(%error, "the version check");
+                    None
+                }
+            };
+            *noticed.lock().unwrap_or_else(PoisonError::into_inner) = said.clone();
+            let _shown = window.upgrade_in_event_loop(move |window| {
+                window.set_notice(said.unwrap_or_default().into());
+            });
         });
     }
 
@@ -536,6 +633,7 @@ mod harness {
         socket: PathBuf,
         hearing: Option<mic_media::audio::Analyzer>,
         cost: Arc<Mutex<crate::videos::Cost>>,
+        notice: Arc<Mutex<Option<String>>>,
     ) -> Box<dyn Fn(&View)> {
         let name = socket
             .file_name()
@@ -548,6 +646,7 @@ mod harness {
             cant_decode: Vec::new(),
             render: None,
             video: Vec::new(),
+            notice: None,
         }));
         let source = ui.clone();
         let harness = Harness::new(
@@ -560,6 +659,10 @@ mod harness {
                     .clone();
                 let cost = cost.lock().unwrap_or_else(PoisonError::into_inner).clone();
                 ui.video = cost.showing.clone();
+                ui.notice = notice
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .clone();
                 ui.render = Some(mic_harness::Render {
                     video_tiles: cost.tiles,
                     pictures: cost.pictures,
@@ -600,6 +703,7 @@ mod harness {
                     .collect(),
                 render: None,
                 video: Vec::new(),
+                notice: None,
             };
             harness.ui_changed();
         })

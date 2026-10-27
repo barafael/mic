@@ -25,6 +25,8 @@
           "--relay", "https://mic-testbox-relay:4443/",
           "--ca", "/keys/ca.pem",
           "--harness", "/run/mic/@NAME@",
+          # The version check, against the box's site, which announces a newer one.
+          "--version-url", "http://mic-testbox-site:8080/version.json",
           # Its voice: a tone of its own and an analyzer for a speaker (xtask's `podman::tone`),
           # or the box's PipeWire devices.
           @VOICE@

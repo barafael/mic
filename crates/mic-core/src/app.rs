@@ -24,6 +24,8 @@ struct Inner {
     client: Client,
     media: Option<MediaFactory>,
     room: watch::Sender<Option<Room>>,
+    /// The profile it last joined with, for a link to join under.
+    last: std::sync::Mutex<Option<Profile>>,
     /// Held through a join or a leave, so two never interleave: a leave can't miss the room a
     /// join is about to put in place.
     changing: Mutex<()>,
@@ -47,6 +49,7 @@ impl App {
                 client,
                 media,
                 room: watch::channel(None).0,
+                last: std::sync::Mutex::new(None),
                 changing: Mutex::new(()),
             }),
         }
@@ -59,6 +62,15 @@ impl App {
     /// The room it's in, kept up to date: none before the first join and after a leave.
     pub fn room(&self) -> watch::Receiver<Option<Room>> {
         self.inner.room.subscribe()
+    }
+
+    /// The profile it last joined a room with, if it has joined one.
+    pub fn last_profile(&self) -> Option<Profile> {
+        self.inner
+            .last
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
     /// The room it's in now, if any.
@@ -77,7 +89,16 @@ impl App {
             .as_ref()
             .map(|media| media())
             .unwrap_or_default();
-        let room = self.inner.client.join_with(invite, profile, media).await?;
+        let room = self
+            .inner
+            .client
+            .join_with(invite, profile.clone(), media)
+            .await?;
+        *self
+            .inner
+            .last
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(profile);
         self.inner.room.send_replace(Some(room.clone()));
         Ok(room)
     }

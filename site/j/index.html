@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Nothing but this page's own files, and no request carries anything of the invite. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<title>Join a room in mic</title>
+<link rel="stylesheet" href="../style.css">
+<script type="module" src="../invite.js"></script>
+</head>
+<body>
+<main>
+  <h1>Join a room</h1>
+  <p id="message">Reading the invite…</p>
+  <p><a id="open" class="button" href="#">Open in mic</a></p>
+  <p>Not installed? <a href="../#download">Download mic</a>, then open this link again.</p>
+  <p class="small">The invite stays in your browser: it's in the part of the link that's never
+  sent to any server, and this page takes it out of the address bar once it's read.</p>
+</main>
+</body>
+</html>
