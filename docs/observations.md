@@ -126,6 +126,41 @@ measurements, and things to revisit. Newest first within each milestone. Each sa
   loops it; `cargo testbox media` and `target/testbox-media/` would only add a step to keep fresh.
   The loop repeats frame numbers every two seconds, which no check counts on.
 
+## The window split up, its animations recorded, fifteen at once
+
+- **No animation set from `init` ever ran** (settled). A tile's fade and growth in, the chat's
+  slide, the menus' pop, the banners' fade, the hand badge and the unread dot all set their flag in
+  `init`, which lands before the first frame: Slint shows the end at once. Recorded frame by frame
+  (below), a newcomer appeared whole. They set it from a 16 ms `Timer` now (`ui/README.md`).
+- **A newcomer landed on the tiles making room for it** (settled): it appeared in its place while
+  the others still moved out of it. It fades in once they've moved (a move's delay); one leaving
+  goes at once.
+- **Opening the chat made the tiles jump** (settled): the grid took any change of its own width
+  for the window being resized, which it follows at once. The room says when the window is
+  resized; the chat's narrowing animates. A screen coming or going moves the grid itself (to the
+  strip, or back), and tiles placed within it flew in from beyond the window: those follow at
+  once, while the stage fades in.
+- **Under the software renderer the reactions were blank** (settled). Asking for Noto Color Emoji
+  by name gives a renderer that draws no colour emoji nothing to draw; `Theme.emoji-font` is empty
+  there (main.rs sets it when wgpu isn't had), and fallback shows what it can.
+- **`app.slint` was 1,660 lines** (settled): split as Slint's examples are (a theme global,
+  `widgets/`, `pages/`, the room's parts in `room/`, `overlays/`), the room's grid, bar and menus
+  components of their own. Every component is exported and loads alone in the preview, with a
+  `…Preview` of sample data where it wants one; `tests/ui.rs` holds both. The invite now starts
+  under the leftmost tile (or the stage's edge), not the window's.
+- **Fifteen windows on one desktop** (settled, by hand): joined through each one's harness, with
+  `--ephemeral` (a hidden harness flag: a device secret in memory, so no keyring fills with test
+  identities). Nine tiles and "+6", a shared screen beside a strip of them, hands and reactions on
+  the small tiles, all as the box's room phase has them. A harness socket's path has to fit a
+  Unix socket's (108 bytes): under `$XDG_RUNTIME_DIR`, not a deep scratch directory. The debug
+  test relay costs six cores under fifteen; run it `--release`.
+- **Recording a window's animation** (settled): in a headless kwin, `ffmpeg -f x11grab
+  -window_id <id>` grabs one window at 30 fps (the root is black there); every few frames side by
+  side show a transition. `slint-viewer --screenshot` renders a preview without a window.
+- **The WebSocket fallback, by hand** (open, the box has it): the client falls back only when UDP
+  is blocked, which on a desktop takes root's firewall or a network namespace, and the test relay
+  serves no WebSocket. The box's network phase blocks UDP in alice's pod and checks she's heard.
+
 ## Window polish after M8, on a real desktop
 
 Found by driving five windows on KDE Plasma 6 (Wayland, GPU renderer), after the headless review;

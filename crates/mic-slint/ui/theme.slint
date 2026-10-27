@@ -1,0 +1,55 @@
+// The window's colours and timings: dark, as a call's video wants around it.
+export global Theme {
+    out property <color> canvas: #0f1115;
+    out property <color> surface: #181b21;
+    out property <color> raised: #262a33;
+    out property <color> raised-hover: #313642;
+    out property <color> line: #2c313b;
+    out property <color> tile: #1e2128;
+    out property <color> text: #eef0f4;
+    out property <color> text-dim: #9aa1ad;
+    out property <color> accent: #4c8dff;
+    out property <color> accent-hover: #6aa0ff;
+    out property <color> danger: #e5484d;
+    out property <color> danger-hover: #f0646a;
+    out property <color> warn: #f5b041;
+    out property <duration> quick: 120ms;
+    out property <duration> moving: 260ms;
+    // The font emoji ask for by name, as fallback takes a monochrome one first for some; none
+    // under the software renderer, which draws no colour emoji (main.rs sets it).
+    in-out property <string> emoji-font: "Noto Color Emoji";
+}
+
+// The colours, for the preview.
+export component ThemePreview inherits Rectangle {
+    width: 560px;
+    height: 120px;
+    background: Theme.canvas;
+    HorizontalLayout {
+        padding: 16px;
+        spacing: 8px;
+        for swatch in [
+            { name: "surface", color: Theme.surface },
+            { name: "raised", color: Theme.raised },
+            { name: "tile", color: Theme.tile },
+            { name: "line", color: Theme.line },
+            { name: "accent", color: Theme.accent },
+            { name: "danger", color: Theme.danger },
+            { name: "warn", color: Theme.warn },
+            { name: "text-dim", color: Theme.text-dim },
+        ]: VerticalLayout {
+            spacing: 6px;
+            Rectangle {
+                height: 48px;
+                border-radius: 8px;
+                background: swatch.color;
+            }
+            Text {
+                text: swatch.name;
+                color: Theme.text;
+                font-size: 11px;
+                horizontal-alignment: center;
+            }
+        }
+    }
+}

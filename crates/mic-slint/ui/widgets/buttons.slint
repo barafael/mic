@@ -1,0 +1,134 @@
+import { Palette, Spinner } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { Icon } from "icon.slint";
+import { Tip } from "tip.slint";
+
+// A round control of the room's bar: the microphone, the camera, leaving.
+export component RoundButton inherits Rectangle {
+    in property <string> icon;
+    // A toggle that's off, as a muted microphone: red, so it's seen at a glance.
+    in property <bool> off;
+    in property <bool> danger;
+    in property <bool> enabled: true;
+    in property <string> label;
+    // A toggle that's on, as a raised hand: in `lit-tint`.
+    in property <bool> lit;
+    in property <color> lit-tint: Theme.accent;
+    // Smaller in a narrow window's bar.
+    in property <length> size: 48px;
+    // The tip ends at the button's right edge, not past the window's, for the bar's last ones.
+    in property <bool> tip-end;
+    callback clicked;
+    width: root.size;
+    height: root.size;
+    border-radius: self.width / 2;
+    background: !root.enabled ? Theme.raised.transparentize(0.5)
+        : root.danger || root.off ? (touch.has-hover ? Theme.danger-hover : Theme.danger)
+        : root.lit ? (touch.has-hover ? root.lit-tint.brighter(0.15) : root.lit-tint)
+        : touch.has-hover ? Theme.raised-hover : Theme.raised;
+    animate background { duration: Theme.quick; }
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-enabled: root.enabled;
+    accessible-action-default => {
+        root.clicked();
+    }
+    Icon {
+        kind: root.icon;
+        tint: root.enabled ? Theme.text : Theme.text-dim;
+        width: root.danger ? 24px : 20px;
+        height: self.width;
+    }
+    touch := TouchArea {
+        mouse-cursor: root.enabled ? pointer : default;
+        clicked => {
+            if (root.enabled) {
+                root.clicked();
+            }
+        }
+    }
+    if touch.has-hover && root.label != "": Tip {
+        text: root.label;
+        x: root.tip-end ? root.width - self.width : (root.width - self.width) / 2;
+        y: -self.height - 8px;
+    }
+}
+
+// A wide button: Join, a new room, the overlay's answers.
+export component PillButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> primary;
+    in property <bool> enabled: true;
+    in property <bool> busy;
+    callback clicked;
+    height: 40px;
+    min-width: label.preferred-width + 32px;
+    border-radius: 8px;
+    background: !root.enabled ? Theme.raised.transparentize(0.4)
+        : root.primary ? (touch.has-hover ? Theme.accent-hover : Theme.accent)
+        : touch.has-hover ? Theme.raised-hover : Theme.raised;
+    animate background { duration: Theme.quick; }
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-enabled: root.enabled;
+    accessible-action-default => {
+        root.clicked();
+    }
+    HorizontalLayout {
+        alignment: center;
+        spacing: 8px;
+        if root.busy: Spinner {
+            indeterminate: true;
+            width: 18px;
+            height: 18px;
+            y: (parent.height - self.height) / 2;
+        }
+        label := Text {
+            text: root.text;
+            color: root.enabled ? (root.primary ? white : Theme.text) : Theme.text-dim;
+            font-size: 14px;
+            font-weight: 600;
+            vertical-alignment: center;
+        }
+    }
+    touch := TouchArea {
+        mouse-cursor: root.enabled ? pointer : default;
+        clicked => {
+            if (root.enabled) {
+                root.clicked();
+            }
+        }
+    }
+}
+
+// The buttons in their states, for the preview.
+export component ButtonsPreview inherits Rectangle {
+    // Dark, as the window sets it (app.slint).
+    init => {
+        Palette.color-scheme = ColorScheme.dark;
+    }
+    background: Theme.canvas;
+    width: 520px;
+    height: 160px;
+    VerticalLayout {
+        padding: 24px;
+        spacing: 16px;
+        HorizontalLayout {
+            spacing: 12px;
+            alignment: start;
+            RoundButton { icon: "mic"; }
+            RoundButton { icon: "mic-off"; off: true; }
+            RoundButton { icon: "camera-off"; enabled: false; }
+            RoundButton { icon: "hand"; lit: true; lit-tint: Theme.warn; }
+            RoundButton { icon: "more"; size: 40px; }
+            RoundButton { icon: "leave"; danger: true; width: 64px; }
+        }
+        HorizontalLayout {
+            spacing: 12px;
+            alignment: start;
+            PillButton { text: "Join"; primary: true; }
+            PillButton { text: "Joining…"; primary: true; busy: true; enabled: false; }
+            PillButton { text: "Start a new room"; }
+        }
+    }
+}

@@ -1,0 +1,239 @@
+import { Theme } from "../theme.slint";
+import { Icon } from "../widgets/icon.slint";
+import { Tip } from "../widgets/tip.slint";
+import { RoundButton } from "../widgets/buttons.slint";
+
+// The room's bar: the invite on the left, under the leftmost tile, the controls in the middle. A
+// narrow one has smaller buttons, and More for the hand, the screen, recording, reactions and the
+// invite.
+export component Bar inherits HorizontalLayout {
+    in property <bool> compact;
+    in property <bool> muted;
+    in property <bool> camera-off;
+    in property <bool> has-camera;
+    in property <bool> hand;
+    in property <bool> sharing;
+    in property <bool> share-opening;
+    in property <bool> recording-self;
+    in property <bool> chat-open;
+    // Messages came while the chat was closed.
+    in property <bool> unread;
+    // The menu open over it: "react", "more", or none.
+    in property <string> menu;
+    in property <bool> copied;
+    // Where the invite starts, from the bar's left: under the leftmost tile, as far as it fits.
+    in property <length> copy-x;
+    // The tiles move at once, as a window being resized is followed: the invite does too.
+    in property <bool> copy-follows;
+    callback copy-invite();
+    callback toggle-mute();
+    callback toggle-camera();
+    callback toggle-hand();
+    callback toggle-share();
+    callback toggle-recording();
+    callback toggle-chat();
+    callback leave();
+    // Opens `menu` over the button it came from, whose middle is at `x` across the window.
+    callback open-menu(string, length);
+    height: 56px;
+    spacing: root.compact ? 8px : 12px;
+    Rectangle {
+        horizontal-stretch: 1;
+        if !root.compact: copy := Rectangle {
+            property <bool> wide: parent.width >= 140px;
+            x: Math.max(0px, Math.min(root.copy-x, parent.width - self.width));
+            animate x {
+                duration: root.copy-follows ? 0ms : Theme.moving;
+                easing: ease-in-out;
+            }
+            width: self.wide ? copy-row.preferred-width : 40px;
+            height: 40px;
+            border-radius: 20px;
+            background: copy-touch.has-hover ? Theme.raised-hover : Theme.raised;
+            animate background { duration: Theme.quick; }
+            accessible-role: button;
+            accessible-label: "Copy the room's invite";
+            accessible-action-default => {
+                root.copy-invite();
+            }
+            copy-row := HorizontalLayout {
+                padding-left: copy.wide ? 12px : 10px;
+                padding-right: copy.wide ? 14px : 10px;
+                spacing: 8px;
+                alignment: start;
+                Icon {
+                    kind: root.copied ? "check" : "copy";
+                    tint: root.copied ? #5fd38d : Theme.text;
+                    y: (parent.height - self.height) / 2;
+                }
+                if copy.wide: Text {
+                    text: root.copied ? "Copied" : "Copy invite";
+                    color: Theme.text;
+                    font-size: 13px;
+                    vertical-alignment: center;
+                }
+            }
+            copy-touch := TouchArea {
+                mouse-cursor: pointer;
+                clicked => {
+                    root.copy-invite();
+                }
+            }
+            if copy-touch.has-hover && !copy.wide: Tip {
+                text: "Copy invite";
+                y: -self.height - 8px;
+            }
+        }
+    }
+    HorizontalLayout {
+        horizontal-stretch: 0;
+        spacing: root.compact ? 8px : 12px;
+        alignment: center;
+        padding-top: root.compact ? 8px : 4px;
+        padding-bottom: root.compact ? 8px : 4px;
+        RoundButton {
+            size: root.compact ? 40px : 48px;
+            icon: root.muted ? "mic-off" : "mic";
+            off: root.muted;
+            label: root.muted ? "Unmute (Ctrl+D)" : "Mute (Ctrl+D)";
+            clicked => {
+                root.toggle-mute();
+            }
+        }
+        RoundButton {
+            size: root.compact ? 40px : 48px;
+            icon: root.camera-off || !root.has-camera ? "camera-off" : "camera";
+            off: root.camera-off && root.has-camera;
+            enabled: root.has-camera;
+            label: !root.has-camera ? "No camera" : root.camera-off ? "Turn the camera on (Ctrl+E)" : "Turn the camera off (Ctrl+E)";
+            clicked => {
+                root.toggle-camera();
+            }
+        }
+        if !root.compact: RoundButton {
+            icon: "hand";
+            lit: root.hand;
+            lit-tint: Theme.warn;
+            label: root.hand ? "Lower your hand (Ctrl+Alt+H)" : "Raise your hand (Ctrl+Alt+H)";
+            clicked => {
+                root.toggle-hand();
+            }
+        }
+        if !root.compact: RoundButton {
+            icon: "screen";
+            lit: root.sharing || root.share-opening;
+            label: root.sharing ? "Stop sharing your screen" : root.share-opening ? "Cancel sharing" : "Share your screen";
+            clicked => {
+                root.toggle-share();
+            }
+        }
+        if !root.compact: RoundButton {
+            icon: "record";
+            lit: root.recording-self;
+            lit-tint: Theme.danger;
+            label: root.recording-self ? "Stop recording" : "Record the call";
+            clicked => {
+                root.toggle-recording();
+            }
+        }
+        if !root.compact: RoundButton {
+            icon: "smile";
+            lit: root.menu == "react";
+            label: root.menu == "react" ? "" : "React";
+            clicked => {
+                root.open-menu("react", self.absolute-position.x + self.width / 2);
+            }
+        }
+        RoundButton {
+            size: root.compact ? 40px : 48px;
+            icon: "chat";
+            tip-end: root.compact;
+            label: root.chat-open ? "Close the chat (Ctrl+Alt+C)" : "Chat (Ctrl+Alt+C)";
+            lit: root.chat-open;
+            clicked => {
+                root.toggle-chat();
+            }
+            if root.unread: dot := Rectangle {
+                property <bool> born;
+                // Set after the first frame: one set in `init` comes before it, and isn't animated.
+                Timer {
+                    interval: 16ms;
+                    running: !dot.born;
+                    triggered => {
+                        dot.born = true;
+                    }
+                }
+                x: parent.width - 14px;
+                y: 2px;
+                width: 12px;
+                height: 12px;
+                border-radius: 6px;
+                background: Theme.accent;
+                transform-scale: self.born ? 1 : 0.2;
+                animate transform-scale {
+                    duration: 240ms;
+                    easing: cubic-bezier(0.34, 1.56, 0.64, 1);
+                }
+            }
+        }
+        if root.compact: RoundButton {
+            size: 40px;
+            icon: "more";
+            tip-end: true;
+            lit: root.menu != "";
+            label: root.menu != "" ? "" : "More";
+            clicked => {
+                root.open-menu("more", self.absolute-position.x + self.width / 2);
+            }
+            // A raised hand, a share or a recording stays in sight.
+            if root.hand || root.sharing || root.recording-self: Rectangle {
+                x: parent.width - 12px;
+                y: 0px;
+                width: 12px;
+                height: 12px;
+                border-radius: 6px;
+                background: root.recording-self ? Theme.danger : root.hand ? Theme.warn : Theme.accent;
+            }
+        }
+        RoundButton {
+            size: root.compact ? 40px : 48px;
+            icon: "leave";
+            danger: true;
+            tip-end: true;
+            width: root.compact ? 56px : 64px;
+            label: "Leave";
+            clicked => {
+                root.leave();
+            }
+        }
+    }
+    Rectangle {
+        horizontal-stretch: 1;
+    }
+}
+
+// The bar wide and narrow, for the preview.
+export component BarPreview inherits Rectangle {
+    background: Theme.canvas;
+    width: 900px;
+    height: 150px;
+    VerticalLayout {
+        padding: 12px;
+        spacing: 16px;
+        Bar {
+            has-camera: true;
+            hand: true;
+            unread: true;
+            copy-x: 40px;
+        }
+        HorizontalLayout {
+            alignment: start;
+            Bar {
+                width: 360px;
+                compact: true;
+                muted: true;
+                sharing: true;
+            }
+        }
+    }
+}
