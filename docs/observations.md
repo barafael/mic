@@ -6,6 +6,16 @@ measurements, and things to revisit. Newest first within each milestone. Each sa
 
 ## M6: Video (VP9)
 
+- **VP9 on VA-API is deferred** (open, upstream). moq-vaapi has no VP9 decoder (the plan's
+  unverified point), and ChromeOS's `cros-codecs`, which has one in Rust, doesn't build here:
+  its binding `cros-libva` 0.0.12, from crates.io and from git `main` alike, misses fields
+  newer libva headers add (`seg_id_block_size`, `va_reserved8` in
+  `VAEncPictureParameterBufferVP9`). Writing a VA-API VP9 decoder (uncompressed header,
+  reference frames) is the upstream work the plan named, more than a commit. Software decoding
+  is cheap at these sizes (29% of a core with 7 cameras); hardware decoding matters for the
+  40-participant rooms of M8. Also: a VA-API decoder outside moq-video couldn't hand mic-render a
+  DMA-BUF, since `moq_video::DmaBuf::new` is the crate's own. (commit 37, deferred)
+
 - **Nine tiles in the box cost 29% of a core** (settled, measured 2026-10-27). Alice's mic was
   decoding 7 VP9 cameras at 640x360 and 15 fps, encoding her own, running both voices, and
   drawing 9 tiles. It drew 102 to 110 pictures a second, each in 0.11 to 0.15 ms, with Slint's

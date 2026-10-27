@@ -474,7 +474,10 @@ Each numbered item below is about one commit. Box phases are in **bold**.
     design doc. *Done* (§5.10).
 37. `mic-media: VP9 decode on VA-API` where the GPU has it, through a VP9 decoder for
     `moq-video`'s `moq-vaapi`, offered upstream **⚠ unverified**. **`video`** runs on VA-API
-    and, with `--no-gpu`, in software.
+    and, with `--no-gpu`, in software. *Deferred:* no VA-API VP9 decoder to use (moq-vaapi has
+    none; `cros-codecs` doesn't build against current libva), and writing one is upstream work;
+    software decoding holds at these sizes. Revisit before M8's large rooms
+    (docs/observations.md).
 38. `mic-core, mic-slint: camera off`. **`video`**: the tile falls back to the name.
 
 Upstreaming codec work to `moq-video` happens alongside, from the branches these commits come
