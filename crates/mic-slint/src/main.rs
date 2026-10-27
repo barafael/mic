@@ -10,11 +10,13 @@
 #![deny(clippy::let_underscore_must_use, clippy::let_underscore_untyped)]
 
 mod devices;
+mod videos;
 mod view;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::rc::Rc;
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use clap::Parser;
@@ -145,7 +147,7 @@ fn run(cli: Cli) -> Result<(), String> {
         None => App::new(client),
     };
 
-    select_backend()?;
+    let gpu = select_backend()?;
     let window = AppWindow::new().map_err(|error| format!("the window: {error}"))?;
     window.set_version(env!("CARGO_PKG_VERSION").into());
     if let Some(invite) = cli.invite {
@@ -154,6 +156,8 @@ fn run(cli: Cli) -> Result<(), String> {
     let tiles = Rc::new(VecModel::<Tile>::default());
     window.set_tiles(ModelRc::from(tiles.clone()));
 
+    // What drawing the tiles costs, for the harness.
+    let cost = Arc::new(Mutex::new(videos::Cost::default()));
     // What the window shows, told to the harness with its feature, after each change.
     #[cfg_attr(not(all(unix, feature = "harness")), expect(unused_mut))]
     let mut shown: Box<dyn Fn(&View)> = Box::new(|_| {});
@@ -166,6 +170,7 @@ fn run(cli: Cli) -> Result<(), String> {
             synthetic
                 .as_ref()
                 .map(|synthetic| synthetic.analyzer.clone()),
+            cost.clone(),
         );
     }
 
@@ -240,6 +245,7 @@ fn run(cli: Cli) -> Result<(), String> {
     // tokio's watch needs no tokio runtime: Slint's executor awaits it on the window's thread.
     let _following = slint::spawn_local({
         let window = window.as_weak();
+        let tiles = tiles.clone();
         async move {
             let mut last = None;
             loop {
@@ -270,15 +276,41 @@ fn run(cli: Cli) -> Result<(), String> {
     // tells of no frames, so there it's said once the event loop runs.
     let mut drawn = false;
     let shows = slint::Timer::default();
-    if let Err(error) = window.window().set_rendering_notifier(move |state, _| {
-        if !drawn && matches!(state, slint::RenderingState::AfterRendering) {
-            drawn = true;
-            println!("{SHOWN}");
-        }
-    }) {
+    let frames = Arc::new(Mutex::new(videos::Frames::default()));
+    let mut building = None;
+    let timed = frames.clone();
+    if let Err(error) = window
+        .window()
+        .set_rendering_notifier(move |state, _| match state {
+            slint::RenderingState::BeforeRendering => building = Some(std::time::Instant::now()),
+            slint::RenderingState::AfterRendering => {
+                if let Some(started) = building.take() {
+                    timed
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .add(started.elapsed());
+                }
+                if !drawn {
+                    drawn = true;
+                    println!("{SHOWN}");
+                }
+            }
+            _ => {}
+        })
+    {
         tracing::debug!(%error, "no rendering notifier");
         shows.start(slint::TimerMode::SingleShot, Duration::ZERO, || {
             println!("{SHOWN}");
+        });
+    }
+
+    // The tiles' video, drawn on the window's thread as pictures come.
+    let looking = slint::Timer::default();
+    {
+        let mut videos = videos::Videos::new(gpu, frames, cost.clone());
+        let (app, tiles) = (app.clone(), tiles.clone());
+        looking.start(slint::TimerMode::Repeated, videos::LOOK, move || {
+            videos.look(&app, &tiles);
         });
     }
 
@@ -295,20 +327,52 @@ fn run(cli: Cli) -> Result<(), String> {
     Ok(())
 }
 
-/// wgpu, as video tiles will need (spikes/video-tiles); Slint's software renderer where there's
-/// no adapter for it.
-fn select_backend() -> Result<(), String> {
-    match slint::BackendSelector::new()
-        .require_wgpu_30(slint::wgpu_30::WGPUConfiguration::default())
-        .select()
-    {
-        Ok(()) => Ok(()),
+/// wgpu, on a device of our own that Slint is handed (`WGPUConfiguration::Manual`, as the spike
+/// did), so the tiles' video is drawn on it; Slint's software renderer where there's no adapter
+/// for it, and the tiles' video comes from the CPU. Vulkan, Metal or DX12: mic-render's renderer
+/// doesn't run on OpenGL. DMA-BUF import is asked for where the adapter has it, for hardware
+/// decoding to come (PLAN.md, commit 37).
+fn select_backend() -> Result<Option<videos::Gpu>, String> {
+    use slint::wgpu_30::wgpu;
+    let gpu = (|| {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::PRIMARY,
+            ..wgpu::InstanceDescriptor::new_without_display_handle()
+        });
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            ..Default::default()
+        }))
+        .map_err(|error| error.to_string())?;
+        let features = adapter.features() & wgpu::Features::VULKAN_EXTERNAL_MEMORY_DMA_BUF;
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            label: Some("mic"),
+            required_features: features,
+            required_limits: adapter.limits(),
+            ..Default::default()
+        }))
+        .map_err(|error| error.to_string())?;
+        tracing::info!(adapter = %adapter.get_info().name, "the window renders with wgpu");
+        slint::BackendSelector::new()
+            .require_wgpu_30(slint::wgpu_30::WGPUConfiguration::Manual {
+                instance,
+                adapter,
+                device: device.clone(),
+                queue: queue.clone(),
+            })
+            .select()
+            .map_err(|error| error.to_string())?;
+        Ok::<_, String>(videos::Gpu { device, queue })
+    })();
+    match gpu {
+        Ok(gpu) => Ok(Some(gpu)),
         Err(error) => {
             tracing::warn!(%error, "no wgpu: the software renderer draws the window");
             slint::BackendSelector::new()
                 .renderer_name("software".to_owned())
                 .select()
-                .map_err(|error| format!("no renderer: {error}"))
+                .map_err(|error| format!("no renderer: {error}"))?;
+            Ok(None)
         }
     }
 }
@@ -329,10 +393,20 @@ fn apply(
     window.set_status(view.status.as_str().into());
     window.set_warning(view.warning.as_str().into());
     window.set_muted(view.muted);
+    // A tile's video stays with its participant while the roster changes around it.
+    let video_of = |key: &str| {
+        tiles
+            .iter()
+            .find(|row| row.key == key)
+            .map(|row| (row.video, row.has_video))
+            .unwrap_or_default()
+    };
     let rows: Vec<Tile> = view
         .tiles
         .iter()
         .map(|tile| Tile {
+            video: video_of(&tile.key).0,
+            has_video: video_of(&tile.key).1,
             key: tile.key.as_str().into(),
             name: tile.name.as_str().into(),
             me: tile.me,
@@ -345,7 +419,11 @@ fn apply(
                 .into(),
         })
         .collect();
-    if tiles.iter().ne(rows.iter().cloned()) {
+    let unchanged = |a: &Tile, b: &Tile| {
+        (&a.key, &a.name, a.me, a.muted, &a.cant_decode)
+            == (&b.key, &b.name, b.me, b.muted, &b.cant_decode)
+    };
+    if tiles.row_count() != rows.len() || tiles.iter().zip(&rows).any(|(a, b)| !unchanged(&a, b)) {
         tiles.set_vec(rows);
     }
     if view.screen == Screen::Room {
@@ -437,6 +515,7 @@ mod harness {
         app: App,
         socket: PathBuf,
         hearing: Option<mic_media::audio::Analyzer>,
+        cost: Arc<Mutex<crate::videos::Cost>>,
     ) -> Box<dyn Fn(&View)> {
         let name = socket
             .file_name()
@@ -447,16 +526,25 @@ mod harness {
             tiles: Vec::new(),
             muted: Vec::new(),
             cant_decode: Vec::new(),
+            render: None,
         }));
         let source = ui.clone();
         let harness = Harness::new(
             app,
             &name,
             Some(Arc::new(move || {
-                source
+                let mut ui = source
                     .lock()
                     .unwrap_or_else(PoisonError::into_inner)
-                    .clone()
+                    .clone();
+                let cost = *cost.lock().unwrap_or_else(PoisonError::into_inner);
+                ui.render = Some(mic_harness::Render {
+                    video_tiles: cost.tiles,
+                    pictures: cost.pictures,
+                    draw_ms: cost.draw_ms,
+                    frame_ms: cost.frame_ms,
+                });
+                ui
             })),
         );
         let harness = match hearing {
@@ -488,6 +576,7 @@ mod harness {
                     .filter(|tile| tile.cant_decode.is_some())
                     .map(|tile| tile.key.clone())
                     .collect(),
+                render: None,
             };
             harness.ui_changed();
         })

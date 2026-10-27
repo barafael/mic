@@ -12,13 +12,23 @@ export struct Tile {
     muted: bool,
     // The codec of its camera, when this client can't decode it; empty otherwise.
     cant-decode: string,
+    // Its camera's latest picture, once there's one.
+    video: image,
+    has-video: bool,
 }
 
 component NameTile inherits Rectangle {
     in property <Tile> tile;
     background: tile.me ? #2b4a6b : #3a3a44;
     border-radius: 8px;
-    Text {
+    clip: true;
+    if tile.has-video: Image {
+        width: parent.width;
+        height: parent.height;
+        source: tile.video;
+        image-fit: contain;
+    }
+    if !tile.has-video: Text {
         text: tile.me ? tile.name + " (you)" : tile.name;
         color: white;
         font-size: 20px;
@@ -26,6 +36,20 @@ component NameTile inherits Rectangle {
         vertical-alignment: center;
         wrap: word-wrap;
         width: parent.width - 16px;
+    }
+    // With video, the name in a corner, over it.
+    if tile.has-video: Rectangle {
+        x: 6px;
+        y: 6px;
+        width: label.preferred-width + 12px;
+        height: label.preferred-height + 6px;
+        background: #000000a0;
+        border-radius: 4px;
+        label := Text {
+            text: tile.name;
+            color: white;
+            font-size: 14px;
+        }
     }
     if tile.cant-decode != "": Text {
         y: parent.height / 2 + 20px;

@@ -6,6 +6,15 @@ measurements, and things to revisit. Newest first within each milestone. Each sa
 
 ## M6: Video (VP9)
 
+- **Nine tiles in the box cost 29% of a core** (settled, measured 2026-10-27). Alice's mic was
+  decoding 7 VP9 cameras at 640x360 and 15 fps, encoding her own, running both voices, and
+  drawing 9 tiles. It drew 102 to 110 pictures a second, each in 0.11 to 0.15 ms, with Slint's
+  frame at 3.4 to 4.0 ms, on RADV. The spike's 18% was drawing only, at 720p, without decoding.
+  (commit 35, the `video` phase's `render.txt`)
+- **The tiles draw on the window's own device** (settled): mic makes the Vulkan device and hands
+  it to Slint (`WGPUConfiguration::Manual`), asking for DMA-BUF import where there is any, for
+  VA-API to come. Without wgpu, the software renderer and mic-render's CPU path. (commit 35)
+
 - **moq-video's renderer needs view formats, which wgpu's GL backend lacks** (upstream, to
   report). On OpenGL (llvmpipe here) its output texture fails validation (`VIEW_FORMATS`). mic
   renders on Vulkan, Metal or DX12, so `mic-render`'s test asks for those; a GL-only machine would

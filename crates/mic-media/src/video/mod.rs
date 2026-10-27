@@ -14,7 +14,7 @@ pub mod vp9;
 use derive_more::{Display, Error};
 use serde::{Deserialize, Serialize};
 
-pub use pattern::{Pattern, PatternCamera, read_pattern};
+pub use pattern::{BACKGROUND, Pattern, PatternCamera, read_pattern, tint};
 
 /// A video codec, as catalogs name it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]

@@ -50,10 +50,11 @@ pub fn testbox(checks: &mut Checks, the_box: &TestBox) -> Result<()> {
         "every binary from the builder finds its libraries in the client image",
         || libraries_found(the_box, "client", None),
     );
-    // The forger runs in the tools pod, of the moq image, not the client image.
-    checks.record("the forger finds its libraries in the tools image", || {
-        libraries_found(the_box, "moq", Some(&["forger"]))
-    });
+    // The forger and the crowd a check starts run in the tools pod, of the moq image.
+    checks.record(
+        "the forger and crowd find their libraries in the tools image",
+        || libraries_found(the_box, "moq", Some(&["forger", "mic-crowd"])),
+    );
     let client = "probe";
     let gpu = has_gpu(the_box, client)?;
     let expected = if gpu { "RADV" } else { "llvmpipe" };

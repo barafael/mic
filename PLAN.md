@@ -467,7 +467,9 @@ Each numbered item below is about one commit. Box phases are in **bold**.
     Not on OpenGL, which lacks the view formats the renderer wants.
 35. `mic-slint: tiles render video` through `mic-render` on Slint's device. **`video`**: pixels in
     each tile of the display's `shot` match the sender's pattern, and render cost per frame with
-    9 tiles is recorded, as the spike measured it.
+    9 tiles is recorded, as the spike measured it. *Done:* the window makes its own Vulkan
+    device and hands it to Slint; a crowd of six in the tools pod fills nine tiles; alice uses
+    29% of a core for it all (docs/observations.md).
 36. `spikes: remove video-tiles`. The box now measures what it measured; its numbers move to the
     design doc.
 37. `mic-media: VP9 decode on VA-API` where the GPU has it, through a VP9 decoder for

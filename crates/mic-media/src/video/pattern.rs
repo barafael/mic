@@ -56,7 +56,7 @@ impl Pattern {
                 } else if column.abs_diff(bar) < block / 2 {
                     WHITE
                 } else {
-                    110
+                    BACKGROUND
                 };
             }
         }
@@ -64,8 +64,12 @@ impl Pattern {
     }
 }
 
-/// The sender's colour, as U and V: one of eight, apart.
-fn tint(sender: u8) -> (u8, u8) {
+/// The luma of the pattern's background, below its rows of blocks.
+pub const BACKGROUND: u8 = 110;
+
+/// The sender's colour, as U and V: one of eight, apart. With [`BACKGROUND`], what most of its
+/// picture is, which a check looks for in a screenshot.
+pub fn tint(sender: u8) -> (u8, u8) {
     let angle = f64::from(sender % 8) * std::f64::consts::TAU / 8.0;
     (
         (128.0 + 60.0 * angle.cos()) as u8,

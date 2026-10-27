@@ -166,7 +166,7 @@ pub struct Snapshot {
 
 /// What a frontend shows, as it fills it in: enough for a check to compare with the core's
 /// state, whatever the toolkit.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Ui {
     /// The screen showing: `join`, `room`, …
     pub screen: String,
@@ -178,6 +178,22 @@ pub struct Ui {
     /// The tiles that say they can't show their participant's video, by key.
     #[serde(default)]
     pub cant_decode: Vec<String>,
+    /// What drawing the tiles' video costs, over the last second, if the frontend says.
+    #[serde(default)]
+    pub render: Option<Render>,
+}
+
+/// What drawing a frontend's video tiles costs, over the last second.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Render {
+    /// Tiles showing video.
+    pub video_tiles: u32,
+    /// Pictures drawn a second, all tiles together.
+    pub pictures: f64,
+    /// Drawing one into its tile, on average, in ms.
+    pub draw_ms: f64,
+    /// The window's frame, on average, in ms, if the renderer says.
+    pub frame_ms: Option<f64>,
 }
 
 /// Pushed to a subscriber on every change of what it shows.
