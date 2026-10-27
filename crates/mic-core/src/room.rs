@@ -97,6 +97,8 @@ struct Shared {
     runtime: tokio::runtime::Handle,
     /// What the others' cameras show.
     board: crate::video::Board,
+    /// What this participant's camera sends, if it sends one.
+    preview: Option<crate::video::Pictures>,
 }
 
 /// What a handle asks of the room's task.
@@ -127,6 +129,8 @@ pub(crate) struct Joined {
     pub voice: Option<tokio::task::JoinHandle<()>>,
     /// Sends its camera, if it has one.
     pub camera: Option<tokio::task::JoinHandle<()>>,
+    /// What its camera sends, if it sends one.
+    pub preview: Option<crate::video::Pictures>,
     /// Whether the voice is muted, which it follows.
     pub muted: watch::Sender<bool>,
     /// Whether the camera is on, which it follows.
@@ -166,6 +170,7 @@ impl Room {
             origin: joined.origin.consume(),
             runtime: joined.runtime.clone(),
             board: crate::video::Board::default(),
+            preview: joined.preview,
         });
         let (roster, followed) = watch::channel(Roster::default());
         let peers = Peers::new(joined.crypto.clone(), joined.path, joined.origin.consume());
@@ -263,6 +268,13 @@ impl Room {
     /// camera this client can't decode or a participant with none.
     pub fn video(&self, whose: ParticipantKey) -> crate::video::Pictures {
         self.shared.board.pictures(whose)
+    }
+
+    /// This participant's own camera's pictures, as they're sent, before they're encoded: its own
+    /// tile shows them. None without a camera that's sent. While the camera is off they keep
+    /// coming; a frontend shows its name instead.
+    pub fn preview(&self) -> Option<crate::video::Pictures> {
+        self.shared.preview.clone()
     }
 
     /// How many of `whose` camera's pictures were decoded.

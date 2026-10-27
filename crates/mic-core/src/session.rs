@@ -238,6 +238,7 @@ impl Inner {
         // since one who decodes none of ours is left out; with a second codec, the choice follows
         // the roster as it changes.
         let (camera_on, camera_follows) = tokio::sync::watch::channel(true);
+        let preview = media.camera.clone();
         let camera = match (
             media.camera,
             mic_media::video::choose(&mic_media::video::Codec::ALL, std::iter::empty()),
@@ -249,6 +250,8 @@ impl Inner {
             ))),
             _ => None,
         };
+        // What it sends, for its own tile: only a camera that's sent.
+        let preview = preview.filter(|_| camera.is_some());
         Ok(Room::start(Joined {
             invite,
             participant,
@@ -264,6 +267,7 @@ impl Inner {
             runtime: self.runtime.clone(),
             voice,
             camera,
+            preview,
             muted,
             camera_on,
             noise,
