@@ -19,8 +19,16 @@ pub struct Screens {
 }
 
 impl Screens {
-    /// What there is to share: each display, then each window.
+    /// What there is to share: each display, then each window. On Wayland, one choice: the
+    /// desktop's portal asks which screen, and X11's lists would only hold XWayland's windows,
+    /// whose root can't be read.
     pub fn choices() -> Vec<Choice> {
+        if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+            return vec![Choice {
+                label: "Entire screen (your desktop asks which)".to_owned(),
+                source: Source::Display(None),
+            }];
+        }
         let displays = mic_media::video::screen::displays().unwrap_or_else(|error| {
             tracing::warn!(%error, "listing the displays");
             Vec::new()

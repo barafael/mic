@@ -71,9 +71,10 @@ component Icon inherits Path {
     height: 20px;
     viewbox-width: 24;
     viewbox-height: 24;
-    stroke: root.kind == "leave" ? transparent : root.tint;
+    property <bool> filled: root.kind == "leave" || root.kind == "more";
+    stroke: root.filled ? transparent : root.tint;
     stroke-width: 1.8px;
-    fill: root.kind == "leave" ? root.tint : transparent;
+    fill: root.filled ? root.tint : transparent;
     commands: root.kind == "mic" ? root.mic
         : root.kind == "mic-off" ? root.mic + root.slash
         : root.kind == "camera" ? root.camera
@@ -87,6 +88,7 @@ component Icon inherits Path {
         : root.kind == "chat" ? "M4 5 L20 5 C20.6 5 21 5.4 21 6 L21 16 C21 16.6 20.6 17 20 17 L9.5 17 L5.5 20.5 L5.5 17 L4 17 C3.4 17 3 16.6 3 16 L3 6 C3 5.4 3.4 5 4 5 Z"
         : root.kind == "send" ? "M4 12 L20 4 L14 20 L11.5 13 Z M11.5 13 L20 4"
         : root.kind == "record" ? "M12 6.5 C15 6.5 17.5 9 17.5 12 C17.5 15 15 17.5 12 17.5 C9 17.5 6.5 15 6.5 12 C6.5 9 9 6.5 12 6.5 Z M12 2.5 C17.2 2.5 21.5 6.8 21.5 12 C21.5 17.2 17.2 21.5 12 21.5 C6.8 21.5 2.5 17.2 2.5 12 C2.5 6.8 6.8 2.5 12 2.5 Z"
+        : root.kind == "more" ? "M4 12 A2 2 0 1 0 8 12 A2 2 0 1 0 4 12 Z M10 12 A2 2 0 1 0 14 12 A2 2 0 1 0 10 12 Z M16 12 A2 2 0 1 0 20 12 A2 2 0 1 0 16 12 Z"
         : root.kind == "screen" ? "M4 4.5 L20 4.5 C20.8 4.5 21.5 5.2 21.5 6 L21.5 15 C21.5 15.8 20.8 16.5 20 16.5 L4 16.5 C3.2 16.5 2.5 15.8 2.5 15 L2.5 6 C2.5 5.2 3.2 4.5 4 4.5 Z M8 20 L16 20 M12 16.5 L12 20 M9 10.5 L12 7.5 L15 10.5 M12 7.5 L12 13.5"
         : "";
 }
@@ -125,9 +127,13 @@ component RoundButton inherits Rectangle {
     // A toggle that's on, as a raised hand: in `lit-tint`.
     in property <bool> lit;
     in property <color> lit-tint: Theme.accent;
+    // Smaller in a narrow window's bar.
+    in property <length> size: 48px;
+    // The tip ends at the button's right edge, not past the window's, for the bar's last ones.
+    in property <bool> tip-end;
     callback clicked;
-    width: 48px;
-    height: 48px;
+    width: root.size;
+    height: root.size;
     border-radius: self.width / 2;
     background: !root.enabled ? Theme.raised.transparentize(0.5)
         : root.danger || root.off ? (touch.has-hover ? Theme.danger-hover : Theme.danger)
@@ -156,7 +162,7 @@ component RoundButton inherits Rectangle {
     }
     if touch.has-hover && root.label != "": Tip {
         text: root.label;
-        x: (root.width - self.width) / 2;
+        x: root.tip-end ? root.width - self.width : (root.width - self.width) / 2;
         y: -self.height - 8px;
     }
 }
@@ -214,6 +220,9 @@ component Banner inherits Rectangle {
     in property <color> tint;
     // Pulsing, while something is under way.
     in property <bool> pulsing;
+    // A button at its end, as "Stop" for a share; none if empty.
+    in property <string> action;
+    callback acted();
     property <bool> shown;
     init => {
         self.shown = true;
@@ -246,6 +255,32 @@ component Banner inherits Rectangle {
             wrap: word-wrap;
             vertical-alignment: center;
         }
+        if root.action != "": Rectangle {
+            horizontal-stretch: 0;
+            width: action-label.preferred-width + 24px;
+            height: 26px;
+            y: (parent.height - self.height) / 2;
+            border-radius: 13px;
+            background: action-touch.has-hover ? root.tint.brighter(0.15) : root.tint;
+            animate background { duration: Theme.quick; }
+            accessible-role: button;
+            accessible-label: root.action;
+            accessible-action-default => {
+                root.acted();
+            }
+            action-label := Text {
+                text: root.action;
+                color: #111318;
+                font-size: 12px;
+                font-weight: 600;
+            }
+            action-touch := TouchArea {
+                mouse-cursor: pointer;
+                clicked => {
+                    root.acted();
+                }
+            }
+        }
     }
 }
 
@@ -255,6 +290,10 @@ component TileView inherits Rectangle {
     property <bool> present: self.born && !root.tile.leaving;
     property <bool> showing-video: root.tile.has-video && !root.tile.camera-off;
     property <length> side: Math.min(self.width, self.height);
+    // Too small for its name over the picture: the name shows while the pointer is on it.
+    property <bool> small: self.height < 90px;
+    // A shared screen whose first picture hasn't come.
+    property <bool> waiting: root.tile.screen && !root.tile.has-video;
     // A tile comes in growing a little, and goes out shrinking.
     init => {
         self.born = true;
@@ -274,8 +313,10 @@ component TileView inherits Rectangle {
     clip: true;
     accessible-role: text;
     accessible-label: root.tile.me ? root.tile.name + " (you)" : root.tile.name;
+    hover := TouchArea { }
     avatar := Rectangle {
-        width: Math.clamp(root.side * 0.36, 32px, 120px);
+        visible: !root.waiting;
+        width: Math.clamp(root.side * (root.small ? 0.5 : 0.36), 16px, 120px);
         height: self.width;
         y: (root.height - self.height) / 2 - (root.tile.cant-decode != "" ? 14px : 0px);
         border-radius: self.width / 2;
@@ -298,6 +339,25 @@ component TileView inherits Rectangle {
         font-size: 12px;
         overflow: elide;
     }
+    if root.waiting: VerticalLayout {
+        alignment: center;
+        spacing: 12px;
+        HorizontalLayout {
+            alignment: center;
+            Spinner {
+                indeterminate: true;
+                width: 28px;
+                height: 28px;
+            }
+        }
+        Text {
+            text: "Waiting for " + root.tile.name + "…";
+            color: Theme.text-dim;
+            font-size: 13px;
+            horizontal-alignment: center;
+            overflow: elide;
+        }
+    }
     // Its own camera comes mirrored already (videos.rs).
     Image {
         width: root.width;
@@ -310,6 +370,8 @@ component TileView inherits Rectangle {
     }
     // The name, and whether it's muted, at the bottom, over the video if there's one.
     Rectangle {
+        opacity: !root.small || hover.has-hover ? 1 : 0;
+        animate opacity { duration: Theme.quick; }
         x: 8px;
         y: root.height - self.height - 8px;
         width: Math.min(name-row.preferred-width, root.width - 16px);
@@ -336,21 +398,30 @@ component TileView inherits Rectangle {
             }
         }
     }
-    // A raised hand, in the top corner.
+    // A raised hand, in the top corner: it pops in.
     if root.tile.hand: Rectangle {
-        x: 8px;
-        y: 8px;
-        width: 30px;
-        height: 30px;
-        border-radius: 15px;
+        property <bool> born;
+        init => {
+            self.born = true;
+        }
+        x: root.small ? 4px : 8px;
+        y: root.small ? 4px : 8px;
+        width: root.small ? 20px : 30px;
+        height: self.width;
+        border-radius: self.width / 2;
         background: Theme.warn;
+        transform-scale: self.born ? 1 : 0.3;
+        animate transform-scale {
+            duration: 260ms;
+            easing: cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
         accessible-role: text;
         accessible-label: "Hand raised";
         Icon {
             kind: "hand";
             tint: #1a1a1a;
-            width: 18px;
-            height: 18px;
+            width: parent.width * 0.6;
+            height: self.width;
         }
     }
     // A reaction, a moment after it comes, in the other corner.
@@ -372,11 +443,11 @@ component TileView inherits Rectangle {
         }
     }
     if root.tile.reaction != "": Rectangle {
-        x: root.width - self.width - 8px;
-        y: root.reacting ? 8px : 20px;
-        width: 44px;
-        height: 44px;
-        border-radius: 22px;
+        x: root.width - self.width - (root.small ? 4px : 8px);
+        y: (root.small ? 4px : 8px) + (root.reacting ? 0px : 12px);
+        width: root.small ? 28px : 44px;
+        height: self.width;
+        border-radius: self.width / 2;
         background: #000000a0;
         opacity: root.reacting ? 1 : 0;
         animate opacity, y {
@@ -385,7 +456,8 @@ component TileView inherits Rectangle {
         }
         Text {
             text: root.tile.reaction;
-            font-size: 24px;
+            font-family: "Noto Color Emoji";
+            font-size: parent.width * 0.55;
         }
     }
     // Ringed while it speaks.
@@ -528,7 +600,10 @@ component JoinScreen inherits Rectangle {
                     root.new-room();
                 }
             }
-            if root.name == "" && root.error == "" && !root.compact: Text {
+            // Kept once a name is typed, unseen, so the card doesn't move under the pointer.
+            if root.error == "" && !root.compact: Text {
+                opacity: root.name == "" ? 1 : 0;
+                animate opacity { duration: Theme.quick; }
                 text: "Type your name to join a room or start one.";
                 color: Theme.text-dim;
                 font-size: 12px;
@@ -563,8 +638,142 @@ component JoinScreen inherits Rectangle {
     }
 }
 
+// The chat: what's been said, and a field to say more. Its field has the keyboard when it opens.
+component ChatPanel inherits Rectangle {
+    in property <[ChatLine]> chat;
+    callback say(string);
+    // How many messages it has shown: what's past them is unread.
+    callback seen(int);
+    property <bool> born;
+    init => {
+        self.born = true;
+        root.seen(root.chat.length);
+        message.focus();
+    }
+    background: Theme.surface;
+    border-radius: 12px;
+    opacity: self.born ? 1 : 0;
+    animate opacity { duration: 180ms; }
+    clip: true;
+    // It slides in from the right.
+    Rectangle {
+        x: root.born ? 0px : 24px;
+        animate x {
+            duration: 200ms;
+            easing: ease-out;
+        }
+        width: root.width;
+        height: root.height;
+        VerticalLayout {
+            padding: 12px;
+            spacing: 8px;
+            Text {
+                text: "Chat";
+                color: Theme.text;
+                font-size: 15px;
+                font-weight: 600;
+            }
+            lines := ListView {
+                vertical-stretch: 1;
+                property <int> count: root.chat.length;
+                changed count => {
+                    root.seen(self.count);
+                    self.content-y = Math.min(0px, self.visible-height - self.content-height);
+                }
+                for line in root.chat: VerticalLayout {
+                    padding-top: 4px;
+                    padding-bottom: 4px;
+                    Text {
+                        text: line.me ? "You" : line.name;
+                        color: line.me ? Theme.accent-hover : Theme.text-dim;
+                        font-size: 12px;
+                        font-weight: 600;
+                    }
+                    Text {
+                        text: line.text;
+                        color: Theme.text;
+                        font-size: 13px;
+                        wrap: word-wrap;
+                    }
+                }
+            }
+            message := LineEdit {
+                placeholder-text: "Message everyone";
+                accessible-label: "Message everyone";
+                accepted => {
+                    if (self.text != "") {
+                        root.say(self.text);
+                        self.text = "";
+                    }
+                }
+            }
+        }
+    }
+}
+
+// A line of a menu over the bar: an icon and what it does.
+component MenuRow inherits Rectangle {
+    in property <string> icon;
+    in property <string> text;
+    in property <bool> lit;
+    in property <color> lit-tint: Theme.warn;
+    callback clicked;
+    height: 40px;
+    border-radius: 8px;
+    background: touch.has-hover ? Theme.raised-hover : transparent;
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-action-default => {
+        root.clicked();
+    }
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 12px;
+        spacing: 10px;
+        Icon {
+            kind: root.icon;
+            tint: root.lit ? root.lit-tint : Theme.text;
+            y: (parent.height - self.height) / 2;
+        }
+        Text {
+            text: root.text;
+            color: Theme.text;
+            font-size: 13px;
+            vertical-alignment: center;
+        }
+    }
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+// A panel over the bar, as the menus are: it pops in.
+component MenuPanel inherits Rectangle {
+    property <bool> born;
+    init => {
+        self.born = true;
+    }
+    background: Theme.raised;
+    border-width: 1px;
+    border-color: Theme.line;
+    opacity: self.born ? 1 : 0;
+    animate opacity { duration: Theme.quick; }
+    transform-scale: self.born ? 1 : 0.95;
+    animate transform-scale {
+        duration: Theme.quick;
+        easing: ease-out;
+    }
+    // Clicks on it stay on it.
+    TouchArea { }
+    @children
+}
+
 // The room: its tiles, and a bar of its controls. The keyboard stays with the room itself, so its
-// shortcuts work whatever was clicked: nothing in it takes the focus.
+// shortcuts work whatever was clicked: only the chat's field takes the focus, and the shortcuts
+// are caught before it sees them.
 component RoomScreen inherits FocusScope {
     in property <[Tile]> tiles;
     // Participants not shown, as a last "+N" tile, when there are more than fit.
@@ -572,6 +781,9 @@ component RoomScreen inherits FocusScope {
     in property <string> invite;
     in property <string> status;
     in property <string> warning;
+    // Something to say a moment, as a share that stopped; shown each time `notice-seq` changes.
+    in property <string> notice;
+    in property <int> notice-seq;
     in property <bool> muted;
     in property <bool> camera-off;
     in property <bool> has-camera;
@@ -587,6 +799,9 @@ component RoomScreen inherits FocusScope {
     // Who records the call, as the window says it, or nothing; and whether this participant does.
     in property <string> recording;
     in property <bool> recording-self;
+    // A share opening: the desktop's own dialog may be asking which screen, and may sit behind
+    // this window.
+    in property <bool> share-opening;
     callback toggle-share();
     callback toggle-recording();
     callback leave();
@@ -598,12 +813,35 @@ component RoomScreen inherits FocusScope {
     // How many columns fit `count` tiles best into a `width` by `height` grid (view.rs).
     pure callback columns-for(int, length, length) -> int;
     property <bool> chat-open;
-    property <bool> picking;
+    // A narrow window's chat, or one beside a shared screen, lies over the tiles instead.
+    property <bool> chat-over;
+    // A narrow window's bar: smaller buttons, and the hand, the screen, recording, reactions and
+    // the invite in a menu.
+    property <bool> compact;
+    // Both follow the width, set as it changes: bound to it, the layouts they change would loop
+    // back into it.
+    property <int> screen-count: root.screens.length;
+    function fit() {
+        self.compact = self.width < 600px;
+        self.chat-over = self.width < 720px || (self.screen-count > 0 && self.width < 900px);
+    }
+    changed width => {
+        self.fit();
+    }
+    changed screen-count => {
+        self.fit();
+    }
+    // The menu open over the bar: "react", "more", or none.
+    property <string> menu;
+    // The middle of the button the menu opened from, across the room.
+    property <length> menu-x;
     // The messages seen while the chat was open: what's past them is unread.
     property <int> read;
     property <bool> born;
     property <bool> copied;
+    property <bool> noticing;
     init => {
+        self.fit();
         self.focus();
         self.born = true;
     }
@@ -612,15 +850,44 @@ component RoomScreen inherits FocusScope {
             self.focus();
         }
     }
-    // The shortcuts again, once the message field is gone.
+    // The shortcuts again, once the message field is gone; and no menu over the chat.
     changed chat-open => {
+        self.menu = "";
         if (!self.chat-open) {
             self.focus();
         }
     }
+    changed compact => {
+        self.menu = "";
+    }
+    changed notice-seq => {
+        self.noticing = true;
+        noticed-for.running = false;
+        noticed-for.running = true;
+    }
+    noticed-for := Timer {
+        interval: 6s;
+        running: false;
+        triggered => {
+            root.noticing = false;
+            self.running = false;
+        }
+    }
     // The shortcuts, as Google Meet has them: Ctrl+D the microphone, Ctrl+E the camera,
-    // Ctrl+Alt+C the chat, Ctrl+Alt+H a hand.
-    key-pressed(event) => {
+    // Ctrl+Alt+C the chat, Ctrl+Alt+H a hand. Escape closes a menu, then the chat. Caught on the
+    // way to the focused element, so the chat's field doesn't keep them.
+    capture-key-pressed(event) => {
+        if (event.text == Key.Escape) {
+            if (root.menu != "") {
+                root.menu = "";
+                return accept;
+            }
+            if (root.chat-open) {
+                root.chat-open = false;
+                return accept;
+            }
+            return reject;
+        }
         if (!event.modifiers.control) {
             return reject;
         }
@@ -656,6 +923,19 @@ component RoomScreen inherits FocusScope {
             self.running = false;
         }
     }
+    function copy-invite() {
+        invite-text.select-all();
+        invite-text.copy();
+        invite-text.clear-selection();
+        root.copied = true;
+        copied-for.running = false;
+        copied-for.running = true;
+    }
+    // Opens `menu` over the button `x` (its middle, across the room), or closes it if it's open.
+    function open-menu(menu: string, x: length) {
+        root.menu-x = x;
+        root.menu = root.menu == menu ? "" : menu;
+    }
     Rectangle {
         background: Theme.canvas;
         opacity: root.born ? 1 : 0;
@@ -679,19 +959,45 @@ component RoomScreen inherits FocusScope {
                 tint: Theme.danger;
                 pulsing: true;
             }
-            HorizontalLayout {
+            if root.share-opening: Banner {
+                text: "Choose what to share in your desktop's dialog";
+                tint: Theme.accent;
+                pulsing: true;
+                action: "Cancel";
+                acted => {
+                    root.toggle-share();
+                }
+            }
+            if root.sharing: Banner {
+                text: "You're sharing your screen";
+                tint: Theme.accent;
+                action: "Stop";
+                acted => {
+                    root.toggle-share();
+                }
+            }
+            if root.noticing && root.notice != "": Banner {
+                text: root.notice;
+                tint: Theme.warn;
+            }
+            stage-row := HorizontalLayout {
             vertical-stretch: 1;
             spacing: 10px;
             // A shared screen, as large as there's room for beside the tiles.
-            if root.screens.length > 0: TileView {
-                horizontal-stretch: 3;
+            stage := Rectangle {
+                horizontal-stretch: 1;
                 min-width: 0;
                 preferred-width: 0;
-                tile: root.screens[0];
+                max-width: root.screens.length > 0 ? 100000px : 0px;
+                if root.screens.length > 0: TileView {
+                    tile: root.screens[0];
+                }
             }
             grid := Rectangle {
                 horizontal-stretch: 1;
-                min-width: root.screens.length > 0 ? 160px : 0;
+                // Beside a shared screen, a strip no wider than 200px: the screen has the rest.
+                min-width: root.screens.length > 0 ? 120px : 0;
+                max-width: root.screens.length > 0 ? 200px : 100000px;
                 preferred-width: 0;
                 // The tiles at 16:9, as the cameras send, as large as the grid lets them be, the
                 // last row centred.
@@ -756,67 +1062,24 @@ component RoomScreen inherits FocusScope {
                     }
                 }
             }
-            if root.chat-open: Rectangle {
+            if root.chat-open && !root.chat-over: ChatPanel {
                 width: 300px;
-                background: Theme.surface;
-                border-radius: 12px;
-                init => {
-                    root.read = root.chat.length;
-                    message.focus();
+                chat: root.chat;
+                say(text) => {
+                    root.say(text);
                 }
-                VerticalLayout {
-                    padding: 12px;
-                    spacing: 8px;
-                    Text {
-                        text: "Chat";
-                        color: Theme.text;
-                        font-size: 15px;
-                        font-weight: 600;
-                    }
-                    lines := ListView {
-                        vertical-stretch: 1;
-                        property <int> count: root.chat.length;
-                        changed count => {
-                            root.read = self.count;
-                            self.content-y = Math.min(0px, self.visible-height - self.content-height);
-                        }
-                        for line in root.chat: VerticalLayout {
-                            padding-top: 4px;
-                            padding-bottom: 4px;
-                            Text {
-                                text: line.me ? "You" : line.name;
-                                color: line.me ? Theme.accent-hover : Theme.text-dim;
-                                font-size: 12px;
-                                font-weight: 600;
-                            }
-                            Text {
-                                text: line.text;
-                                color: Theme.text;
-                                font-size: 13px;
-                                wrap: word-wrap;
-                            }
-                        }
-                    }
-                    message := LineEdit {
-                        placeholder-text: "Message everyone";
-                        accessible-label: "Message everyone";
-                        accepted => {
-                            if (self.text != "") {
-                                root.say(self.text);
-                                self.text = "";
-                            }
-                        }
-                    }
+                seen(count) => {
+                    root.read = count;
                 }
             }
             }
             // The bar: the invite on the left, the controls in the middle.
             HorizontalLayout {
                 height: 56px;
-                spacing: 12px;
+                spacing: root.compact ? 8px : 12px;
                 Rectangle {
                     horizontal-stretch: 1;
-                    copy := Rectangle {
+                    if !root.compact: copy := Rectangle {
                         property <bool> wide: parent.width >= 140px;
                         x: 0;
                         width: self.wide ? copy-row.preferred-width : 40px;
@@ -827,7 +1090,7 @@ component RoomScreen inherits FocusScope {
                         accessible-role: button;
                         accessible-label: "Copy the room's invite";
                         accessible-action-default => {
-                            copy-touch.clicked();
+                            root.copy-invite();
                         }
                         copy-row := HorizontalLayout {
                             padding-left: copy.wide ? 12px : 10px;
@@ -849,12 +1112,7 @@ component RoomScreen inherits FocusScope {
                         copy-touch := TouchArea {
                             mouse-cursor: pointer;
                             clicked => {
-                                invite-text.select-all();
-                                invite-text.copy();
-                                invite-text.clear-selection();
-                                root.copied = true;
-                                copied-for.running = false;
-                                copied-for.running = true;
+                                root.copy-invite();
                             }
                         }
                         if copy-touch.has-hover && !copy.wide: Tip {
@@ -865,11 +1123,12 @@ component RoomScreen inherits FocusScope {
                 }
                 HorizontalLayout {
                     horizontal-stretch: 0;
-                    spacing: 12px;
+                    spacing: root.compact ? 8px : 12px;
                     alignment: center;
-                    padding-top: 4px;
-                    padding-bottom: 4px;
+                    padding-top: root.compact ? 8px : 4px;
+                    padding-bottom: root.compact ? 8px : 4px;
                     RoundButton {
+                        size: root.compact ? 40px : 48px;
                         icon: root.muted ? "mic-off" : "mic";
                         off: root.muted;
                         label: root.muted ? "Unmute (Ctrl+D)" : "Mute (Ctrl+D)";
@@ -878,6 +1137,7 @@ component RoomScreen inherits FocusScope {
                         }
                     }
                     RoundButton {
+                        size: root.compact ? 40px : 48px;
                         icon: root.camera-off || !root.has-camera ? "camera-off" : "camera";
                         off: root.camera-off && root.has-camera;
                         enabled: root.has-camera;
@@ -886,7 +1146,7 @@ component RoomScreen inherits FocusScope {
                             root.toggle-camera();
                         }
                     }
-                    RoundButton {
+                    if !root.compact: RoundButton {
                         icon: "hand";
                         lit: root.hand;
                         lit-tint: Theme.warn;
@@ -895,15 +1155,15 @@ component RoomScreen inherits FocusScope {
                             root.toggle-hand();
                         }
                     }
-                    RoundButton {
+                    if !root.compact: RoundButton {
                         icon: "screen";
-                        lit: root.sharing;
-                        label: root.sharing ? "Stop sharing your screen" : "Share your screen";
+                        lit: root.sharing || root.share-opening;
+                        label: root.sharing ? "Stop sharing your screen" : root.share-opening ? "Cancel sharing" : "Share your screen";
                         clicked => {
                             root.toggle-share();
                         }
                     }
-                    RoundButton {
+                    if !root.compact: RoundButton {
                         icon: "record";
                         lit: root.recording-self;
                         lit-tint: Theme.danger;
@@ -912,66 +1172,66 @@ component RoomScreen inherits FocusScope {
                             root.toggle-recording();
                         }
                     }
-                    react-button := RoundButton {
+                    if !root.compact: RoundButton {
                         icon: "smile";
-                        label: root.picking ? "" : "React";
+                        lit: root.menu == "react";
+                        label: root.menu == "react" ? "" : "React";
                         clicked => {
-                            root.picking = !root.picking;
-                        }
-                        if root.picking: Rectangle {
-                            x: (parent.width - self.width) / 2;
-                            y: -self.height - 10px;
-                            width: picks.preferred-width;
-                            height: 48px;
-                            border-radius: 24px;
-                            background: Theme.raised;
-                            picks := HorizontalLayout {
-                                padding-left: 6px;
-                                padding-right: 6px;
-                                for emoji[i] in root.reactions: Rectangle {
-                                    width: 40px;
-                                    border-radius: 20px;
-                                    background: pick.has-hover ? Theme.raised-hover : transparent;
-                                    accessible-role: button;
-                                    accessible-label: emoji;
-                                    accessible-action-default => {
-                                        root.react(i);
-                                    }
-                                    Text {
-                                        text: emoji;
-                                        font-size: 22px;
-                                    }
-                                    pick := TouchArea {
-                                        mouse-cursor: pointer;
-                                        clicked => {
-                                            root.react(i);
-                                            root.picking = false;
-                                        }
-                                    }
-                                }
-                            }
+                            root.open-menu("react", self.absolute-position.x - root.absolute-position.x + self.width / 2);
                         }
                     }
                     RoundButton {
+                        size: root.compact ? 40px : 48px;
                         icon: "chat";
+                        tip-end: root.compact;
                         label: root.chat-open ? "Close the chat (Ctrl+Alt+C)" : "Chat (Ctrl+Alt+C)";
                         lit: root.chat-open;
                         clicked => {
                             root.chat-open = !root.chat-open;
                         }
                         if !root.chat-open && root.chat.length > root.read: Rectangle {
+                            property <bool> born;
+                            init => {
+                                self.born = true;
+                            }
                             x: parent.width - 14px;
                             y: 2px;
                             width: 12px;
                             height: 12px;
                             border-radius: 6px;
                             background: Theme.accent;
+                            transform-scale: self.born ? 1 : 0.2;
+                            animate transform-scale {
+                                duration: 240ms;
+                                easing: cubic-bezier(0.34, 1.56, 0.64, 1);
+                            }
+                        }
+                    }
+                    if root.compact: RoundButton {
+                        size: 40px;
+                        icon: "more";
+                        tip-end: true;
+                        lit: root.menu != "";
+                        label: root.menu != "" ? "" : "More";
+                        clicked => {
+                            root.open-menu("more", self.absolute-position.x - root.absolute-position.x + self.width / 2);
+                        }
+                        // A raised hand, a share or a recording stays in sight.
+                        if root.hand || root.sharing || root.recording-self: Rectangle {
+                            x: parent.width - 12px;
+                            y: 0px;
+                            width: 12px;
+                            height: 12px;
+                            border-radius: 6px;
+                            background: root.recording-self ? Theme.danger : root.hand ? Theme.warn : Theme.accent;
                         }
                     }
                     RoundButton {
+                        size: root.compact ? 40px : 48px;
                         icon: "leave";
                         danger: true;
-                        width: 64px;
+                        tip-end: true;
+                        width: root.compact ? 56px : 64px;
                         label: "Leave";
                         clicked => {
                             root.leave();
@@ -980,6 +1240,117 @@ component RoomScreen inherits FocusScope {
                 }
                 Rectangle {
                     horizontal-stretch: 1;
+                }
+            }
+        }
+        // A narrow window's chat, over the tiles.
+        if root.chat-open && root.chat-over: ChatPanel {
+            x: stage-row.x;
+            y: stage-row.y;
+            width: stage-row.width;
+            height: stage-row.height;
+            chat: root.chat;
+            say(text) => {
+                root.say(text);
+            }
+            seen(count) => {
+                root.read = count;
+            }
+        }
+    }
+    // A menu over the bar; a click anywhere else closes it.
+    if root.menu != "": TouchArea {
+        clicked => {
+            root.menu = "";
+        }
+    }
+    // Above the bar: 10px of padding, 56px of bar, 10px apart.
+    property <length> menu-bottom: root.height - 10px - 56px - 10px;
+    if root.menu == "react": MenuPanel {
+        width: picks.preferred-width;
+        height: 48px;
+        x: Math.clamp(root.menu-x - self.width / 2, 8px, root.width - self.width - 8px);
+        y: root.menu-bottom - self.height;
+        border-radius: 24px;
+        picks := HorizontalLayout {
+            padding-left: 4px;
+            padding-right: 4px;
+            for emoji[i] in root.reactions: Rectangle {
+                width: 44px;
+                border-radius: 20px;
+                background: pick.has-hover ? Theme.raised-hover : transparent;
+                accessible-role: button;
+                accessible-label: emoji;
+                accessible-action-default => {
+                    root.react(i);
+                }
+                Text {
+                    width: parent.width;
+                    height: parent.height;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                    text: emoji;
+                    font-family: "Noto Color Emoji";
+                    font-size: 22px;
+                }
+                pick := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        root.react(i);
+                        root.menu = "";
+                    }
+                }
+            }
+        }
+    }
+    if root.menu == "more": MenuPanel {
+        width: 240px;
+        height: rows.preferred-height;
+        x: Math.clamp(root.menu-x - self.width / 2, 8px, root.width - self.width - 8px);
+        y: root.menu-bottom - self.height;
+        border-radius: 12px;
+        rows := VerticalLayout {
+            padding: 6px;
+            spacing: 2px;
+            MenuRow {
+                icon: root.copied ? "check" : "copy";
+                text: root.copied ? "Copied" : "Copy invite";
+                clicked => {
+                    root.copy-invite();
+                }
+            }
+            MenuRow {
+                icon: "hand";
+                lit: root.hand;
+                text: root.hand ? "Lower your hand (Ctrl+Alt+H)" : "Raise your hand (Ctrl+Alt+H)";
+                clicked => {
+                    root.menu = "";
+                    root.toggle-hand();
+                }
+            }
+            MenuRow {
+                icon: "screen";
+                text: root.sharing ? "Stop sharing your screen" : root.share-opening ? "Cancel sharing" : "Share your screen";
+                clicked => {
+                    root.menu = "";
+                    root.toggle-share();
+                }
+            }
+            MenuRow {
+                icon: "record";
+                lit: root.recording-self;
+                lit-tint: Theme.danger;
+                text: root.recording-self ? "Stop recording" : "Record the call";
+                clicked => {
+                    root.menu = "";
+                    root.toggle-recording();
+                }
+            }
+            MenuRow {
+                icon: "smile";
+                text: "React";
+                clicked => {
+                    root.menu = "react";
                 }
             }
         }
@@ -1017,8 +1388,13 @@ export component AppWindow inherits Window {
     in property <string> recording;
     in property <bool> recording-self;
     callback toggle-recording();
+    in property <bool> share-opening;
     // What there is to share, while the picker asks; empty otherwise.
     in property <[string]> share-choices;
+    // Something the room says a moment, as a share that stopped: shown again each time
+    // `room-notice-seq` changes.
+    in property <string> room-notice;
+    in property <int> room-notice-seq;
     // Share, or stop: the picker opens with the choices to share.
     callback toggle-share();
     // The choice of `share-choices` at this index; none (-1) cancels.
@@ -1117,6 +1493,9 @@ export component AppWindow inherits Window {
             sharing: root.sharing;
             recording: root.recording;
             recording-self: root.recording-self;
+            share-opening: root.share-opening;
+            notice: root.room-notice;
+            notice-seq: root.room-notice-seq;
             toggle-share => {
                 root.toggle-share();
             }
