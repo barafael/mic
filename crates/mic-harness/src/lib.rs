@@ -187,6 +187,9 @@ pub struct Ui {
     /// What the window says of the version, if anything: a newer one is out.
     #[serde(default)]
     pub notice: Option<String>,
+    /// The link the window asks whether to leave the call for, while it asks.
+    #[serde(default)]
+    pub asking: Option<String>,
 }
 
 /// What drawing a frontend's video tiles costs, over the last second.

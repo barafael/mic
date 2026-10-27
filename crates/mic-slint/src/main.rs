@@ -72,8 +72,8 @@ struct Cli {
     #[cfg(all(unix, feature = "harness"))]
     #[arg(long, value_parser = parse_decoders)]
     decoders: Option<Decoders>,
-    /// An invite to fill in, `mic://join/…`; handed to a mic already running, which joins it
-    /// under the last name it joined with.
+    /// An invite to fill in, `mic://join/…`, under the last name joined with; handed to a mic
+    /// already running, which asks first if it's in a call.
     invite: Option<String>,
 }
 
@@ -218,10 +218,13 @@ fn run(cli: Cli) -> Result<(), String> {
     let notice: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
     // What the window shows, told to the harness with its feature, after each change.
     #[cfg_attr(not(all(unix, feature = "harness")), expect(unused_mut))]
-    let mut shown: Box<dyn Fn(&View)> = Box::new(|_| {});
+    let mut tell = Rc::new(Tell {
+        view: Box::new(|_| {}),
+        asking: Box::new(|_| {}),
+    });
     #[cfg(all(unix, feature = "harness"))]
     if let Some(socket) = cli.harness {
-        shown = harness::serve(
+        tell = harness::serve(
             &runtime,
             app.clone(),
             socket,
@@ -250,46 +253,90 @@ fn run(cli: Cli) -> Result<(), String> {
             };
             shown.set_error("".into());
             shown.set_joining(true);
-            let app = app.clone();
-            let window = window.clone();
-            runtime.spawn(async move {
-                let joined = app.join(invite, Profile::new(&name)).await;
-                let error = joined.err().map(|error| error.to_string());
-                // Joined: the room's view takes over the screen.
-                let _shown = window.upgrade_in_event_loop(move |window| {
-                    window.set_joining(false);
-                    if let Some(error) = error {
-                        window.set_error(format!("Couldn't join: {error}").into());
-                    }
-                });
-            });
+            join(&runtime, &app, window.clone(), invite, Profile::new(&name));
         }
     });
-    // A link, handed over by another mic or given at start: joined under the last name used, as
-    // the Join button joins, or filled in for a name.
+    // A link, handed over by another mic or given at start. It never joins by itself: a page
+    // that opens one could otherwise move whoever has mic open into its room. Out of a call, it's
+    // filled in on the join screen, under the last name used, for Join; in one, the window asks
+    // whether to leave the call for it.
     let open = {
         let window = window.as_weak();
         let app = app.clone();
+        let tell = tell.clone();
         move |link: String| {
             let Some(window) = window.upgrade() else {
                 return;
             };
-            window.set_invite(link.as_str().into());
-            // No name yet: the invite waits, filled in, for one.
-            if let Some(profile) = app.last_profile() {
-                window.invoke_join(profile.name.as_str().into(), link.into());
+            match app.current() {
+                // The room it's in already.
+                Some(room) if link.parse::<Invite>().as_ref() == Ok(room.invite()) => {}
+                Some(_) => {
+                    window.set_asking(link.as_str().into());
+                    (tell.asking)(Some(link));
+                }
+                None => {
+                    window.set_invite(link.as_str().into());
+                    window.set_filled(window.get_filled().wrapping_add(1));
+                    if let Some(profile) = app.last_profile()
+                        && window.get_name().is_empty()
+                    {
+                        window.set_name(profile.name.as_str().into());
+                    }
+                }
             }
         }
     };
-    {
-        let open = open.clone();
-        if let Err(error) = links::listen(move |link| {
-            let open = open.clone();
-            let _opened = slint::invoke_from_event_loop(move || open(link));
-        }) {
-            tracing::warn!(%error, "links opened elsewhere won't reach this window");
+    window.on_answer({
+        let window = window.as_weak();
+        let app = app.clone();
+        let runtime = runtime.handle().clone();
+        let tell = tell.clone();
+        move |leave| {
+            let Some(shown) = window.upgrade() else {
+                return;
+            };
+            let link = shown.get_asking().to_string();
+            shown.set_asking("".into());
+            (tell.asking)(None);
+            if !leave {
+                return;
+            }
+            let invite = match link.parse::<Invite>() {
+                Ok(invite) => invite,
+                Err(error) => {
+                    tracing::warn!(%error, "the link isn't an invite");
+                    return;
+                }
+            };
+            // As it is in this call: its name, and whether it's muted and its camera off.
+            let profile = app
+                .current()
+                .map(|room| room.state().borrow().me.profile.clone())
+                .or_else(|| app.last_profile());
+            let Some(profile) = profile else {
+                return;
+            };
+            shown.set_joining(true);
+            join(&runtime, &app, window.clone(), invite, profile);
         }
+    });
+    // Handed over on the listener's thread, opened on the window's.
+    let (handed, mut handed_over) = tokio::sync::mpsc::unbounded_channel::<String>();
+    if let Err(error) = links::listen(move |link| {
+        let _sent = handed.send(link);
+    }) {
+        tracing::warn!(%error, "links opened elsewhere won't reach this window");
     }
+    let _handing = slint::spawn_local({
+        let open = open.clone();
+        async move {
+            while let Some(link) = handed_over.recv().await {
+                open(link);
+            }
+        }
+    })
+    .map_err(|error| format!("opening links: {error}"))?;
     // Kept for as long as the window runs, so it fires once the event loop does.
     let opening = slint::Timer::default();
     if let Some(link) = cli.invite.clone() {
@@ -362,7 +409,7 @@ fn run(cli: Cli) -> Result<(), String> {
                 let Some(window) = window.upgrade() else {
                     return;
                 };
-                apply(&window, &tiles, &view, &*shown, &mut last);
+                apply(&window, &tiles, &view, &*tell.view, &mut last);
                 drop(window);
                 if viewed.changed().await.is_err() {
                     return;
@@ -516,6 +563,35 @@ fn select_backend() -> Result<Option<videos::Gpu>, String> {
     }
 }
 
+/// What the window tells the harness, with its feature: each view it shows, and the link it asks
+/// about while it asks.
+struct Tell {
+    view: Box<dyn Fn(&View)>,
+    asking: Box<dyn Fn(Option<String>)>,
+}
+
+/// Joins `invite` as `profile`, on `runtime`, and says on `window` if it couldn't.
+fn join(
+    runtime: &tokio::runtime::Handle,
+    app: &App,
+    window: slint::Weak<AppWindow>,
+    invite: Invite,
+    profile: Profile,
+) {
+    let app = app.clone();
+    runtime.spawn(async move {
+        let joined = app.join(invite, profile).await;
+        let error = joined.err().map(|error| error.to_string());
+        // Joined: the room's view takes over the screen.
+        let _shown = window.upgrade_in_event_loop(move |window| {
+            window.set_joining(false);
+            if let Some(error) = error {
+                window.set_error(format!("Couldn't join: {error}").into());
+            }
+        });
+    });
+}
+
 /// Sets `view` on the window, unless it's what shows already, and tells `shown`.
 fn apply(
     window: &AppWindow,
@@ -647,9 +723,10 @@ mod harness {
     use mic_harness::Ui;
     use mic_harness::server::Harness;
 
+    use crate::Tell;
     use crate::view::View;
 
-    /// Serves the harness at `socket`, on `runtime`; returns what tells it of each view shown.
+    /// Serves the harness at `socket`, on `runtime`; returns what tells it of what's shown.
     /// If it stops serving, the window closes.
     pub fn serve(
         runtime: &tokio::runtime::Runtime,
@@ -658,7 +735,7 @@ mod harness {
         hearing: Option<mic_media::audio::Analyzer>,
         cost: Arc<Mutex<crate::videos::Cost>>,
         notice: Arc<Mutex<Option<String>>>,
-    ) -> Box<dyn Fn(&View)> {
+    ) -> std::rc::Rc<Tell> {
         let name = socket
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
@@ -671,6 +748,7 @@ mod harness {
             render: None,
             video: Vec::new(),
             notice: None,
+            asking: None,
         }));
         let source = ui.clone();
         let harness = Harness::new(
@@ -709,8 +787,11 @@ mod harness {
                 let _quit = slint::quit_event_loop();
             });
         });
-        Box::new(move |view: &View| {
-            *ui.lock().unwrap_or_else(PoisonError::into_inner) = Ui {
+        let (asked, told) = (ui.clone(), harness.clone());
+        let view = Box::new(move |view: &View| {
+            let mut ui = ui.lock().unwrap_or_else(PoisonError::into_inner);
+            let asking = ui.asking.take();
+            *ui = Ui {
                 screen: view.screen.name().to_owned(),
                 tiles: view.tiles.iter().map(|tile| tile.key.clone()).collect(),
                 muted: view
@@ -728,8 +809,15 @@ mod harness {
                 render: None,
                 video: Vec::new(),
                 notice: None,
+                asking,
             };
+            drop(ui);
             harness.ui_changed();
-        })
+        });
+        let asking = Box::new(move |link: Option<String>| {
+            asked.lock().unwrap_or_else(PoisonError::into_inner).asking = link;
+            told.ui_changed();
+        });
+        std::rc::Rc::new(Tell { view, asking })
     }
 }

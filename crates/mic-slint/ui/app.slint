@@ -77,10 +77,15 @@ component JoinScreen inherits VerticalBox {
     in property <bool> joining;
     in property <string> error;
     callback join(string, string);
+    // Counts the links filled in: each gives the name field the keyboard, for Enter to join.
+    in property <int> filled;
     callback new-room();
     alignment: center;
     // Typing starts with the name, whenever the screen shows.
     init => {
+        name-field.focus();
+    }
+    changed filled => {
         name-field.focus();
     }
     Text {
@@ -92,6 +97,9 @@ component JoinScreen inherits VerticalBox {
         placeholder-text: "Your name";
         text <=> root.name;
         enabled: !root.joining;
+        accepted => {
+            root.join(root.name, root.invite);
+        }
     }
     LineEdit {
         placeholder-text: "Invite: mic://join/…";
@@ -210,6 +218,13 @@ export component AppWindow inherits Window {
     callback leave();
     callback toggle-mute();
     callback toggle-camera();
+    // A link opened during a call, while the window asks whether to leave the call for it; empty
+    // otherwise. A link never takes the window to another room without a click (links.rs).
+    in property <string> asking;
+    // Counts the links filled in on the join screen.
+    in property <int> filled;
+    // Its answer: true to leave for the link's room.
+    callback answer(bool);
 
     // The room's shortcuts, as Google Meet has them: Ctrl+D the microphone, Ctrl+E the camera.
     // Out of the layout, and given the keyboard whenever the room shows.
@@ -235,6 +250,11 @@ export component AppWindow inherits Window {
     }
     changed screen => {
         if (root.screen == "room") {
+            shortcuts.focus();
+        }
+    }
+    changed asking => {
+        if (root.asking == "" && root.screen == "room") {
             shortcuts.focus();
         }
     }
@@ -278,6 +298,7 @@ export component AppWindow inherits Window {
             invite <=> root.invite;
             joining: root.joining;
             error: root.error;
+            filled: root.filled;
             join(name, invite) => {
                 root.join(name, invite);
             }
@@ -312,6 +333,66 @@ export component AppWindow inherits Window {
                 text: "About";
                 clicked => {
                     about.show();
+                }
+            }
+        }
+    }
+    // Over everything while it asks: Enter joins, Escape stays.
+    if root.asking != "": Rectangle {
+        width: root.width;
+        height: root.height;
+        background: #000000a0;
+        TouchArea { }
+        asked := FocusScope {
+            init => {
+                asked.focus();
+            }
+            key-pressed(event) => {
+                if (event.text == Key.Return) {
+                    root.answer(true);
+                    return accept;
+                }
+                if (event.text == Key.Escape) {
+                    root.answer(false);
+                    return accept;
+                }
+                reject
+            }
+            Rectangle {
+                width: Math.min(420px, root.width - 32px);
+                height: question.preferred-height;
+                background: #202024;
+                border-radius: 8px;
+                question := VerticalBox {
+                    Text {
+                        text: "Leave this call for the room the link names?";
+                        color: white;
+                        font-size: 16px;
+                        wrap: word-wrap;
+                    }
+                    Text {
+                        text: root.asking;
+                        color: #d0d0d8;
+                        font-size: 12px;
+                        overflow: elide;
+                    }
+                    HorizontalBox {
+                        padding: 0;
+                        alignment: end;
+                        Button {
+                            text: "Stay";
+                            clicked => {
+                                root.answer(false);
+                            }
+                        }
+                        Button {
+                            text: "Leave and join";
+                            primary: true;
+                            clicked => {
+                                root.answer(true);
+                            }
+                        }
+                    }
                 }
             }
         }
