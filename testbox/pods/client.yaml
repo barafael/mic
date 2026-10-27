@@ -27,6 +27,8 @@
           "--harness", "/run/mic/@NAME@",
           # The version check, against the box's site, which announces a newer one.
           "--version-url", "http://mic-testbox-site:8080/version.json",
+          # Recordings in the client's own directory, where a check reads them back.
+          "--recordings", "/run/mic/recordings",
           # Its voice: a tone of its own and an analyzer for a speaker (xtask's `podman::tone`),
           # or the box's PipeWire devices.
           @VOICE@

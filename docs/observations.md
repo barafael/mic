@@ -4,6 +4,24 @@ What turned up while building `mic` that the plan didn't expect: surprises, upst
 measurements, and things to revisit. Newest first within each milestone. Each says whether it's
 **open**, **settled** (and where), or **upstream** (to report or follow).
 
+## M9: Recording
+
+- **moq-mux's exporter reads a broadcast, so a recording makes one** (settled, commit 49).
+  mic's broadcasts are encrypted with a catalog of their own, which the exporter can't read;
+  a recording puts each participant's decrypted, confirmed frames onto a broadcast of the
+  process's own origin, announced (or the exporter finds nothing: "unroutable"), with a hang
+  catalog of VP9 and Opus. Its catalog and tracks must be finished, not dropped, or the export
+  ends on "json: dropped" before it writes out what it holds. Frames given before the
+  exporter subscribes are lost, which a live recording's first fraction of a second is.
+- **A file a participant, not one file** (settled, commit 49). The exporter refuses a track
+  added once its header is out, and participants come and go during a call; so each gets a
+  file, from its first frame on. A file of everyone mixed would be decoding and encoding again.
+- **Recording watches every camera** (open, commit 49): what isn't subscribed to can't be
+  recorded, so while it records a client takes, and decodes, each camera, shown or not. Taking
+  without decoding those that aren't shown would spare the CPU; the egress stays.
+- **Screens aren't recorded** (open, commit 49): a screen's track would want a file, or a track,
+  of its own, from a share that starts and stops.
+
 ## M8: Rooms
 
 - **Forty in a room fit the budget** (settled, commit 48). Over three minutes with the six

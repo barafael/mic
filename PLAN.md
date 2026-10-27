@@ -545,7 +545,11 @@ from; the git pins move to releases as they land.
 
 49. `mic-core, mic-slint: client-side recording to WebM` via `moq-mux`, with the indicator for
     everyone (D7). **`recording`**: every client shows the indicator; the file decodes in the box
-    (ffprobe).
+    (ffprobe). *Done:* a file a participant, itself among them, in a directory a recording
+    (`--recordings`, `Videos/mic` by default): each participant's frames go onto a broadcast in
+    the process, with a hang catalog, which moq-mux's exporter writes. `Command::Record`; a
+    `recording` flag in the signed profile; a banner in every window. While it records, every
+    camera is watched, shown or not. Screens aren't recorded yet.
 
 ### M10: Release
 

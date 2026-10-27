@@ -215,6 +215,12 @@ pub struct Ui {
     /// Whether it shares its own screen.
     #[serde(default)]
     pub sharing: bool,
+    /// What it says of who records the call, if anyone does: the indicator (D7).
+    #[serde(default)]
+    pub recording: Option<String>,
+    /// Who it shows as recording, by key, itself among them if it does.
+    #[serde(default)]
+    pub recorders: Vec<String>,
 }
 
 /// What drawing a frontend's video tiles costs, over the last second: the others' cameras, not
