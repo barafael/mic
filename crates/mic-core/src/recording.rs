@@ -602,6 +602,8 @@ const RECORDING_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(30
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mic_media::video::Pattern;
+    use mic_media::video::vp9::Vp9Encoder;
 
     fn participant(byte: u8) -> crate::Participant {
         crate::Participant {
@@ -651,8 +653,6 @@ mod tests {
             Shown::Screen(key(7))
         );
     }
-    use mic_media::video::vp9::Vp9Encoder;
-    use mic_media::video::Pattern;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn a_recording_is_webm_with_the_camera_and_the_voice() {
