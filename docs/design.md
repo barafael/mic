@@ -531,11 +531,21 @@ how this one handles them:**
    - app version (§5.12);
    - later, an X25519 key for rekeying (§5.3.1).
 
-   **The exact list is still open.**
+   Fixed in commit 20 as canonical bytes, `"mic/v1/catalog\0"` and a format
+   number first, then room, participant key, `kid`, epoch, sequence number,
+   tracks and app version, the signature last (`crates/mic-core/src/catalog.rs`).
+   The broadcast's path is bound to the key: its participant segment must be
+   the one the catalog's key derives. The X25519 key for rekeying comes with
+   MLS.
 3. **Epoch rule.** Follow the greatest epoch *whose decrypted catalog verifies*
    against the expected participant key, never simply the greatest epoch
    (P5).
-4. **Checkpoints every 250 ms on a separate `sig` track (decided).**
+4. **Checkpoints every 250 ms on a separate `sig` track (decided; built in
+   commit 21, `crates/mic-core/src/sig.rs`).** As built: a hash chain per
+   group of each track; a checkpoint lists each track's latest group and the
+   groups changed in the last 3 s, sent within 250 ms of a frame and once a
+   second regardless, so frames written before a subscriber came are covered.
+   The catalog and `sig` tracks are signed on their own.
    - **Proposal:** one checkpoint per broadcast. It lists, for each track, a
      hash over that track's new frames (with track, `kid`, epoch, group and
      frame range), and signs the whole list.

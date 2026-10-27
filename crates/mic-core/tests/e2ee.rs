@@ -24,7 +24,7 @@ fn client(relay: &TestRelay) -> Client {
 
 /// `room` publishes a track `note` with one group holding [`PLAINTEXT`]; returns its producer,
 /// which keeps the track up.
-async fn publish_note(room: &Room) -> moq_e2ee::track::Producer {
+async fn publish_note(room: &Room) -> mic_core::sig::SignedTrack {
     let mut track = room.publish("note").await.unwrap();
     let mut group = track.append_group().unwrap();
     group

@@ -5,12 +5,14 @@
 // Every outcome is handled: a discarded `Result` would hide a failure.
 #![deny(clippy::let_underscore_must_use, clippy::let_underscore_untyped)]
 
+pub mod catalog;
 pub mod invite;
 pub mod keys;
 pub mod room;
 pub mod roster;
 pub mod secrets;
 pub mod session;
+pub mod sig;
 pub mod tracks;
 
 pub use invite::{Invite, RoomId, RoomSecret};

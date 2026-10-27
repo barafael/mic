@@ -1,0 +1,16 @@
+[package]
+name = "forger"
+description = "The test box's forger: a room member publishing what it can't sign, for the impersonation phase"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+clap = { version = "4.6.7", features = ["derive"] }
+mic-core = { version = "0.1.0", path = "../../crates/mic-core" }
+moq-e2ee = "=0.0.17"
+moq-net = "=0.3.16"
+moq-tokio = { version = "=0.19.29", default-features = false, features = ["noq", "aws-lc-rs"] }
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "time"] }
+url = "2"

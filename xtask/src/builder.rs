@@ -13,7 +13,7 @@ pub const BIN: &str = "target/testbox-bin";
 /// What the box runs, by workspace: mic's, and the display tools' (testbox/view), whose
 /// `with-display` runs a program on its display.
 const WORKSPACES: [(&str, &[&str]); 2] = [
-    ("Cargo.toml", &["mic-crowd", "probe"]),
+    ("Cargo.toml", &["forger", "mic-crowd", "probe"]),
     ("testbox/view/Cargo.toml", &["with-display"]),
 ];
 

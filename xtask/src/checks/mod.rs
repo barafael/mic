@@ -2,6 +2,7 @@
 
 mod crashed;
 mod e2ee;
+mod impersonation;
 mod record;
 mod relay;
 mod roster;
@@ -23,10 +24,18 @@ pub enum Phase {
     Roster,
     /// A stranger on the relay sees only opaque names and ciphertext.
     E2ee,
+    /// A member publishing what it can't sign is rejected.
+    Impersonation,
 }
 
 impl Phase {
-    pub const ALL: [Phase; 4] = [Phase::Box, Phase::Relay, Phase::Roster, Phase::E2ee];
+    pub const ALL: [Phase; 5] = [
+        Phase::Box,
+        Phase::Relay,
+        Phase::Roster,
+        Phase::E2ee,
+        Phase::Impersonation,
+    ];
 
     pub fn name(self) -> String {
         clap::ValueEnum::to_possible_value(&self)
@@ -38,7 +47,7 @@ impl Phase {
     /// as two driving alice at once would take each other's rooms. (Leasing clients to phases
     /// lifts that, once there are more phases with clients.)
     pub fn uses_clients(self) -> bool {
-        matches!(self, Phase::Roster | Phase::E2ee)
+        matches!(self, Phase::Roster | Phase::E2ee | Phase::Impersonation)
     }
 
     /// Whether it disrupts the whole box (`roster` restarts the relay): such a phase runs alone,
@@ -53,6 +62,7 @@ impl Phase {
             Phase::Relay => relay::relay(checks, the_box),
             Phase::Roster => roster::roster(checks, the_box),
             Phase::E2ee => e2ee::e2ee(checks, the_box),
+            Phase::Impersonation => impersonation::impersonation(checks, the_box),
         }
     }
 }
