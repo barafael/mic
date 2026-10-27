@@ -962,8 +962,9 @@ Whether `moq-tokio` exposes that switch needs checking **(unverified)**.
   widgets. PLAN.md has the interface.
 - **Video tiles:** `moq-video`'s `Renderer::new(&device, &queue, …)` takes a
   device it didn't create, so tiles are drawn on Slint's own device.
-- **Video-tile spike** (`spikes/video-tiles/`, measured 2026-10-27; its
-  README has the tables):
+- **Video-tile spike** (commit 22, measured 2026-10-27; removed in commit 36,
+  once the box measured the app's own tiles; it's in the history at
+  `spikes/video-tiles/`):
   - A Slint window with 9 tiles of `moq-video` frames at 30 fps, at 720p,
     360p and 180p, on a Radeon 8060S (RADV) under Wayland.
   - **9 tiles of 720p cost about 18% of one core and a few percent of the
@@ -983,9 +984,22 @@ Whether `moq-tokio` exposes that switch needs checking **(unverified)**.
   - `moq-video`'s VA-API H.264 encoder writes no parameter sets on this
     Mesa, where ffmpeg's does. Not in `mic`'s path (libvpx encodes); to
     report upstream.
-  - It's outside the Cargo workspace (`[workspace] exclude =
-    ["spikes"]`), and is deleted once the app's own tiles are measured the
-    same way.
+  - Its measurements, 9 tiles at 30 fps in a 1280x720 window:
+
+    | Source | Tick | Slint build | Tick to GPU done | Process CPU | GPU busy |
+    |---|---|---|---|---|---|
+    | CPU I420, 720p | 1.76/3.31 ms | 1.47/1.74 ms | 4.38/6.13 ms | 5.9 ms/frame, 18% | 7% (baseline 3%) |
+    | CPU I420, 360p | 1.23/2.10 ms | 1.48/2.02 ms | 3.87/5.15 ms | 5.4 ms/frame, 16% | 6% |
+    | CPU I420, 180p | 1.05/1.57 ms | 1.48/1.96 ms | 3.73/4.94 ms | 5.1 ms/frame, 15% | 5% |
+    | VA-API, 720p | 20.99/35.23 ms | 1.46/2.09 ms | 23.59/38.46 ms | 5.8 ms/frame, 17% | 6% |
+
+    And on Xvnc, by `MESA_VK_WSI_PRESENT_MODE`: unset or `fifo`, under 2 fps;
+    `mailbox` or `immediate`, 30.
+- **The app's own tiles, as the box measures them (commit 35):** 9 tiles,
+  7 with 640x360 VP9 cameras at 15 fps, on RADV: 102 to 110 pictures drawn a
+  second, 0.11 to 0.15 ms each, Slint's frame at 3.4 to 4.0 ms, and 29% of a
+  core for the whole client (decoding 7 cameras, encoding one, two voices,
+  drawing). The `video` phase records it each run (`render.txt`).
 - **License (D24: MIT + Apache-2.0):** use Slint's **royalty-free license**.
   - Its condition is attribution, either:
     - (a) the `AboutSlint` widget in an About screen reachable from the
@@ -1313,7 +1327,7 @@ sequenceDiagram
 | **moq.pro (single point of failure)** | Relay only (D22) means every call depends on it. Young (launched 2026-08). 400 GB/month free (assumed; the site has said 400 and 500). A self-hosted `moq-relay` is the configuration fallback. |
 | **Video codec (D10)** | VP9 software decode is on upstream `main` but unreleased; VP9 encode and VA-API VP9 decode don't exist upstream. libvpx is a C library parsing other people's data. Macs always encode in software. |
 | E2EE + signatures | `moq-e2ee-00`'s epoch and path aren't authenticated, so `mic` needs the signed-catalog epoch rule. A static room secret means no forward secrecy against a leaked invite (accepted for v1). Rekeying without P2P needs per-member encryption or MLS. |
-| **UI** | Slint: the wgpu interop is "unstable" between minor releases; presents only with `AutoVsync` (Mesa overrides it in the box). 9 tiles of 720p cost about 18% of a core (the spike). |
+| **UI** | Slint: the wgpu interop is "unstable" between minor releases; presents only with `AutoVsync` (Mesa overrides it in the box). 9 tiles cost the whole client 29% of a core in the box, decoding included. |
 | Audio | sonora (v0.2.0) is young. Noise suppression is chosen by testing. Integrating it into `moq-audio`'s capture path is our own work. |
 | Device secret | Needs a system keyring. A Linux desktop without a Secret Service has nowhere to keep it. |
 | Abuse | The moq.pro public prefix lets anyone spend our egress, and allows duplicate announcements in every room, until a token service exists. |

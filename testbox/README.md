@@ -86,7 +86,7 @@ flowchart LR
   the box's speaker, whose monitor a check records, and microphone, fed by a sink of its own a
   check plays into (`box-devices.conf`). mic reaches them through cpal and ALSA.
 - **Windows present in mailbox mode** (`MESA_VK_WSI_PRESENT_MODE`): Slint presents with Fifo,
-  which waits for a vertical blank Xvnc never has (spikes/video-tiles: under 2 fps).
+  which waits for a vertical blank Xvnc never has (the video-tile spike: under 2 fps).
 - **A display shows what runs on it**: `with-display` runs a program on TigerVNC's Xvnc, served on
   a Unix socket only, in `target/testbox-view/<client>/` (the owner's only), with the viewer's
   input and the clipboard off. `cargo testbox vnc` shows the displays in a window, `cargo testbox

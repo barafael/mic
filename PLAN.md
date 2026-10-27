@@ -471,7 +471,7 @@ Each numbered item below is about one commit. Box phases are in **bold**.
     device and hands it to Slint; a crowd of six in the tools pod fills nine tiles; alice uses
     29% of a core for it all (docs/observations.md).
 36. `spikes: remove video-tiles`. The box now measures what it measured; its numbers move to the
-    design doc.
+    design doc. *Done* (§5.10).
 37. `mic-media: VP9 decode on VA-API` where the GPU has it, through a VP9 decoder for
     `moq-video`'s `moq-vaapi`, offered upstream **⚠ unverified**. **`video`** runs on VA-API
     and, with `--no-gpu`, in software.
