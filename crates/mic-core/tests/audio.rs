@@ -167,3 +167,61 @@ async fn muted_is_silence_on_the_far_end_and_said_in_the_profile() {
     hears(&bob, 440.0, 660.0).await;
     assert!(!bob.room.state().borrow().participants[0].profile.muted);
 }
+
+/// Waits until `listener`'s room says `holds` of its active speaker and who's speaking.
+async fn speaker_is(
+    listener: &Participant,
+    what: &str,
+    holds: impl Fn(Option<mic_core::ParticipantKey>, &[mic_core::ParticipantKey]) -> bool,
+) {
+    let mut state = listener.room.state();
+    let waited = tokio::time::timeout(
+        PATIENCE,
+        state.wait_for(|state| holds(state.speaker, &state.speaking)),
+    )
+    .await
+    .is_ok();
+    assert!(waited, "{what}: {:?}", *listener.room.state().borrow());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_active_speaker_is_who_speaks_and_stays_through_silence() {
+    use mic_core::Command;
+    let relay = TestRelay::start().await.unwrap();
+    let invite = Invite::new_room();
+    let alice = join(&relay, &invite, "Alice", Some(440.0)).await;
+    let bob = join(&relay, &invite, "Bob", Some(660.0)).await;
+    let carol = join(&relay, &invite, "Carol", None).await;
+    let (alices, bobs) = (alice.room.participant(), bob.room.participant());
+    bob.room
+        .command(Command::SetMuted { muted: true })
+        .await
+        .unwrap();
+    speaker_is(&carol, "alice speaks", |speaker, speaking| {
+        speaker == Some(alices) && speaking == [alices]
+    })
+    .await;
+    // She stops, he starts: he takes over.
+    alice
+        .room
+        .command(Command::SetMuted { muted: true })
+        .await
+        .unwrap();
+    bob.room
+        .command(Command::SetMuted { muted: false })
+        .await
+        .unwrap();
+    speaker_is(&carol, "bob speaks", |speaker, speaking| {
+        speaker == Some(bobs) && speaking == [bobs]
+    })
+    .await;
+    // Nobody speaks: he stays the speaker.
+    bob.room
+        .command(Command::SetMuted { muted: true })
+        .await
+        .unwrap();
+    speaker_is(&carol, "nobody speaks", |speaker, speaking| {
+        speaker == Some(bobs) && speaking.is_empty()
+    })
+    .await;
+}

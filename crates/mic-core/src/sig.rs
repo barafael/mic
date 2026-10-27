@@ -411,6 +411,9 @@ struct VerificationState {
     /// The last checkpoint's number.
     last: Option<u64>,
     failed: Option<Forgery>,
+    /// Tracks the subscriber let go of mid-group, whose frames read since are ignored until it
+    /// subscribes again.
+    abandoned: std::collections::HashSet<String>,
 }
 
 /// One group as a subscriber read it.
@@ -426,6 +429,9 @@ impl Verification {
     /// its start, as one stream.
     fn read(&self, track: &str, group: u64, plaintext: &[u8]) {
         let mut state = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        if state.abandoned.contains(track) {
+            return;
+        }
         let key = (track.to_owned(), group);
         let read = state.read.entry(key.clone()).or_insert_with(|| Group {
             links: Vec::new(),
@@ -479,6 +485,26 @@ impl Verification {
         state.failed.clone()
     }
 
+    /// `track` let go of by the subscriber, as a camera no longer shown is: the frames of it
+    /// read and not confirmed are forgotten, since the rest of their groups, which the
+    /// checkpoints confirm them with, won't be read; and so are any it reads until it's
+    /// subscribed to again ([`Self::resume`]). What was read is read again from its group's start
+    /// then.
+    pub(crate) fn abandon(&self, track: &str) {
+        let mut state = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        state.read.retain(|(read, _), _| read != track);
+        state.abandoned.insert(track.to_owned());
+    }
+
+    /// `track` subscribed to again, after [`Self::abandon`].
+    fn resume(&self, track: &str) {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .abandoned
+            .remove(track);
+    }
+
     fn fail(&self, forgery: Forgery) {
         let mut state = self.0.lock().unwrap_or_else(PoisonError::into_inner);
         state.failed.get_or_insert(forgery);
@@ -522,6 +548,7 @@ impl VerifiedTrack {
         track: moq_e2ee::track::Consumer,
         verification: Verification,
     ) -> Self {
+        verification.resume(semantic);
         Self {
             semantic: semantic.to_owned(),
             track,

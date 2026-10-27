@@ -31,6 +31,13 @@ pub struct RoomState {
     /// can't sign, as when they pose as someone else. A frontend warns of them.
     pub rejected: Vec<Rejected>,
     pub connection: Connection,
+    /// The active speaker among the others (`crate::speaker`), once someone has spoken: kept
+    /// after they stop, until someone else speaks.
+    #[serde(default)]
+    pub speaker: Option<ParticipantKey>,
+    /// The others speaking now.
+    #[serde(default)]
+    pub speaking: Vec<ParticipantKey>,
 }
 
 /// The room's session with the relay.
@@ -61,6 +68,11 @@ pub enum Command {
     /// Take the noise out of the voice with this suppressor, or none.
     SetNoiseSuppression {
         mode: mic_media::audio::noise::NoiseSuppression,
+    },
+    /// Show the cameras of these participants only, as a frontend's visible tiles do; every
+    /// camera with none (as at the start). Only those are subscribed to and decoded (§5.8).
+    Watch {
+        participants: Option<Vec<ParticipantKey>>,
     },
 }
 
@@ -154,6 +166,8 @@ impl Room {
             participants: Vec::new(),
             rejected: Vec::new(),
             connection: Connection::Connected,
+            speaker: None,
+            speaking: Vec::new(),
         });
         let (events, _) = broadcast::channel(EVENTS);
         let weak_events = events.downgrade();
@@ -170,6 +184,9 @@ impl Room {
         let (roster, followed) = watch::channel(Roster::default());
         let peers = Peers::new(joined.crypto.clone(), joined.path, joined.origin.consume());
         let board = shared.board.clone();
+        let voices = crate::speaker::Voices::default();
+        let (watching, watched_cameras) = watch::channel(None);
+        let (speaker, followed_speaker) = watch::channel(None);
         let following = joined.runtime.spawn(roster::follow(
             peers,
             joined.crypto,
@@ -179,6 +196,9 @@ impl Room {
                 mixer: joined.mixer,
                 board: board.clone(),
                 decoders: joined.decoders.clone(),
+                voices: voices.clone(),
+                watching: watched_cameras,
+                speaker: followed_speaker,
             },
         ));
         let task = Task {
@@ -198,6 +218,9 @@ impl Room {
             roster: followed,
             state,
             events,
+            voices,
+            watching,
+            speaker,
         };
         joined.runtime.spawn(task.run(received));
         Self {
@@ -323,11 +346,19 @@ struct Task {
     roster: watch::Receiver<Roster>,
     state: watch::Sender<RoomState>,
     events: broadcast::Sender<Event>,
+    /// When each voice was last loud.
+    voices: crate::speaker::Voices,
+    /// Whose cameras are shown: all, if none are named.
+    watching: watch::Sender<Option<Vec<ParticipantKey>>>,
+    /// The active speaker, whose camera's priority is raised.
+    speaker: watch::Sender<Option<ParticipantKey>>,
 }
 
 impl Task {
     async fn run(mut self, mut requests: mpsc::UnboundedReceiver<Request>) {
         let mut roster_open = true;
+        let mut looking = tokio::time::interval(crate::speaker::LOOK);
+        looking.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             tokio::select! {
                 request = requests.recv() => match request {
@@ -360,8 +391,33 @@ impl Task {
                     self.roster_changed(roster);
                 }
                 status = status(&mut self.connection) => self.status(status),
+                _ = looking.tick() => self.look_at_speakers(),
             }
         }
+    }
+
+    /// Who speaks now, and who the active speaker is, into the state.
+    fn look_at_speakers(&self) {
+        let now = std::time::Instant::now();
+        let (present, last) = {
+            let state = self.state.borrow();
+            let present: Vec<ParticipantKey> =
+                state.participants.iter().map(|other| other.key).collect();
+            (present, state.speaker)
+        };
+        let speaking = self.voices.speaking(&present, now);
+        let speaker = self.voices.active(last, &present, now);
+        self.speaker.send_if_modified(|shown| {
+            let changed = *shown != speaker;
+            *shown = speaker;
+            changed
+        });
+        self.state.send_if_modified(|state| {
+            let changed = state.speaker != speaker || state.speaking != speaking;
+            state.speaker = speaker;
+            state.speaking = speaking;
+            changed
+        });
     }
 
     async fn command(&mut self, command: Command) -> Result<(), Error> {
@@ -392,6 +448,14 @@ impl Task {
             }
             Command::SetNoiseSuppression { mode } => {
                 self.noise.send_replace(mode);
+                Ok(())
+            }
+            Command::Watch { participants } => {
+                self.watching.send_if_modified(|watching| {
+                    let changed = *watching != participants;
+                    *watching = participants;
+                    changed
+                });
                 Ok(())
             }
         }

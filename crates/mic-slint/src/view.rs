@@ -127,6 +127,8 @@ mod tests {
             participants: vec![participant(2, "Bob"), participant(3, "Carol")],
             rejected: Vec::new(),
             connection: Connection::Connected,
+            speaker: None,
+            speaking: Vec::new(),
         }
     }
 

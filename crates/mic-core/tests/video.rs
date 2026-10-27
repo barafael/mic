@@ -171,6 +171,53 @@ async fn a_recorded_camera_is_seen_at_its_rate() {
     assert!(rate > fps * 0.7, "{rate} pictures a second, of {fps}");
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn only_the_cameras_watched_are_decoded() {
+    use mic_core::Command;
+    let relay = TestRelay::start().await.unwrap();
+    let invite = Invite::new_room();
+    let alice = join(&invite, "Alice", Some(1), config(&relay)).await;
+    let bob = join(&invite, "Bob", Some(2), config(&relay)).await;
+    let carol = join(&invite, "Carol", None, config(&relay)).await;
+    let (alices, bobs) = (alice.room.participant(), bob.room.participant());
+    sees(&carol, alices, 1).await;
+    sees(&carol, bobs, 2).await;
+    carol
+        .room
+        .command(Command::Watch {
+            participants: Some(vec![alices]),
+        })
+        .await
+        .unwrap();
+    // What was on its way when the camera was dropped.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let fps = f64::from(CAMERA_SETTINGS.fps);
+    let (of_alice, of_bob) = (rate(&carol, alices).await, rate(&carol, bobs).await);
+    assert!(of_alice > fps * 0.7, "alice's at {of_alice} a second");
+    assert_eq!(of_bob, 0.0, "bob's, unwatched");
+    carol
+        .room
+        .command(Command::Watch { participants: None })
+        .await
+        .unwrap();
+    let before = carol.room.video_count(bobs);
+    sees(&carol, bobs, 2).await;
+    let deadline = tokio::time::Instant::now() + PATIENCE;
+    while carol.room.video_count(bobs) < before + 15 {
+        assert!(
+            carol.room.state().borrow().rejected.is_empty(),
+            "bob's broadcast rejected: {:?}",
+            carol.room.state().borrow().rejected
+        );
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "bob's camera not back: {:?}",
+            *carol.room.state().borrow()
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
 #[test]
 fn under_a_second_isnt_a_recording() {
     let pictures = (0..CAMERA_SETTINGS.fps - 1)

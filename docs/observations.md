@@ -6,6 +6,19 @@ measurements, and things to revisit. Newest first within each milestone. Each sa
 
 ## M8: Rooms
 
+- **Dropping a camera mid-group rejected its sender** (settled, commit 43). A camera no longer
+  watched is unsubscribed wherever its group stands. The frames read of that group can't be
+  confirmed without the rest, which the checkpoints' chain needs (D18), so after the 2 s grace
+  the whole broadcast was rejected as a forgery. The subscriber now lets go of what it read
+  and didn't confirm when it drops the track on purpose (`Verification::abandon`). A track
+  that ends any other way still counts against its sender.
+- **Watch channels must be marked seen** (settled, commit 43). A `watch::Receiver` whose
+  `changed()` fires and is then only `borrow`ed stays changed, and a `select!` on it spins.
+  The roster's readers `mark_unchanged` after each change.
+- **moq-net reuses a lingering track on resubscribe** (upstream, noted). Re-subscribing within
+  moq-net's linger window gets the dropped subscription's producer back, its newest group again
+  from its start. mic reads it as a new group: the abandoned frames are forgotten.
+
 - **The crowd's media isn't cached on disk** (settled, commit 42). Encoding two seconds of a
   pattern takes well under a second, so each crowd participant encodes its own at start and
   loops it; `cargo testbox media` and `target/testbox-media/` would only add a step to keep fresh.

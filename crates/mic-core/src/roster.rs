@@ -201,6 +201,22 @@ pub(crate) struct Playing {
     pub board: crate::video::Board,
     /// The video codecs this participant decodes, by name.
     pub decoders: Vec<String>,
+    /// When each voice was last loud, as its player hears it.
+    pub voices: crate::speaker::Voices,
+    /// Whose cameras are shown, and so played: all, if none are named.
+    pub watching: watch::Receiver<Option<Vec<ParticipantKey>>>,
+    /// The active speaker, whose camera is raised above the others'.
+    pub speaker: watch::Receiver<Option<ParticipantKey>>,
+}
+
+impl Playing {
+    /// Whether `whose` camera is shown.
+    fn shows(&self, whose: ParticipantKey) -> bool {
+        self.watching
+            .borrow()
+            .as_ref()
+            .is_none_or(|watching| watching.contains(&whose))
+    }
 }
 
 /// Follows the room's peers, their catalogs and their profiles into `roster` until the peers end
@@ -343,7 +359,7 @@ async fn read_peer(
     crypto: RoomCrypto,
     room: RoomId,
     found: mpsc::UnboundedSender<(String, Found)>,
-    playing: Playing,
+    mut playing: Playing,
 ) {
     let path = peer.path().to_owned();
     let send = |find: Found| found.send((path.clone(), find)).is_ok();
@@ -357,15 +373,19 @@ async fn read_peer(
     let segment_of = |key: &ParticipantKey| crypto.participant_segment(key.as_bytes()).ok();
     let mut last: Option<u64> = None;
     let mut _profiles: Option<Task> = None;
-    // Its voice and camera, played once a catalog names them, until the broadcast goes or is
-    // rejected.
+    // Its voice, played once a catalog names it, and its camera, while it's shown, until the
+    // broadcast goes or is rejected.
     let mut _voice: Option<Task> = None;
-    let mut _camera: Option<Task> = None;
+    let mut camera: Option<Camera> = None;
+    // Whose camera the catalog names, in a codec this participant decodes.
+    let mut decodable: Option<ParticipantKey> = None;
     let mut verification: Option<Verification> = None;
     let mut verifying: Option<tokio::task::JoinHandle<sig::Forgery>> = None;
+    // Once the room's task is gone, these are never asked again.
+    let (mut watching_open, mut speaker_open) = (true, true);
     loop {
         let received = tokio::select! {
-            received = catalogs.recv_group() => received,
+            received = catalogs.recv_group() => Some(received),
             forgery = async {
                 match verifying.as_mut() {
                     Some(task) => task.await.ok(),
@@ -377,85 +397,144 @@ async fn read_peer(
                 }
                 return;
             }
-        };
-        let mut group = match received {
-            Ok(Some(group)) => group,
-            Ok(None) => return,
-            Err(error) => {
-                send(Found::Rejected(format!(
-                    "its catalog track failed: {error}"
-                )));
-                return;
+            changed = playing.watching.changed(), if watching_open => {
+                watching_open = changed.is_ok();
+                playing.watching.mark_unchanged();
+                None
+            }
+            changed = playing.speaker.changed(), if speaker_open => {
+                speaker_open = changed.is_ok();
+                playing.speaker.mark_unchanged();
+                None
             }
         };
-        let Ok(Some(frame)) = group.read_frame().await else {
-            continue;
-        };
-        let expected = Expected {
-            room,
-            kid: crypto.kid(),
-            epoch: peer.epoch(),
-            participant_segment: peer.participant_segment(),
-            segment_of: &segment_of,
-            last,
-        };
-        let catalog = match Catalog::verify(&frame.plaintext, &expected) {
-            Ok(catalog) => catalog,
-            Err(rejection) => {
-                send(Found::Rejected(rejection.to_string()));
-                return;
-            }
-        };
-        last = Some(catalog.seq);
-        if !send(Found::Verified(Box::new(catalog.clone()))) {
-            return;
-        }
-        if verifying.is_none() {
-            let checkpoints = match peer.track(SIG).await {
-                Ok(track) => track,
+        if let Some(received) = received {
+            let mut group = match received {
+                Ok(Some(group)) => group,
+                Ok(None) => return,
                 Err(error) => {
-                    send(Found::Rejected(format!("no checkpoints: {error}")));
+                    send(Found::Rejected(format!(
+                        "its catalog track failed: {error}"
+                    )));
                     return;
                 }
             };
-            let checked = Verification::default();
-            verification = Some(checked.clone());
-            verifying = Some(tokio::spawn(sig::verify(
-                checkpoints,
-                checked.clone(),
-                catalog.participant,
+            let Ok(Some(frame)) = group.read_frame().await else {
+                continue;
+            };
+            let expected = Expected {
                 room,
-                crypto.kid(),
-                peer.epoch().to_owned(),
-            )));
-            _profiles = Some(Task(tokio::spawn(read_profiles(
-                peer.clone(),
-                checked,
-                found.clone(),
-            ))));
+                kid: crypto.kid(),
+                epoch: peer.epoch(),
+                participant_segment: peer.participant_segment(),
+                segment_of: &segment_of,
+                last,
+            };
+            let catalog = match Catalog::verify(&frame.plaintext, &expected) {
+                Ok(catalog) => catalog,
+                Err(rejection) => {
+                    send(Found::Rejected(rejection.to_string()));
+                    return;
+                }
+            };
+            last = Some(catalog.seq);
+            if !send(Found::Verified(Box::new(catalog.clone()))) {
+                return;
+            }
+            if verifying.is_none() {
+                let checkpoints = match peer.track(SIG).await {
+                    Ok(track) => track,
+                    Err(error) => {
+                        send(Found::Rejected(format!("no checkpoints: {error}")));
+                        return;
+                    }
+                };
+                let checked = Verification::default();
+                verification = Some(checked.clone());
+                verifying = Some(tokio::spawn(sig::verify(
+                    checkpoints,
+                    checked.clone(),
+                    catalog.participant,
+                    room,
+                    crypto.kid(),
+                    peer.epoch().to_owned(),
+                )));
+                _profiles = Some(Task(tokio::spawn(read_profiles(
+                    peer.clone(),
+                    checked,
+                    found.clone(),
+                ))));
+            }
+            // What the catalog names now, started once: a track added later starts with the
+            // catalog that names it.
+            if _voice.is_none()
+                && let Some(checked) = &verification
+                && let Some(mixer) = &playing.mixer
+                && catalog
+                    .tracks
+                    .iter()
+                    .any(|track| track == crate::audio::AUDIO)
+            {
+                _voice = play_voice(
+                    &peer,
+                    checked,
+                    mixer.clone(),
+                    catalog.participant,
+                    playing.voices.clone(),
+                )
+                .await;
+            }
+            if catalog.renditions.iter().any(|rendition| {
+                rendition.track == crate::video::CAMERA
+                    && playing.decoders.contains(&rendition.codec)
+            }) {
+                decodable = Some(catalog.participant);
+            }
         }
-        let Some(checked) = &verification else {
+        // Its camera, played while it's shown, and raised while it's the active speaker's.
+        let (Some(checked), Some(whose)) = (&verification, decodable) else {
             continue;
         };
-        // What the catalog names now, started once: a track added later starts with the
-        // catalog that names it.
-        if _voice.is_none()
-            && let Some(mixer) = &playing.mixer
-            && catalog
-                .tracks
-                .iter()
-                .any(|track| track == crate::audio::AUDIO)
-        {
-            _voice = play_voice(&peer, checked, mixer.clone()).await;
+        let shown = playing.shows(whose);
+        if shown && camera.is_none() {
+            camera = play_camera(&peer, checked, whose, &playing.board).await;
+        } else if !shown && let Some(unwatched) = camera.take() {
+            unwatched.stop(checked);
         }
-        if _camera.is_none()
-            && let Some(rendition) = catalog
-                .renditions
-                .iter()
-                .find(|rendition| rendition.track == crate::video::CAMERA)
-            && playing.decoders.contains(&rendition.codec)
-        {
-            _camera = play_camera(&peer, checked, catalog.participant, &playing.board).await;
+        if let Some(camera) = camera.as_mut() {
+            camera.raise(*playing.speaker.borrow() == Some(whose));
+        }
+    }
+}
+
+/// A camera being played, its subscription raised while its sender is the active speaker.
+/// Dropped, it stops.
+struct Camera {
+    playing: tokio::task::JoinHandle<()>,
+    preferences: crate::tracks::Preferences,
+    raised: bool,
+}
+
+impl Camera {
+    /// Stops playing it, as when it's no longer shown: what was read of its group and isn't
+    /// confirmed yet never will be, so it's let go (`Verification::abandon`).
+    fn stop(self, verification: &Verification) {
+        self.playing.abort();
+        verification.abandon(crate::video::CAMERA);
+    }
+}
+
+impl Drop for Camera {
+    fn drop(&mut self) {
+        self.playing.abort();
+    }
+}
+
+impl Camera {
+    fn raise(&mut self, raised: bool) {
+        if self.raised != raised {
+            self.raised = raised;
+            self.preferences.raise(raised);
         }
     }
 }
@@ -466,16 +545,16 @@ async fn play_camera(
     verification: &Verification,
     whose: ParticipantKey,
     board: &crate::video::Board,
-) -> Option<Task> {
+) -> Option<Camera> {
     match peer
-        .verified_track(crate::video::CAMERA, verification)
+        .verified_track_with_preferences(crate::video::CAMERA, verification)
         .await
     {
-        Ok(track) => Some(Task(tokio::spawn(crate::video::play(
-            track,
-            whose,
-            board.clone(),
-        )))),
+        Ok((track, preferences)) => Some(Camera {
+            playing: tokio::spawn(crate::video::play(track, whose, board.clone())),
+            preferences,
+            raised: false,
+        }),
         Err(error) => {
             tracing::debug!(%error, path = peer.path(), "no camera");
             None
@@ -483,14 +562,19 @@ async fn play_camera(
     }
 }
 
-/// `peer`'s voice into a stream of `mixer`'s, its frames confirmed as any others are.
+/// `peer`'s voice, `whose` it is, into a stream of `mixer`'s, its frames confirmed as any others
+/// are, and how loud it is into `voices`.
 async fn play_voice(
     peer: &Peer,
     verification: &Verification,
     mixer: mic_media::audio::Mixer,
+    whose: ParticipantKey,
+    voices: crate::speaker::Voices,
 ) -> Option<Task> {
     match peer.verified_track(crate::audio::AUDIO, verification).await {
-        Ok(track) => Some(Task(tokio::spawn(crate::audio::play(track, mixer)))),
+        Ok(track) => Some(Task(tokio::spawn(crate::audio::play(
+            track, mixer, whose, voices,
+        )))),
         Err(error) => {
             tracing::debug!(%error, path = peer.path(), "no voice");
             None
