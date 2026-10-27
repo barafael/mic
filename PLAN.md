@@ -488,6 +488,8 @@ from; the git pins move to releases as they land.
 ### M7: Invites, version check, site
 
 39. `site: the landing page and version.json`, built by GitHub Actions for GitHub Pages (D25).
+    *Done* (`site/`, `site.yml`); the invite page's logic is tested under node against the
+    invite mic-core writes.
 40. `mic-core, mic-slint: the version check` against `version.json` (D15). **`version`**: the
     box's `site` container serves a newer version; the client says so.
 41. `mic-slint: open mic:// links`. On Linux, `mic --register` installs the desktop file and the

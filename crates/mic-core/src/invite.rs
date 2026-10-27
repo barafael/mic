@@ -235,4 +235,22 @@ mod tests {
     fn new_rooms_differ() {
         assert_ne!(Invite::new_room(), Invite::new_room());
     }
+
+    /// The invite site/invite.test.mjs holds the landing page to: both forms, as mic writes them.
+    #[test]
+    fn the_landing_pages_fixture() {
+        let invite = Invite {
+            room: RoomId([1; 16]),
+            secret: RoomSecret([2; 32]),
+        };
+        let (room, secret) = (
+            "AQEBAQEBAQEBAQEBAQEBAQ",
+            "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI",
+        );
+        assert_eq!(
+            invite.to_https_url("example.org"),
+            format!("https://example.org/j/#1/{room}/{secret}")
+        );
+        assert_eq!(invite.to_mic_url(), format!("mic://join/1/{room}#{secret}"));
+    }
 }

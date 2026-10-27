@@ -4,6 +4,16 @@ What turned up while building `mic` that the plan didn't expect: surprises, upst
 measurements, and things to revisit. Newest first within each milestone. Each says whether it's
 **open**, **settled** (and where), or **upstream** (to report or follow).
 
+## M7: Invites, version check, site
+
+- **The Pages actions' SHAs come from GitHub's API, read through a summarizer** (open). Confirm
+  them on the first run of `site.yml`: a wrong pin fails loudly, not silently.
+- **The site has no domain yet** (open). Its pages link relatively, and `Invite::to_https_url`
+  takes the host; a CNAME file and the release's download links come with one.
+- **The Slint badge is a text link** (open). The royalty-free terms' option (b), the badge on the
+  download page, wants Slint's own badge image; mic meets option (a), AboutSlint in the window,
+  already (design §5.10).
+
 ## M6: Video (VP9)
 
 - **A click at fixed coordinates hit the wrong button** (settled). The new Camera button pushed
