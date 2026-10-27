@@ -11,9 +11,16 @@ use crate::view;
 
 /// How long the relay and each client may take after their pods were played.
 pub const START: Duration = Duration::from_secs(30);
-/// What a display's program logs once it's up: the probe window's first frame (testbox/probe,
-/// `PRESENTED`).
-pub const DISPLAY_UP: &str = "probe: presented";
+/// What the probe logs once it's up: its window's first frame (testbox/probe, `PRESENTED`).
+pub const PROBE_UP: &str = "probe: presented";
+
+/// What `display`'s program logs once it's up: the probe's, or a client's window's first frame.
+fn up_line(display: &str) -> &'static str {
+    match display {
+        "probe" => PROBE_UP,
+        _ => mic_harness::SHOWN,
+    }
+}
 
 /// Waits until the relay answers, and every display and client is up.
 pub fn all(the_box: &TestBox) -> Result<()> {
@@ -57,13 +64,13 @@ pub fn relay(the_box: &TestBox) -> Result<()> {
     }
 }
 
-/// `display` has logged [`DISPLAY_UP`]; returns its log.
+/// `display` has logged that it's up ([`up_line`]); returns its log.
 pub fn display_up(the_box: &TestBox, display: &'static str) -> Result<String> {
     let container = view::container(display);
     let deadline = Instant::now() + START;
     loop {
         let log = the_box.log(&container)?;
-        if log.lines().any(|line| line == DISPLAY_UP) {
+        if log.lines().any(|line| line == up_line(display)) {
             return Ok(log);
         }
         if Instant::now() > deadline {

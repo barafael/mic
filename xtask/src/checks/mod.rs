@@ -152,3 +152,20 @@ impl Checks<'_> {
         }
     }
 }
+
+/// A PNG's pixels, and how many samples each has.
+pub fn png_pixels(path: &std::path::Path) -> Result<(Vec<u8>, usize)> {
+    let file = std::fs::File::open(path).map_err(|source| Error::Io {
+        what: path.display().to_string(),
+        source,
+    })?;
+    let mut reader = png::Decoder::new(std::io::BufReader::new(file))
+        .read_info()
+        .map_err(|error| Error::Failed(format!("{}: {error}", path.display())))?;
+    let mut pixels = vec![0; reader.output_buffer_size().unwrap_or(0)];
+    let info = reader
+        .next_frame(&mut pixels)
+        .map_err(|error| Error::Failed(format!("{}: {error}", path.display())))?;
+    pixels.truncate(info.buffer_size());
+    Ok((pixels, info.color_type.samples()))
+}

@@ -1,0 +1,38 @@
+[package]
+name = "mic-slint"
+description = "mic's window: the Slint frontend over mic-core. It builds the `mic` binary"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "mic"
+path = "src/main.rs"
+
+[features]
+# The box's harness on a Unix socket (`--harness`), with the `ui` section filled in.
+harness = ["dep:mic-harness"]
+
+[dependencies]
+clap = { version = "4.6.7", features = ["derive", "env"] }
+mic-core = { version = "0.1.0", path = "../mic-core" }
+mic-harness = { version = "0.1.0", path = "../mic-harness", optional = true }
+# wgpu for the video tiles to come (the spike, spikes/video-tiles); the software renderer where
+# there's no wgpu adapter. Slint's royalty-free license: the About screen shows AboutSlint (D24).
+slint = { version = "=1.18.1", default-features = false, features = [
+    "std",
+    "compat-1-2",
+    "accessibility",
+    "backend-winit",
+    "renderer-femtovg-wgpu",
+    "renderer-software",
+    "unstable-wgpu-30",
+] }
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "signal", "sync", "time"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+url = "2"
+
+[build-dependencies]
+slint-build = "=1.18.1"

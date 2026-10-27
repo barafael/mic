@@ -14,8 +14,9 @@ ignore = [
 ]
 
 [licenses]
-# mic is MIT OR Apache-2.0 (D24), so only permissive licenses. Slint's royalty-free license joins
-# this list with Slint itself (PLAN.md, M4).
+# mic is MIT OR Apache-2.0 (D24), so only permissive licenses, and Slint's royalty-free one: Slint
+# is GPL-3.0-only OR royalty-free OR commercial, and mic takes the royalty-free terms, whose
+# condition the About screen meets with AboutSlint (design §5.10).
 allow = [
     "0BSD",
     "Apache-2.0",
@@ -27,6 +28,7 @@ allow = [
     # webpki-roots and webpki-root-certs: Mozilla's root certificates, as data.
     "CDLA-Permissive-2.0",
     "ISC",
+    "LicenseRef-Slint-Royalty-free-2.0",
     "MIT",
     "Unicode-3.0",
     "Unlicense",

@@ -1,0 +1,205 @@
+// mic's window: a join screen, and a room's tiles. It shows what the Rust side sets and asks for
+// what's clicked through callbacks; it holds no room logic (PLAN.md, "The core and its
+// frontends").
+
+import { AboutSlint, Button, LineEdit, VerticalBox, HorizontalBox } from "std-widgets.slint";
+
+// A participant's tile: by key, as the harness's `ui` section names it.
+export struct Tile {
+    key: string,
+    name: string,
+    me: bool,
+}
+
+component NameTile inherits Rectangle {
+    in property <Tile> tile;
+    background: tile.me ? #2b4a6b : #3a3a44;
+    border-radius: 8px;
+    Text {
+        text: tile.me ? tile.name + " (you)" : tile.name;
+        color: white;
+        font-size: 20px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        wrap: word-wrap;
+        width: parent.width - 16px;
+    }
+}
+
+component JoinScreen inherits VerticalBox {
+    in-out property <string> name;
+    in-out property <string> invite;
+    in property <bool> joining;
+    in property <string> error;
+    callback join(string, string);
+    callback new-room();
+    alignment: center;
+    // Typing starts with the name, whenever the screen shows.
+    init => {
+        name-field.focus();
+    }
+    Text {
+        text: "mic";
+        font-size: 32px;
+        horizontal-alignment: center;
+    }
+    name-field := LineEdit {
+        placeholder-text: "Your name";
+        text <=> root.name;
+        enabled: !root.joining;
+    }
+    LineEdit {
+        placeholder-text: "Invite: mic://join/…";
+        text <=> root.invite;
+        enabled: !root.joining;
+        accepted => {
+            root.join(root.name, root.invite);
+        }
+    }
+    HorizontalBox {
+        padding: 0;
+        Button {
+            text: "New room";
+            enabled: !root.joining;
+            clicked => {
+                root.new-room();
+            }
+        }
+        Button {
+            text: root.joining ? "Joining…" : "Join";
+            primary: true;
+            enabled: !root.joining && root.name != "" && root.invite != "";
+            clicked => {
+                root.join(root.name, root.invite);
+            }
+        }
+    }
+    Text {
+        text: root.error;
+        color: #d04040;
+        wrap: word-wrap;
+        horizontal-alignment: center;
+    }
+}
+
+component RoomScreen inherits VerticalBox {
+    in property <[Tile]> tiles;
+    in property <string> invite;
+    in property <string> status;
+    in property <string> warning;
+    callback leave();
+    // As square a grid as the tiles make.
+    property <int> columns: Math.max(1, Math.ceil(Math.sqrt(root.tiles.length)));
+    property <int> rows: Math.max(1, Math.ceil(root.tiles.length / root.columns));
+    HorizontalBox {
+        padding: 0;
+        LineEdit {
+            text: root.invite;
+            read-only: true;
+            accessible-label: "The room's invite";
+        }
+        Button {
+            text: "Leave";
+            clicked => {
+                root.leave();
+            }
+        }
+    }
+    if root.status != "": Text {
+        text: root.status;
+        color: #d0a040;
+    }
+    if root.warning != "": Text {
+        text: root.warning;
+        color: #d04040;
+        wrap: word-wrap;
+    }
+    grid := Rectangle {
+        vertical-stretch: 1;
+        for tile[i] in root.tiles: NameTile {
+            tile: tile;
+            x: grid.width / root.columns * Math.mod(i, root.columns) + 4px;
+            y: grid.height / root.rows * Math.floor(i / root.columns) + 4px;
+            width: grid.width / root.columns - 8px;
+            height: grid.height / root.rows - 8px;
+        }
+    }
+}
+
+export component AppWindow inherits Window {
+    title: "mic";
+    preferred-width: 960px;
+    preferred-height: 600px;
+    min-width: 360px;
+    min-height: 300px;
+    // `join` or `room`.
+    in property <string> screen: "join";
+    in-out property <string> name;
+    in-out property <string> invite;
+    in property <bool> joining;
+    in property <string> error;
+    in property <[Tile]> tiles;
+    in property <string> room-invite;
+    in property <string> status;
+    in property <string> warning;
+    callback join(string, string);
+    callback new-room();
+    callback leave();
+
+    about := PopupWindow {
+        x: (root.width - 320px) / 2;
+        y: (root.height - 240px) / 2;
+        width: 320px;
+        height: 240px;
+        Rectangle {
+            background: #202024;
+            border-radius: 8px;
+            VerticalBox {
+                AboutSlint { }
+                Text {
+                    text: "mic " + root.version;
+                    horizontal-alignment: center;
+                    color: white;
+                }
+            }
+        }
+    }
+    in property <string> version;
+
+    VerticalLayout {
+        if root.screen == "join": JoinScreen {
+            vertical-stretch: 1;
+            name <=> root.name;
+            invite <=> root.invite;
+            joining: root.joining;
+            error: root.error;
+            join(name, invite) => {
+                root.join(name, invite);
+            }
+            new-room => {
+                root.new-room();
+            }
+        }
+        if root.screen == "room": RoomScreen {
+            vertical-stretch: 1;
+            tiles: root.tiles;
+            invite: root.room-invite;
+            status: root.status;
+            warning: root.warning;
+            leave => {
+                root.leave();
+            }
+        }
+        HorizontalLayout {
+            vertical-stretch: 0;
+            alignment: end;
+            padding: 4px;
+            Button {
+                text: "About";
+                clicked => {
+                    about.show();
+                }
+            }
+        }
+    }
+}

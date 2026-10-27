@@ -8,9 +8,13 @@ ARG ARCH_SNAPSHOT
 # TigerVNC's Xvnc, the display `with-display` runs a client on, and its `vncconfig`. Mesa's
 # userspace drivers, close to the host's kernel driver: radeonsi for VA-API and GL, RADV for
 # Vulkan, and llvmpipe and lavapipe for a box without the GPU (`up --no-gpu`); vainfo. The X
-# libraries winit loads at run time.
+# libraries winit loads at run time. A font, without which Slint doesn't start (the spike,
+# spikes/video-tiles). D-Bus and GNOME Keyring, for the device secret (keyring-session).
+# xdotool, which types and clicks into a window as a person would, for checks of its screens.
 RUN --mount=type=cache,target=/var/cache/pacman/pkg \
     echo "Server = https://archive.archlinux.org/repos/${ARCH_SNAPSHOT}/\$repo/os/\$arch" \
         > /etc/pacman.d/mirrorlist \
     && pacman -Syu --noconfirm --needed tigervnc mesa vulkan-radeon vulkan-swrast libva-utils \
-        libxkbcommon-x11 libxcursor libxi libxrandr
+        libxkbcommon-x11 libxcursor libxi libxrandr ttf-dejavu dbus gnome-keyring \
+        xdotool
+COPY keyring-session /usr/local/bin/keyring-session

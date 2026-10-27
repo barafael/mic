@@ -1,0 +1,15 @@
+#!/bin/sh
+# A participant's session bus with GNOME Keyring's Secret Service on it, unlocked, then the
+# command in this process (exec), so the stop signals with-display hands on reach it: the
+# device secret comes from the keyring, as on a desktop (D16). The keyring lives under $HOME,
+# which outlives the container, so the secret, and the participant's key with it, survive a
+# restart.
+set -eu
+mkdir -p "$HOME"
+DBUS_SESSION_BUS_ADDRESS=$(dbus-daemon --session --fork --print-address=1 --nopidfile)
+export DBUS_SESSION_BUS_ADDRESS
+# Unlocked with a password the box doesn't keep secret, which makes the login keyring the first
+# time; the daemon forks, and prints what to export.
+eval "$(printf box | gnome-keyring-daemon --daemonize --unlock --components=secrets)"
+export GNOME_KEYRING_CONTROL
+exec "$@"

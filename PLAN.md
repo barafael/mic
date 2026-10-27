@@ -396,7 +396,11 @@ Each numbered item below is about one commit. Box phases are in **bold**.
     tiles. The core runs on a tokio runtime on a second thread; state reaches the UI through
     `invoke_from_event_loop`. It embeds `mic-harness` and fills the `ui` section. **`roster`**
     now runs with windows: the `ui` section matches the roster, the device secret comes from
-    the box's keyring, and screenshots are taken.
+    the box's keyring, and screenshots are taken. *Done,* with a commit before it:
+    `mic-core: the room a frontend is in` (`App`), which the join screen and the harness both
+    join through. `roster` also types a join into a window (`xdotool`), and restarts a client
+    to see its key kept. The relay is `--relay` (or `MIC_RELAY`) until moq.pro's public prefix
+    is settled (D8).
 24. `ci: a release build of mic on Linux, Windows and macOS`. The smoke job, `mic --version`.
 
 ### M5: Audio

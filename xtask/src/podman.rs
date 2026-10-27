@@ -26,11 +26,10 @@ const RENDERED: &str = "target/testbox-pods";
 pub const VIEW: &str = "target/testbox-view";
 /// A directory per client for its harness's socket, which only that client mounts.
 pub const RUN: &str = "target/testbox-run";
-/// The clients `up` plays, each a pod of its own from testbox/pods/client.yaml: headless until
-/// M4 gives them windows.
+/// The clients `up` plays, each a pod of its own from testbox/pods/client.yaml: a window.
 pub const CLIENTS: [&str; 2] = ["alice", "bob"];
-/// The pods with a display: the probe's, for now.
-pub const DISPLAYS: [&str; 1] = ["probe"];
+/// The pods with a display: the probe's, and each client's.
+pub const DISPLAYS: [&str; 3] = ["probe", "alice", "bob"];
 
 /// A pod of the box, from `testbox/pods/<name>.yaml`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -200,7 +199,7 @@ impl TestBox {
         self.repo.join(VIEW).join(display).join("vnc")
     }
 
-    /// Where `client`'s harness serves on the host (mic-crowd's `--harness`, /run/mic).
+    /// Where `client`'s harness serves on the host (mic's `--harness`, /run/mic/<client>).
     pub fn harness_socket(&self, client: &str) -> PathBuf {
         self.repo.join(RUN).join(client).join(client)
     }

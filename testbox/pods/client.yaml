@@ -10,25 +10,42 @@
   spec: {
     restartPolicy: "Always",
     containers: [
-      # Headless for now (crates/mic-crowd, one participant): driven by its harness, on a socket
-      # in target/testbox-run/@NAME@. It trusts the relay by the box's CA. M4 gives it a window.
+      # The window (crates/mic-slint) on a display of its own (testbox/view/with-display), served
+      # on a socket in target/testbox-view/@NAME@ for `cargo testbox vnc` and `shot`, with the
+      # host's GPU. Driven by its harness, on a socket in target/testbox-run/@NAME@; its device
+      # secret in GNOME Keyring (keyring-session), under a home in that directory too, which
+      # outlives the container. It trusts the relay by the box's CA.
       {
         name: "client",
         image: "@IMAGE:client@",
         args: [
-          "/opt/mic/mic-crowd",
+          "/opt/mic/with-display", "/run/view/vnc", "1280x720", "--",
+          "keyring-session",
+          "/opt/mic/mic",
           "--relay", "https://mic-testbox-relay:4443/",
           "--ca", "/keys/ca.pem",
-          "--harness", "/run/mic",
-          "@NAME@",
+          "--harness", "/run/mic/@NAME@",
         ],
-        # Plain logs: the record merges them into one timeline.
-        env: [{ name: "RUST_LOG", value: "info" }, { name: "NO_COLOR", value: "1" }],
+        env: [
+          # Plain logs: the record merges them into one timeline.
+          { name: "RUST_LOG", value: "info" },
+          { name: "NO_COLOR", value: "1" },
+          { name: "HOME", value: "/run/mic/home" },
+          # Vulkan's loader, Mesa and the keyring want a runtime directory.
+          { name: "XDG_RUNTIME_DIR", value: "/tmp" },
+          # Slint presents with Fifo, which waits for a vertical blank Xvnc never has: under
+          # 2 fps (spikes/video-tiles). Mesa presents in mailbox mode instead.
+          { name: "MESA_VK_WSI_PRESENT_MODE", value: "mailbox" },
+        ],
         securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: ["ALL"] } },
         volumeMounts: [
           { name: "bin", mountPath: "/opt/mic", readOnly: true },
           { name: "keys", mountPath: "/keys", readOnly: true },
           { name: "run", mountPath: "/run/mic" },
+          { name: "view", mountPath: "/run/view" },
+          # The host's GPU, for rendering and video only: the render node, not the card's
+          # node. Left out with `up --no-gpu`, where Slint draws in software.
+          # @GPU@ { name: "render", mountPath: "/dev/dri/renderD128" },
         ],
       },
     ],
@@ -36,8 +53,11 @@
       # What the builder built (`cargo testbox build`): a change is a restart, not an image build.
       { name: "bin", hostPath: { path: "@REPO@/target/testbox-bin", type: "Directory" } },
       { name: "keys", persistentVolumeClaim: { claimName: "mic-testbox-keys" } },
-      # The harness's socket, which only this client mounts: no client reaches another's.
+      # The harness's socket and the keyring's home, which only this client mounts: no client
+      # reaches another's.
       { name: "run", hostPath: { path: "@REPO@/target/testbox-run/@NAME@", type: "Directory" } },
+      { name: "view", hostPath: { path: "@REPO@/target/testbox-view/@NAME@", type: "Directory" } },
+      # @GPU@ { name: "render", hostPath: { path: "/dev/dri/renderD128", type: "CharDevice" } },
     ],
   },
 }
