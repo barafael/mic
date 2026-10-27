@@ -118,3 +118,31 @@ async fn a_rejoin_is_one_participant() {
     drop(alice);
     roster_is(&bob, &["Alice"]).await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn each_participants_decoders_reach_the_others() {
+    let relay = TestRelay::start().await.unwrap();
+    let invite = Invite::new_room();
+    let alice = client(&relay)
+        .join(invite.clone(), Profile::new("Alice"))
+        .await
+        .unwrap();
+    // Dave decodes nothing, as `--decoders none` has it.
+    let mut config = Config::new(relay.url());
+    config.trust = Trust::Fingerprints(vec![relay.fingerprint().to_owned()]);
+    config.decoders = Vec::new();
+    let dave = Client::new(
+        config,
+        &InMemory::default(),
+        tokio::runtime::Handle::current(),
+    )
+    .unwrap()
+    .join(invite, Profile::new("Dave"))
+    .await
+    .unwrap();
+    roster_is(&alice, &["Dave"]).await;
+    roster_is(&dave, &["Alice"]).await;
+    assert!(alice.state().borrow().participants[0].decoders.is_empty());
+    assert_eq!(dave.state().borrow().participants[0].decoders, ["vp9"]);
+    assert_eq!(alice.state().borrow().me.decoders, ["vp9"]);
+}

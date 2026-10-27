@@ -30,6 +30,9 @@ pub struct Config {
     pub trust: Trust,
     /// How long a join may take to reach the relay.
     pub connect_timeout: Duration,
+    /// The video codecs it says it decodes: every one it has, unless told fewer (the box's
+    /// `--decoders`, to see a codec go unsupported).
+    pub decoders: Vec<mic_media::video::Codec>,
 }
 
 impl Config {
@@ -39,6 +42,7 @@ impl Config {
             relay,
             trust: Trust::System,
             connect_timeout: CONNECT_TIMEOUT,
+            decoders: mic_media::video::Codec::ALL.to_vec(),
         }
     }
 }
@@ -206,7 +210,13 @@ impl Inner {
                 why: error.to_string(),
             })?;
         let participant = ParticipantKey::from_bytes(key.public().to_bytes());
-        let mut publication = Publication::new(generation, broadcast, key, invite.room)?;
+        let mut publication = Publication::new(
+            generation,
+            broadcast,
+            key,
+            invite.room,
+            &self.config.decoders,
+        )?;
         // The profile first: the broadcast is announced with it, so whoever finds the
         // participant finds its name.
         let mut profile_track = publication.track(roster::PROFILE)?;
@@ -239,6 +249,12 @@ impl Inner {
             muted,
             noise,
             mixer: media.mixer,
+            decoders: self
+                .config
+                .decoders
+                .iter()
+                .map(|codec| codec.name().to_owned())
+                .collect(),
         }))
     }
 }

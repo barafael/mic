@@ -52,12 +52,36 @@ struct Cli {
     #[cfg(all(unix, feature = "harness"))]
     #[arg(long)]
     tone: Option<f64>,
+    /// Claims to decode only these video codecs, comma-separated, or `none`: the box's way to
+    /// see a codec go unsupported.
+    #[cfg(all(unix, feature = "harness"))]
+    #[arg(long, value_parser = parse_decoders)]
+    decoders: Option<Decoders>,
     /// An invite to fill in, `mic://join/…`.
     invite: Option<String>,
 }
 
 /// What it prints once the window shows: mic-harness's `SHOWN`, which the box waits for.
 const SHOWN: &str = "the window shows";
+
+/// Video codecs, as `--decoders` takes them.
+#[cfg(all(unix, feature = "harness"))]
+#[derive(Clone, Debug)]
+struct Decoders(Vec<mic_media::video::Codec>);
+
+#[cfg(all(unix, feature = "harness"))]
+fn parse_decoders(text: &str) -> Result<Decoders, String> {
+    if text == "none" {
+        return Ok(Decoders(Vec::new()));
+    }
+    text.split(',')
+        .map(|name| {
+            mic_media::video::Codec::named(name.trim())
+                .ok_or_else(|| format!("no codec {name:?}: vp9, or none"))
+        })
+        .collect::<Result<_, _>>()
+        .map(Decoders)
+}
 
 /// How long leaving may take when the window closes.
 const LEAVING: Duration = Duration::from_secs(5);
@@ -84,6 +108,10 @@ fn run(cli: Cli) -> Result<(), String> {
     let mut config = Config::new(cli.relay);
     if let Some(ca) = cli.ca {
         config.trust = Trust::Roots(vec![ca]);
+    }
+    #[cfg(all(unix, feature = "harness"))]
+    if let Some(Decoders(decoders)) = cli.decoders {
+        config.decoders = decoders;
     }
     // Before the window: the keyring may ask to be unlocked.
     let keyring = Keyring::system().map_err(|error| error.to_string())?;

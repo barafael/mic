@@ -141,6 +141,12 @@ pub(crate) fn write_profile(track: &mut SignedTrack, profile: &Profile) -> Resul
 pub struct Participant {
     pub key: ParticipantKey,
     pub profile: Profile,
+    /// The video codecs it decodes, by name, as its catalog says.
+    #[serde(default)]
+    pub decoders: Vec<String>,
+    /// Which codec each of its video tracks is sent in.
+    #[serde(default)]
+    pub renditions: Vec<crate::catalog::Rendition>,
 }
 
 /// Who is in the room, as `follow` keeps it.
@@ -163,8 +169,8 @@ pub struct Rejected {
 
 /// What a peer's readers find.
 enum Found {
-    /// Its catalog stands: whose the broadcast is.
-    Verified(ParticipantKey),
+    /// Its catalog stands: whose the broadcast is, and what it decodes and sends.
+    Verified(Box<Catalog>),
     Profile(Profile),
     Rejected(String),
 }
@@ -174,6 +180,8 @@ enum Found {
 struct Known {
     key: Option<ParticipantKey>,
     profile: Option<Profile>,
+    decoders: Vec<String>,
+    renditions: Vec<crate::catalog::Rendition>,
 }
 
 /// Follows the room's peers, their catalogs and their profiles into `roster` until the peers end
@@ -228,7 +236,11 @@ pub(crate) async fn follow(
                     continue;
                 };
                 match find {
-                    Found::Verified(key) => entry.key = Some(key),
+                    Found::Verified(catalog) => {
+                        entry.key = Some(catalog.participant);
+                        entry.decoders = catalog.decoders;
+                        entry.renditions = catalog.renditions;
+                    }
                     Found::Profile(profile) => entry.profile = Some(profile),
                     Found::Rejected(reason) => {
                         tracing::warn!(%path, %reason, "a broadcast in the room doesn't stand");
@@ -269,6 +281,8 @@ fn participants(known: &HashMap<String, Known>) -> Vec<Participant> {
                 Participant {
                     key: known.key?,
                     profile: known.profile.clone()?,
+                    decoders: known.decoders.clone(),
+                    renditions: known.renditions.clone(),
                 },
             ))
         })
@@ -372,7 +386,7 @@ async fn read_peer(
             }
         };
         last = Some(catalog.seq);
-        if !send(Found::Verified(catalog.participant)) {
+        if !send(Found::Verified(Box::new(catalog.clone()))) {
             return;
         }
         if let (None, Some(mixer), Some(verification)) = (&_voice, &mixer, &verification)
@@ -488,6 +502,8 @@ mod tests {
         let known = |key: u8, name: &str| Known {
             key: Some(ParticipantKey([key; 32])),
             profile: Some(Profile::new(name)),
+            decoders: Vec::new(),
+            renditions: Vec::new(),
         };
         let known: HashMap<String, Known> = [
             (

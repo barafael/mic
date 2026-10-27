@@ -195,6 +195,7 @@ impl Publication {
         broadcast: moq_net::broadcast::Producer,
         key: RoomKey,
         room: RoomId,
+        decoders: &[mic_media::video::Codec],
     ) -> Result<Self, TrackError> {
         let epoch = generation.epoch().as_str().to_owned();
         let catalog = Catalog {
@@ -204,6 +205,11 @@ impl Publication {
             epoch: epoch.clone(),
             seq: 0,
             tracks: vec![CATALOG.to_owned(), SIG.to_owned()],
+            decoders: decoders
+                .iter()
+                .map(|codec| codec.name().to_owned())
+                .collect(),
+            renditions: Vec::new(),
             app: env!("CARGO_PKG_VERSION").to_owned(),
         };
         let catalog_track = produce(&generation, &broadcast, CATALOG)?;

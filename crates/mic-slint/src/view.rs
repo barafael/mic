@@ -100,6 +100,8 @@ mod tests {
         Participant {
             key: ParticipantKey::from_bytes([byte; 32]),
             profile: Profile::new(name),
+            decoders: vec!["vp9".to_owned()],
+            renditions: Vec::new(),
         }
     }
 

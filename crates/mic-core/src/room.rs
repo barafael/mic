@@ -127,6 +127,8 @@ pub(crate) struct Joined {
     pub noise: watch::Sender<mic_media::audio::noise::NoiseSuppression>,
     /// Where the others' voices play, if anywhere.
     pub mixer: Option<mic_media::audio::Mixer>,
+    /// The video codecs this participant decodes, by name.
+    pub decoders: Vec<String>,
 }
 
 impl Room {
@@ -135,6 +137,8 @@ impl Room {
         let me = Participant {
             key: joined.participant,
             profile: joined.profile.clone(),
+            decoders: joined.decoders.clone(),
+            renditions: Vec::new(),
         };
         let (state, watched) = watch::channel(RoomState {
             room: joined.invite.room.to_string(),

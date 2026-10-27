@@ -117,6 +117,8 @@ async fn forge(cli: Cli) -> Result<(), String> {
             PROFILE.to_owned(),
             AUDIO.to_owned(),
         ],
+        decoders: Vec::new(),
+        renditions: Vec::new(),
         app: env!("CARGO_PKG_VERSION").to_owned(),
     };
     let origin = moq_tokio::origin::spawn();
