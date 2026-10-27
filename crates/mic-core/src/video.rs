@@ -13,6 +13,7 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, PoisonError};
+use std::time::Duration;
 
 use mic_media::video::vp9::{Content, Settings, Vp9Decoder, Vp9Encoder};
 use mic_media::video::{Decoder as _, Encoder as _, Picture};
@@ -37,14 +38,58 @@ pub const CAMERA_SETTINGS: Settings = Settings {
     content: Content::Camera,
 };
 
-/// Encodes what `pictures` gives onto `track`, a group a second, each starting with a keyframe,
-/// until the pictures or the track end. While `on` says it's off, nothing is sent, and the next
-/// picture after it's on again starts a group.
-pub(crate) async fn publish(
-    mut pictures: Pictures,
-    mut track: SignedTrack,
-    on: watch::Receiver<bool>,
-) {
+/// What a participant sends as its camera.
+#[derive(Clone)]
+pub enum Camera {
+    /// Pictures from a source, encoded as they come.
+    Live(Pictures),
+    /// Pictures encoded once, sent in a loop: what a crowd of many sends without the CPU of an
+    /// encoder each (PLAN.md, commit 42).
+    Recorded(Recorded),
+}
+
+/// A camera's pictures encoded once at [`CAMERA_SETTINGS`], a keyframe each second, to send in
+/// a loop. Cheap to clone.
+#[derive(Clone)]
+pub struct Recorded {
+    /// Each picture's packets, a whole number of seconds of them.
+    pictures: Arc<Vec<Vec<Vec<u8>>>>,
+}
+
+impl Recorded {
+    /// `pictures` encoded, as many as make whole seconds; none is an error.
+    pub fn encode(pictures: impl IntoIterator<Item = Picture>) -> Result<Self, String> {
+        let settings = CAMERA_SETTINGS;
+        let fps = settings.fps as usize;
+        let mut encoder = Vp9Encoder::new(settings).map_err(|error| error.to_string())?;
+        let mut encoded = Vec::new();
+        for (index, picture) in pictures.into_iter().enumerate() {
+            let packets = encoder
+                .encode(&picture, index.is_multiple_of(fps))
+                .map_err(|error| error.to_string())?;
+            encoded.push(packets.into_iter().map(|packet| packet.data).collect());
+        }
+        encoded.truncate(encoded.len() / fps * fps);
+        if encoded.is_empty() {
+            return Err(format!("under a second of pictures ({fps} make one)"));
+        }
+        Ok(Self {
+            pictures: Arc::new(encoded),
+        })
+    }
+}
+
+/// Sends `camera` onto `track`, a group a second, each starting with a keyframe, until the
+/// camera or the track end. While `on` says it's off, nothing is sent, and the next picture
+/// after it's on again starts a group.
+pub(crate) async fn publish(camera: Camera, track: SignedTrack, on: watch::Receiver<bool>) {
+    match camera {
+        Camera::Live(pictures) => publish_live(pictures, track, on).await,
+        Camera::Recorded(recorded) => publish_recorded(recorded, track, on).await,
+    }
+}
+
+async fn publish_live(mut pictures: Pictures, track: SignedTrack, on: watch::Receiver<bool>) {
     let settings = CAMERA_SETTINGS;
     let mut encoder = match Vp9Encoder::new(settings) {
         Ok(encoder) => Some(encoder),
@@ -53,15 +98,13 @@ pub(crate) async fn publish(
             return;
         }
     };
-    let mut group = None;
-    let mut sent: u64 = 0;
+    let mut sending = Sending::new(track);
     while pictures.changed().await.is_ok() {
         let Some(picture) = pictures.borrow_and_update().clone() else {
             continue;
         };
         if !*on.borrow() {
-            // Back on, it starts with a keyframe.
-            sent = sent.next_multiple_of(u64::from(settings.fps));
+            sending.pause();
             continue;
         }
         if (picture.width, picture.height) != (settings.width, settings.height) {
@@ -72,7 +115,7 @@ pub(crate) async fn publish(
             );
             continue;
         }
-        let keyframe = sent.is_multiple_of(u64::from(settings.fps));
+        let keyframe = sending.keyframe_next();
         let Some(mut working) = encoder.take() else {
             return;
         };
@@ -91,44 +134,105 @@ pub(crate) async fn publish(
                 return;
             }
         };
-        let packets = match packets {
-            Ok(packets) => packets,
-            Err(error) => {
-                tracing::warn!(%error, "encoding the camera");
-                continue;
+        match packets {
+            Ok(packets) => {
+                let data: Vec<Vec<u8>> = packets.into_iter().map(|packet| packet.data).collect();
+                if !sending.send(&data) {
+                    return;
+                }
             }
-        };
-        if keyframe {
-            if let Some(full) = group.take()
+            Err(error) => tracing::warn!(%error, "encoding the camera"),
+        }
+    }
+}
+
+/// `recorded`, from its start, at the camera's rate, over and over. Paused, it starts again
+/// from its start, a keyframe.
+async fn publish_recorded(recorded: Recorded, track: SignedTrack, on: watch::Receiver<bool>) {
+    let mut ticks = tokio::time::interval(Duration::from_secs(1) / CAMERA_SETTINGS.fps);
+    ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut sending = Sending::new(track);
+    let mut next = 0;
+    loop {
+        ticks.tick().await;
+        if !*on.borrow() {
+            sending.pause();
+            next = 0;
+            continue;
+        }
+        if !sending.send(&recorded.pictures[next]) {
+            return;
+        }
+        next = (next + 1) % recorded.pictures.len();
+    }
+}
+
+/// A camera's pictures onto its track: a group a second, each starting with a keyframe, on the
+/// camera's timeline.
+struct Sending {
+    track: SignedTrack,
+    group: Option<crate::sig::SignedGroup>,
+    /// Pictures sent, and skipped while paused: where the timeline is.
+    sent: u64,
+}
+
+impl Sending {
+    fn new(track: SignedTrack) -> Self {
+        Self {
+            track,
+            group: None,
+            sent: 0,
+        }
+    }
+
+    fn fps() -> u64 {
+        u64::from(CAMERA_SETTINGS.fps)
+    }
+
+    /// Whether the next picture starts a group, and so must be a keyframe.
+    fn keyframe_next(&self) -> bool {
+        self.sent.is_multiple_of(Self::fps())
+    }
+
+    /// Nothing sent for now: the next picture starts a group.
+    fn pause(&mut self) {
+        self.sent = self.sent.next_multiple_of(Self::fps());
+    }
+
+    /// The next picture's packets, encoded as [`Self::keyframe_next`] said; false once the track
+    /// is over.
+    fn send(&mut self, packets: &[Vec<u8>]) -> bool {
+        if self.keyframe_next() {
+            if let Some(full) = self.group.take()
                 && let Err(error) = crate::sig::SignedGroup::finish(full)
             {
                 tracing::debug!(%error, "finishing a camera group");
             }
-            match track.append_group() {
-                Ok(new) => group = Some(new),
+            match self.track.append_group() {
+                Ok(new) => self.group = Some(new),
                 Err(error) => {
                     tracing::debug!(%error, "the camera track ended");
-                    return;
+                    return false;
                 }
             }
         }
-        let timestamp =
-            match moq_net::Timestamp::from_micros(sent * 1_000_000 / u64::from(settings.fps)) {
-                Ok(timestamp) => timestamp,
-                Err(error) => {
-                    tracing::warn!(%error, "the camera's timeline ran out");
-                    return;
-                }
-            };
-        if let Some(open) = group.as_mut() {
+        let timestamp = match moq_net::Timestamp::from_micros(self.sent * 1_000_000 / Self::fps()) {
+            Ok(timestamp) => timestamp,
+            Err(error) => {
+                tracing::warn!(%error, "the camera's timeline ran out");
+                return false;
+            }
+        };
+        if let Some(open) = self.group.as_mut() {
             for packet in packets {
-                if let Err(error) = open.write_frame(timestamp, &packet.data) {
+                if let Err(error) = open.write_frame(timestamp, packet) {
                     tracing::debug!(%error, "the camera track ended");
-                    return;
+                    return false;
                 }
             }
         }
-        sent += 1;
+        self.sent += 1;
+        true
     }
 }
 

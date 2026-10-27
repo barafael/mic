@@ -32,7 +32,29 @@ pub fn all(the_box: &TestBox) -> Result<()> {
     for client in CLIENTS {
         client_up(the_box, client)?;
     }
+    for index in 1..=the_box.crowd() {
+        crowd_up(the_box, index)?;
+    }
     Ok(())
+}
+
+/// The crowd's participant `index` answers `Ping` on its harness.
+pub fn crowd_up(the_box: &TestBox, index: u32) -> Result<()> {
+    let deadline = Instant::now() + START;
+    loop {
+        let pinged = Participant::crowd(the_box, index).and_then(|mut member| member.ping());
+        match pinged {
+            Ok(_) => return Ok(()),
+            Err(error) if Instant::now() > deadline => {
+                return Err(Error::Failed(format!(
+                    "{} didn't answer within {}s: {error}",
+                    crate::podman::crowd_name(index),
+                    START.as_secs()
+                )));
+            }
+            Err(_) => std::thread::sleep(Duration::from_millis(100)),
+        }
+    }
 }
 
 /// The relay answers HTTP on TCP 4443 (`/announced`, what is announced), which it serves beside

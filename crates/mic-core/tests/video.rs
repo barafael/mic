@@ -8,7 +8,7 @@ use mic_core::secrets::InMemory;
 use mic_core::video::CAMERA_SETTINGS;
 use mic_core::{Client, Config, Connection, Invite, Media, ParticipantKey, Profile, Room, Trust};
 use mic_media::audio::Running;
-use mic_media::video::{PatternCamera, read_pattern};
+use mic_media::video::{Pattern, PatternCamera, read_pattern};
 use mic_testrelay::TestRelay;
 
 const PATIENCE: Duration = Duration::from_secs(15);
@@ -26,7 +26,29 @@ struct Participant {
 }
 
 async fn join(invite: &Invite, name: &str, camera: Option<u8>, config: Config) -> Participant {
+    join_sending(invite, name, camera, config, false).await
+}
+
+/// As [`join`], the camera recorded once and sent in a loop if `recorded`.
+async fn join_sending(
+    invite: &Invite,
+    name: &str,
+    camera: Option<u8>,
+    config: Config,
+    recorded: bool,
+) -> Participant {
     let (camera, running) = match camera {
+        Some(sender) if recorded => {
+            let pictures = (0..CAMERA_SETTINGS.fps * 2).map(|frame| {
+                Pattern {
+                    sender,
+                    frame: frame as u16,
+                }
+                .draw(CAMERA_SETTINGS.width, CAMERA_SETTINGS.height)
+            });
+            let recorded = mic_core::video::Recorded::encode(pictures).unwrap();
+            (Some(mic_core::video::Camera::Recorded(recorded)), None)
+        }
         Some(sender) => {
             let (pictures, shown) = tokio::sync::watch::channel(None);
             let running = PatternCamera {
@@ -37,7 +59,7 @@ async fn join(invite: &Invite, name: &str, camera: Option<u8>, config: Config) -
             }
             .start(pictures)
             .unwrap();
-            (Some(shown), Some(running))
+            (Some(mic_core::video::Camera::Live(shown)), Some(running))
         }
         None => (None, None),
     };
@@ -134,6 +156,26 @@ async fn each_decodes_the_others_camera_also_after_a_restart() {
         );
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_recorded_camera_is_seen_at_its_rate() {
+    let relay = TestRelay::start().await.unwrap();
+    let invite = Invite::new_room();
+    let crowd = join_sending(&invite, "Crowd", Some(7), config(&relay), true).await;
+    let bob = join(&invite, "Bob", None, config(&relay)).await;
+    let whose = crowd.room.participant();
+    sees(&bob, whose, 7).await;
+    let fps = f64::from(CAMERA_SETTINGS.fps);
+    let rate = rate(&bob, whose).await;
+    assert!(rate > fps * 0.7, "{rate} pictures a second, of {fps}");
+}
+
+#[test]
+fn under_a_second_isnt_a_recording() {
+    let pictures = (0..CAMERA_SETTINGS.fps - 1)
+        .map(|_| mic_media::video::Picture::grey(CAMERA_SETTINGS.width, CAMERA_SETTINGS.height));
+    assert!(mic_core::video::Recorded::encode(pictures).is_err());
 }
 
 #[tokio::test(flavor = "multi_thread")]

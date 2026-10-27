@@ -70,7 +70,7 @@ flowchart LR
   into `target/testbox-bin` only when it changed, by a rename, and client pods mount that
   directory read-only. The builder fetches crates, so it's on podman's default network, outside
   the box; `down` leaves it running, `down --wipe` removes it and its caches.
-- **Clients are `mic` participants**, a pod each (`alice`, `bob`): the window
+- **Clients are `mic` participants**, a pod each (`alice` to `frank`, six): the window
   (crates/mic-slint) on a display of its own, with the host's GPU, trusting the relay by the
   box's CA. A check drives each through its harness (crates/mic-harness), on a socket in
   `target/testbox-run/<client>/` (the owner's only): it joins a fresh room, acts as a click
@@ -81,7 +81,13 @@ flowchart LR
   `target/testbox-run/<client>/home`, so a restarted client is the same participant.
 - **alice's and bob's voices are tones of their own** (`--tone`, from xtask's `podman::tone`),
   and their speakers analyzers the harness answers `heard` from (crates/mic-harness,
-  `synthetic`), so phases measure exactly what each sent.
+  `synthetic`), so phases measure exactly what each sent. Each but carol sends a pattern camera
+  naming it (`--camera-pattern`, 1 to 5); dave, erin and frank send no voice.
+- **The crowd fills rooms beyond six windows**: the `crowd` pod runs `mic-crowd` with 34
+  headless participants (`up --crowd n`, none with 0), `crowd-1` to `crowd-n`, each with a
+  harness on a socket in `target/testbox-run/crowd/`. Each sends two seconds of its pattern
+  camera (10 + its number), encoded once at start and looped, and no voice, and decodes and
+  plays nothing, so a room's cost is the windows' and the relay's.
 - **carol uses devices**: PipeWire and WirePlumber run in every client (`client-session`), with
   the box's speaker, whose monitor a check records, and microphone, fed by a sink of its own a
   check plays into (`box-devices.conf`). mic reaches them through cpal and ALSA.
@@ -146,7 +152,8 @@ Phases don't need a fresh box: each check uses rooms and broadcasts of its own. 
 - **`down --wipe`** is for when something is wrong with the box itself.
 
 `up` keeps its flags in `target/testbox-pods/box.settings`, and whatever plays pods again later
-(`dev`, `run --fresh`) plays the same box: after `up --no-gpu`, still without the GPU.
+(`dev`, `run --fresh`) plays the same box: after `up --no-gpu`, still without the GPU, and with
+the crowd `up` was given.
 
 | Phase | What it checks |
 |---|---|
@@ -154,7 +161,7 @@ Phases don't need a fresh box: each check uses rooms and broadcasts of its own. 
 | `relay` | Frames pass through the relay between moq's own publisher and subscriber; a client without the box's CA is refused. If this fails, the box is broken, not `mic` |
 | `roster` | alice and bob join a room and see each other; their windows show the room's tiles, in the roster's order, as the harness's `ui` section says and a screenshot of each shows; a new name reaches the other; bob leaves and alice sees him go, and his window shows the join screen; bob joins again by typing into his window; after the relay restarts, both are connected again and see each other once; a restarted alice has the same key, her device secret kept in her keyring; an honest room rejects nobody |
 | `impersonation` | The forger (testbox/forger), a member with the invite, run in the tools pod, speaking an 880 Hz tone and showing a camera of its own (pattern 9): at alice's path with a catalog it signed itself, it stands for no one; at its own path with frames no checkpoint covers, it's rejected within the 2 s grace, after bob heard it and decoded its camera (frames play before they're confirmed), and before he hears only alice and shows its camera no more; bob sees alice once |
-| `video` | alice and bob send pattern cameras (ids 1 and 2), carol claims to decode no video (`--decoders none`): each of alice and bob decodes the other's camera, its pattern names the right sender, and the frame rate holds at 70 % of 15 fps; a screenshot of each window shows the other's camera in its colour and not its own, and carol's shows neither, saying on each tile that it can't show their video; then a crowd of six with cameras (mic-crowd, in the tools pod) fills alice's window to nine tiles, seven with video, and what drawing them costs, and alice's CPU, go in the record (`render.txt`); at least 70 % of the pictures must be drawn; and with alice's camera off, bob's tile shows her name and none of her pictures come, until it's on again. It measures, so it runs alone |
+| `video` | alice and bob send pattern cameras (ids 1 and 2), carol claims to decode no video (`--decoders none`): each of alice and bob decodes the other's camera, its pattern names the right sender, and the frame rate holds at 70 % of 15 fps; a screenshot of each window shows the other's camera in its colour and not its own, and carol's shows neither, saying on each tile that it can't show their video; then six of the crowd, with cameras, fill alice's window to nine tiles, seven with video, and what drawing them costs, and alice's CPU, go in the record (`render.txt`); at least 70 % of the pictures must be drawn; and with alice's camera off, bob's tile shows her name and none of her pictures come, until it's on again. It measures, so it runs alone |
 | `version` | The box's site (testbox/pods/site.yaml, `site/build.sh`) announces 99.0.0; every client's window says a newer version is out, from its check at start |
 | `links` | `mic --register` in alice's pod, then `xdg-open mic://join/…` on her display: a second mic hands the link to the one running, which joins its room under the name she last joined with |
 | `audio-devices` | carol on PipeWire devices, alice on her tone: what carol's speaker plays (recorded from its monitor) holds alice's tone; a tone played into carol's microphone reaches alice; with carol's speaker linked into her microphone (pw-link), which a recording shows carries alice's tone, alice doesn't hear herself back: the echo is cancelled; with a speech-like voice over noise in carol's microphone, each noise suppressor is measured by what alice hears (in the record, `noise-suppression.txt`), and RNNoise must raise the voice over the noise by 8 dB and keep it. It measures, so it runs alone |

@@ -63,9 +63,10 @@ struct Cli {
     #[cfg(all(unix, feature = "harness"))]
     #[arg(long)]
     tone: Option<f64>,
-    /// Sends a pattern naming this id for a camera (mic-media's `PatternCamera`), with `--tone`.
+    /// Sends a pattern naming this id for a camera (mic-media's `PatternCamera`), and plays the
+    /// others into an analyzer, as `--tone` does.
     #[cfg(all(unix, feature = "harness"))]
-    #[arg(long, requires = "tone")]
+    #[arg(long)]
     camera_pattern: Option<u8>,
     /// Claims to decode only these video codecs, comma-separated, or `none`: the box's way to
     /// see a codec go unsupported.
@@ -183,14 +184,13 @@ fn run(cli: Cli) -> Result<(), String> {
     let keyring = Keyring::system().map_err(|error| error.to_string())?;
     let client = Client::new(config, &keyring, runtime.handle().clone())
         .map_err(|error| error.to_string())?;
-    // The system's microphone and speaker; with the harness and `--tone`, the box's synthetic
-    // ones instead.
+    // The system's microphone and speaker; with the harness and `--tone` or `--camera-pattern`,
+    // the box's synthetic ones instead.
     #[cfg(all(unix, feature = "harness"))]
-    let synthetic = cli
-        .tone
-        .map(|tone| mic_harness::synthetic::Synthetic::new(Some(tone), cli.camera_pattern))
+    let synthetic = (cli.tone.is_some() || cli.camera_pattern.is_some())
+        .then(|| mic_harness::synthetic::Synthetic::new(cli.tone, cli.camera_pattern))
         .transpose()
-        .map_err(|error| format!("the synthetic audio: {error}"))?;
+        .map_err(|error| format!("the synthetic media: {error}"))?;
     #[cfg(all(unix, feature = "harness"))]
     let devices = synthetic.is_none().then(devices::Devices::new);
     #[cfg(not(all(unix, feature = "harness")))]

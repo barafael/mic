@@ -60,6 +60,10 @@ enum Command {
         /// in CI. Phases that measure the hardware paths skip them, and say so.
         #[arg(long)]
         no_gpu: bool,
+        /// How many headless participants the crowd pod runs (mic-crowd), for rooms beyond the
+        /// six windows; none plays no crowd.
+        #[arg(long, default_value_t = settings::Settings::default().crowd)]
+        crowd: u32,
     },
     /// Compiles what the box runs, in the builder pod, into target/testbox-bin.
     Build,
@@ -132,7 +136,13 @@ fn main() -> ExitCode {
     // brought up. `down` plays nothing, so settings it can't read don't stop it: it takes the
     // box down all the same.
     let the_box = match &command {
-        Command::Up { no_gpu } => Ok(TestBox::with(&repo, settings::Settings { gpu: !no_gpu })),
+        Command::Up { no_gpu, crowd } => Ok(TestBox::with(
+            &repo,
+            settings::Settings {
+                gpu: !no_gpu,
+                crowd: *crowd,
+            },
+        )),
         Command::Down { .. } => Ok(TestBox::with(
             &repo,
             settings::Settings::saved(&repo).unwrap_or_else(|reason| {

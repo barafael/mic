@@ -1,0 +1,44 @@
+# The crowd: many headless participants in one process (crates/mic-crowd), for rooms bigger than
+# the windows make (PLAN.md, M8). `cargo testbox up --crowd n` plays it with n of them, crowd-1 to
+# crowd-n, each driven by a harness on a socket of its own in target/testbox-run/crowd. Each sends
+# a camera recorded once at start, pattern 10 + its number, and no voice; none decodes video or
+# plays a voice, so what a room of 40 costs is the windows' and the relay's, not the crowd's.
+{
+  apiVersion: "v1",
+  kind: "Pod",
+  metadata: {
+    name: "mic-testbox-crowd",
+  },
+  spec: {
+    restartPolicy: "Always",
+    containers: [
+      {
+        name: "crowd",
+        image: "@IMAGE:moq@",
+        args: [
+          "/opt/mic/mic-crowd",
+          "--relay", "https://mic-testbox-relay:4443/",
+          "--ca", "/keys/ca.pem",
+          "--harness", "/run/mic",
+          "--no-decoders", "--deaf",
+          @CROWD@
+        ],
+        env: [
+          { name: "RUST_LOG", value: "info" },
+          { name: "NO_COLOR", value: "1" },
+        ],
+        securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: ["ALL"] } },
+        volumeMounts: [
+          { name: "bin", mountPath: "/opt/mic", readOnly: true },
+          { name: "keys", mountPath: "/keys", readOnly: true },
+          { name: "run", mountPath: "/run/mic" },
+        ],
+      },
+    ],
+    volumes: [
+      { name: "bin", hostPath: { path: "@REPO@/target/testbox-bin", type: "Directory" } },
+      { name: "keys", persistentVolumeClaim: { claimName: "mic-testbox-keys" } },
+      { name: "run", hostPath: { path: "@REPO@/target/testbox-run/crowd", type: "Directory" } },
+    ],
+  },
+}

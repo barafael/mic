@@ -178,8 +178,8 @@ pub struct Media {
     /// What takes the noise out of the capture: a microphone wants it; a synthetic tone, which
     /// a suppressor would take for noise, doesn't.
     pub noise: mic_media::audio::noise::NoiseSuppression,
-    /// Pictures to send as this participant's camera, if it has one.
-    pub camera: Option<crate::video::Pictures>,
+    /// What this participant sends as its camera, if it has one.
+    pub camera: Option<crate::video::Camera>,
 }
 
 impl Inner {
@@ -242,8 +242,8 @@ impl Inner {
             media.camera,
             mic_media::video::choose(&mic_media::video::Codec::ALL, std::iter::empty()),
         ) {
-            (Some(pictures), Some(codec)) => Some(tokio::spawn(crate::video::publish(
-                pictures,
+            (Some(camera), Some(codec)) => Some(tokio::spawn(crate::video::publish(
+                camera,
                 publication.video_track(crate::video::CAMERA, codec)?,
                 camera_follows,
             ))),

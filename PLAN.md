@@ -503,7 +503,10 @@ from; the git pins move to releases as they land.
 
 42. `testbox: pre-encoded media for the crowd`. `cargo testbox media` encodes the patterns with
     `mic-media`'s VP9 encoder and caches them in `target/testbox-media/`; `mic-crowd` publishes
-    them; `up --crowd n`.
+    them; `up --crowd n`. *Done,* without the cache: each crowd participant encodes two seconds
+    of its pattern once at start (`mic_core::video::Recorded`), a second or so for a crowd of 34,
+    and sends it in a loop. The crowd is a pod of its own (`up --crowd n`, 34 by default), and
+    the box has six windows, `alice` to `frank`.
 43. `mic-core: selective subscriptions`. Subscribe only to visible tiles; the active speaker's
     priority goes up (§1.6, §5.8). **`room`**: 6 windowed clients plus the crowd.
 44. `mic-core, mic-slint: chat, reactions and raise hand` on JSON tracks, encrypted like every

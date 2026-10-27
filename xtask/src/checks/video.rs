@@ -14,7 +14,7 @@ use mic_core::{Command, Invite};
 
 use crate::error::{Error, Result};
 use crate::harness::{Participant, names};
-use crate::podman::{Pod, TestBox, camera};
+use crate::podman::{TestBox, camera};
 use crate::view;
 
 use super::Checks;
@@ -90,8 +90,9 @@ pub fn video(checks: &mut Checks, the_box: &TestBox) -> Result<()> {
         }
         Ok(())
     });
+    let mut crowd = Vec::new();
     checks.record("nine tiles: what drawing alice's costs", || {
-        crowd(the_box, &invite)?;
+        crowd = join_crowd(the_box, &invite)?;
         alice.wait_for_snapshot(
             "showing nine tiles, seven with video",
             PATIENCE,
@@ -194,7 +195,10 @@ pub fn video(checks: &mut Checks, the_box: &TestBox) -> Result<()> {
         bob.wait_for_snapshot("showing alice's video again", PATIENCE, shows_her)?;
         Ok(())
     });
-    for participant in [&mut alice, &mut bob, &mut carol] {
+    for participant in [&mut alice, &mut bob, &mut carol]
+        .into_iter()
+        .chain(crowd.iter_mut())
+    {
         participant.reset()?;
     }
     Ok(())
@@ -272,26 +276,23 @@ fn colour(sender: u8) -> [u8; 3] {
     [rgba[0], rgba[1], rgba[2]]
 }
 
-/// Six crowd participants with cameras of their own (patterns 11 to 16) in the room `invite`
-/// names, from the tools pod, for long enough to measure, decoding nothing themselves.
-fn crowd(the_box: &TestBox, invite: &Invite) -> Result<()> {
-    let names: Vec<String> = (1..=6).map(|i| format!("crowd-{i}@{}", 10 + i)).collect();
-    let command = format!(
-        "mkdir -p /tmp/crowd && timeout 40 /opt/mic/mic-crowd \
-         --relay https://mic-testbox-relay:4443/ --ca /keys/ca.pem --harness /tmp/crowd \
-         --no-decoders --join '{}' {} >/tmp/crowd/log 2>&1 &",
-        invite.to_mic_url(),
-        names.join(" ")
-    );
-    let started = the_box.exec(&Pod::Tools.container("tools"), &["bash", "-c", &command])?;
-    if started.status.success() {
-        Ok(())
-    } else {
-        Err(Error::Failed(format!(
-            "the crowd didn't start: {}",
-            String::from_utf8_lossy(&started.stderr)
-        )))
+/// Six of the crowd (`Pod::Crowd`), with cameras of their own (patterns 11 to 16), in the room
+/// `invite` names, decoding nothing themselves; they stay until they're reset.
+fn join_crowd(the_box: &TestBox, invite: &Invite) -> Result<Vec<Participant>> {
+    const CROWD: u32 = 6;
+    if the_box.crowd() < CROWD {
+        return Err(Error::Failed(format!(
+            "a crowd of {} in the box, of {CROWD} wanted: `cargo testbox up --crowd {CROWD}` or more",
+            the_box.crowd()
+        )));
     }
+    (1..=CROWD)
+        .map(|index| {
+            let mut member = Participant::crowd(the_box, index)?;
+            member.join(invite, &crate::podman::crowd_name(index))?;
+            Ok(member)
+        })
+        .collect()
 }
 
 /// Waits until `viewer` decodes `whose` camera with `sender`'s pattern.

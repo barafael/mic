@@ -4,6 +4,13 @@ What turned up while building `mic` that the plan didn't expect: surprises, upst
 measurements, and things to revisit. Newest first within each milestone. Each says whether it's
 **open**, **settled** (and where), or **upstream** (to report or follow).
 
+## M8: Rooms
+
+- **The crowd's media isn't cached on disk** (settled, commit 42). Encoding two seconds of a
+  pattern takes well under a second, so each crowd participant encodes its own at start and
+  loops it; `cargo testbox media` and `target/testbox-media/` would only add a step to keep fresh.
+  The loop repeats frame numbers every two seconds, which no check counts on.
+
 ## M7: Invites, version check, site
 
 - **A link joins at once, leaving the call it's in** (settled, after M7). A link handed to a

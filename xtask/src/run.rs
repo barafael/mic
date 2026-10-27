@@ -123,7 +123,7 @@ fn next(queue: &Mutex<VecDeque<Phase>>) -> Option<Phase> {
 pub fn dev(the_box: &TestBox, phase: Phase) -> Result<()> {
     let started = Instant::now();
     let rebuilt_images = !the_box.images()?.is_empty();
-    let running = Pod::all().into_iter().all(|pod| {
+    let running = the_box.pods().into_iter().all(|pod| {
         the_box
             .containers_of(pod)
             .iter()
@@ -166,6 +166,9 @@ pub fn dev(the_box: &TestBox, phase: Phase) -> Result<()> {
 fn restart_clients(the_box: &TestBox) -> Result<()> {
     for client in CLIENTS {
         the_box.play(Pod::Client(client))?;
+    }
+    if the_box.crowd() > 0 {
+        the_box.play(Pod::Crowd)?;
     }
     the_box.play(Pod::Probe)?;
     ready::all(the_box)

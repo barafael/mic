@@ -14,6 +14,8 @@ use clap::Parser;
 use mic_core::secrets::InMemory;
 #[cfg(unix)]
 use mic_core::{App, Client, Config, Trust};
+#[cfg(unix)]
+use mic_harness::synthetic::{Sending, Synthetic};
 
 #[derive(Parser)]
 #[command(version, about)]
@@ -35,6 +37,14 @@ struct Cli {
     /// Claims to decode no video: a crowd that fills a room without decoding every camera in it.
     #[arg(long)]
     no_decoders: bool,
+    /// Plays nobody's voice: a crowd that fills a room without a decoder for every voice in it.
+    /// The harness then hears nothing.
+    #[arg(long)]
+    deaf: bool,
+    /// Draws and encodes each camera live, as the windows do, instead of sending two seconds
+    /// encoded once at start, in a loop.
+    #[arg(long)]
+    live_cameras: bool,
     /// The participants, by name, each with the tone it sends for a voice and the pattern its
     /// camera shows, if any: `carol=880@3`.
     #[arg(required = true)]
@@ -122,9 +132,22 @@ async fn run(cli: Cli) -> Result<(), String> {
             tokio::runtime::Handle::current(),
         )
         .map_err(|error| format!("{name}: {error}"))?;
-        let synthetic = mic_harness::synthetic::Synthetic::new(tone, camera)
-            .map_err(|error| format!("{name}'s audio: {error}"))?;
-        let app = App::with_media(client, synthetic.media());
+        let sending = if cli.live_cameras {
+            Sending::Live
+        } else {
+            Sending::Recorded
+        };
+        let synthetic = Synthetic::sending(tone, camera, sending)
+            .map_err(|error| format!("{name}'s media: {error}"))?;
+        let media = synthetic.media();
+        let deaf = cli.deaf;
+        let app = App::with_media(client, move || {
+            let mut joined = media();
+            if deaf {
+                joined.mixer = None;
+            }
+            joined
+        });
         if let Some(invite) = &invite {
             let (app, invite) = (app.clone(), invite.clone());
             let profile = mic_core::Profile::new(&name);
@@ -137,8 +160,12 @@ async fn run(cli: Cli) -> Result<(), String> {
                 std::future::pending::<Result<(), String>>().await
             });
         }
-        let harness =
-            mic_harness::server::Harness::new(app, &name, None).hearing(synthetic.analyzer.clone());
+        let harness = mic_harness::server::Harness::new(app, &name, None);
+        let harness = if deaf {
+            harness
+        } else {
+            harness.hearing(synthetic.analyzer.clone())
+        };
         speakers.push(synthetic);
         let socket = cli.harness.join(&name);
         served.spawn(async move {
