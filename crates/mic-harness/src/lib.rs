@@ -13,6 +13,7 @@
 pub mod client;
 #[cfg(unix)]
 pub mod server;
+pub mod synthetic;
 
 use serde::{Deserialize, Serialize};
 
@@ -53,6 +54,9 @@ pub enum Call {
     /// Leaves the room it's in, if any, and forgets it: the client is as it started, for the
     /// next check, without a restart. Answered with [`Done`].
     Reset,
+    /// How loud each of `frequencies` (Hz) is in what it played in the last second, for a client
+    /// whose speaker is an analyzer (mic-media's `AnalyzingSink`). Answered with [`Heard`].
+    Heard { frequencies: Vec<f64> },
 }
 
 /// The answer to request `id`: `{"id": …, "result": …}` or `{"id": …, "error": "…"}`.
@@ -121,6 +125,14 @@ pub struct Acted {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Done {
     pub ok: bool,
+}
+
+/// What a client heard in the last second: each frequency's amplitude, as asked, and the
+/// loudness of it all.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Heard {
+    pub levels: Vec<f64>,
+    pub rms: f64,
 }
 
 /// What the client shows: the room it's in, if any, and its UI, if it has one.

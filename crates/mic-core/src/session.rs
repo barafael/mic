@@ -138,12 +138,23 @@ impl Client {
 
     /// Joins the room `invite` names as `profile`: a session with the relay for it, with this
     /// device's key in the room. Fails if the relay can't be reached within the configured
-    /// timeout.
+    /// timeout. Sends and plays no audio: [`Self::join_with`] does.
     pub async fn join(&self, invite: Invite, profile: Profile) -> Result<Room, Error> {
+        self.join_with(invite, profile, Media::default()).await
+    }
+
+    /// Joins as [`Self::join`] does, sending `media`'s capture as this participant's voice and
+    /// playing every other's into its mixer.
+    pub async fn join_with(
+        &self,
+        invite: Invite,
+        profile: Profile,
+        media: Media,
+    ) -> Result<Room, Error> {
         let inner = self.inner.clone();
         self.inner
             .runtime
-            .spawn(async move { inner.join(invite, profile).await })
+            .spawn(async move { inner.join(invite, profile, media).await })
             .await
             .unwrap_or_else(|error| match error.try_into_panic() {
                 // A panic in the join is the join's: it goes on as one, not as a stopped runtime.
@@ -153,8 +164,17 @@ impl Client {
     }
 }
 
+/// What a participant sends and plays: its voice from a capture, and every other's into a mixer.
+/// Either may be left out: one without a microphone only listens, one without a speaker only
+/// speaks.
+#[derive(Default)]
+pub struct Media {
+    pub capture: Option<mic_media::audio::Capture>,
+    pub mixer: Option<mic_media::audio::Mixer>,
+}
+
 impl Inner {
-    async fn join(&self, invite: Invite, profile: Profile) -> Result<Room, Error> {
+    async fn join(&self, invite: Invite, profile: Profile, media: Media) -> Result<Room, Error> {
         let key = self.secret.room_key(&invite.room);
         let crypto = RoomCrypto::new(&invite)?;
         // The session is rooted at the room's prefix on the relay, by its URL's path, as a
@@ -188,6 +208,13 @@ impl Inner {
         // participant finds its name.
         let mut profile_track = publication.track(roster::PROFILE)?;
         roster::write_profile(&mut profile_track, &profile)?;
+        let voice = match media.capture {
+            Some(capture) => Some(tokio::spawn(crate::audio::publish(
+                capture,
+                publication.track(crate::audio::AUDIO)?,
+            ))),
+            None => None,
+        };
         Ok(Room::start(Joined {
             invite,
             participant,
@@ -201,6 +228,8 @@ impl Inner {
             url,
             origin,
             runtime: self.runtime.clone(),
+            voice,
+            mixer: media.mixer,
         }))
     }
 }

@@ -46,6 +46,11 @@ struct Cli {
     #[cfg(all(unix, feature = "harness"))]
     #[arg(long)]
     harness: Option<PathBuf>,
+    /// Sends a tone at this many Hz for a voice, and plays the others into an analyzer the
+    /// harness reads, instead of devices: the box's synthetic microphone and speaker.
+    #[cfg(all(unix, feature = "harness"))]
+    #[arg(long)]
+    tone: Option<f64>,
     /// An invite to fill in, `mic://join/…`.
     invite: Option<String>,
 }
@@ -83,6 +88,20 @@ fn run(cli: Cli) -> Result<(), String> {
     let keyring = Keyring::system().map_err(|error| error.to_string())?;
     let client = Client::new(config, &keyring, runtime.handle().clone())
         .map_err(|error| error.to_string())?;
+    // The box's synthetic devices, with the harness and `--tone`; no audio otherwise, until
+    // devices arrive (PLAN.md, commit 28).
+    #[cfg(all(unix, feature = "harness"))]
+    let synthetic = cli
+        .tone
+        .map(|tone| mic_harness::synthetic::Synthetic::new(Some(tone)))
+        .transpose()
+        .map_err(|error| format!("the synthetic audio: {error}"))?;
+    #[cfg(all(unix, feature = "harness"))]
+    let app = match &synthetic {
+        Some(synthetic) => App::with_media(client, synthetic.media()),
+        None => App::new(client),
+    };
+    #[cfg(not(all(unix, feature = "harness")))]
     let app = App::new(client);
 
     select_backend()?;
@@ -99,7 +118,14 @@ fn run(cli: Cli) -> Result<(), String> {
     let mut shown: Box<dyn Fn(&View)> = Box::new(|_| {});
     #[cfg(all(unix, feature = "harness"))]
     if let Some(socket) = cli.harness {
-        shown = harness::serve(&runtime, app.clone(), socket);
+        shown = harness::serve(
+            &runtime,
+            app.clone(),
+            socket,
+            synthetic
+                .as_ref()
+                .map(|synthetic| synthetic.analyzer.clone()),
+        );
     }
 
     window.on_join({
@@ -345,6 +371,7 @@ mod harness {
         runtime: &tokio::runtime::Runtime,
         app: App,
         socket: PathBuf,
+        hearing: Option<mic_media::audio::Analyzer>,
     ) -> Box<dyn Fn(&View)> {
         let name = socket
             .file_name()
@@ -365,6 +392,10 @@ mod harness {
                     .clone()
             })),
         );
+        let harness = match hearing {
+            Some(analyzer) => harness.hearing(analyzer),
+            None => harness,
+        };
         let serving = harness.clone();
         runtime.spawn(async move {
             if let Err(error) = serving.serve(&socket).await {

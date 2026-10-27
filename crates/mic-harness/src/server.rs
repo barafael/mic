@@ -20,7 +20,7 @@ use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::{mpsc, watch};
 
 use crate::{
-    Acted, Call, Done, Joined, LISTENING, Outcome, Pong, Pushed, Reply, Request, Snapshot,
+    Acted, Call, Done, Heard, Joined, LISTENING, Outcome, Pong, Pushed, Reply, Request, Snapshot,
     Subscribed, Ui, Unsubscribed,
 };
 
@@ -37,6 +37,8 @@ struct Inner {
     app: App,
     name: String,
     ui: Option<UiSource>,
+    /// What its speaker heard, if its speaker is an analyzer.
+    hearing: Option<mic_media::audio::Analyzer>,
     /// Bumped on every change of what a snapshot shows; subscribers follow it.
     changes: watch::Sender<u64>,
 }
@@ -59,9 +61,20 @@ impl Harness {
                 app,
                 name: name.to_owned(),
                 ui,
+                hearing: None,
                 changes: watch::channel(0).0,
             }),
         }
+    }
+
+    /// The harness, answering [`Call::Heard`](crate::Call::Heard) from `analyzer`: what the
+    /// client's speaker, an analyzer, heard. Call it before serving.
+    pub fn hearing(mut self, analyzer: mic_media::audio::Analyzer) -> Self {
+        match Arc::get_mut(&mut self.inner) {
+            Some(inner) => inner.hearing = Some(analyzer),
+            None => tracing::warn!("a harness given its hearing once it serves: ignored"),
+        }
+        self
     }
 
     /// Tells subscribers that what the UI shows changed: a frontend calls it after it redraws.
@@ -139,6 +152,7 @@ impl Harness {
                 Call::Join { invite, name } => answer(&out, id, self.join(&invite, &name).await),
                 Call::Act { command } => answer(&out, id, self.act(command).await),
                 Call::Reset => answer(&out, id, Ok(self.reset().await)),
+                Call::Heard { frequencies } => answer(&out, id, self.heard(&frequencies)),
             };
             if !sent {
                 break;
@@ -239,6 +253,21 @@ impl Harness {
             .await
             .map_err(|error| error.to_string())?;
         Ok(Acted { ok: true })
+    }
+
+    fn heard(&self, frequencies: &[f64]) -> Result<Heard, String> {
+        let analyzer = self
+            .inner
+            .hearing
+            .as_ref()
+            .ok_or("its speaker isn't an analyzer: it can't say what it heard")?;
+        Ok(Heard {
+            levels: frequencies
+                .iter()
+                .map(|&frequency| analyzer.level(frequency))
+                .collect(),
+            rms: analyzer.rms(),
+        })
     }
 
     /// Leaves the room it's in, if any.

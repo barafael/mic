@@ -28,6 +28,16 @@ pub const VIEW: &str = "target/testbox-view";
 pub const RUN: &str = "target/testbox-run";
 /// The clients `up` plays, each a pod of its own from testbox/pods/client.yaml: a window.
 pub const CLIENTS: [&str; 2] = ["alice", "bob"];
+/// The tone each client sends for a voice, in Hz: apart from each other and from their
+/// harmonics, so an analyzer tells whose it hears (crates/mic-harness, `synthetic`).
+pub fn tone(client: &str) -> u32 {
+    match client {
+        "alice" => 440,
+        "bob" => 660,
+        _ => 550,
+    }
+}
+
 /// The pods with a display: the probe's, and each client's.
 pub const DISPLAYS: [&str; 3] = ["probe", "alice", "bob"];
 
@@ -329,7 +339,9 @@ impl TestBox {
                 .ok_or_else(|| Error::Failed(format!("{}: no image {name}", source.display())))?
                 .tag(&self.repo)
         })?;
-        Ok(gpu_lines(&rendered, self.settings.gpu).replace("@NAME@", pod.name()))
+        Ok(gpu_lines(&rendered, self.settings.gpu)
+            .replace("@NAME@", pod.name())
+            .replace("@TONE@", &tone(pod.name()).to_string()))
     }
 
     /// Stops and removes the box's pods; `wipe` also removes the builder, and then every volume

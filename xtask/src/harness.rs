@@ -5,13 +5,18 @@ use std::time::{Duration, Instant};
 
 use mic_core::{Command, Invite, RoomState};
 use mic_harness::client::Client;
-use mic_harness::{Acted, Call, Done, Joined, Pong, Snapshot};
+use mic_harness::{Acted, Call, Done, Heard, Joined, Pong, Snapshot};
 
 use crate::error::{Error, Result};
 use crate::podman::TestBox;
 
 /// How long a reply may take: a join waits for its session.
 const REPLY: Duration = Duration::from_secs(30);
+/// What a tone of amplitude 0.5 must be heard at, at least: half of it, which leaves room for
+/// what the codec and a gap take.
+pub const LOUD: f64 = 0.25;
+/// What a tone not sent must stay below: a twenty-fifth of a sent one.
+pub const SILENT: f64 = 0.02;
 /// How often a state is looked at again while waiting for it.
 const POLL: Duration = Duration::from_millis(100);
 
@@ -73,6 +78,57 @@ impl Participant {
 
     pub fn snapshot(&mut self) -> Result<Snapshot> {
         self.call(Call::Snapshot)
+    }
+
+    /// How loud each of `frequencies` is in what it heard in the last second.
+    pub fn heard(&mut self, frequencies: &[f64]) -> Result<Heard> {
+        self.call(Call::Heard {
+            frequencies: frequencies.to_vec(),
+        })
+    }
+
+    /// Waits until it hears `tone` (Hz) at least at [`LOUD`] and each of `quiet` below [`SILENT`],
+    /// within `patience`; fails saying what it heard.
+    pub fn wait_to_hear(&mut self, tone: f64, quiet: &[f64], patience: Duration) -> Result<()> {
+        let frequencies: Vec<f64> = std::iter::once(tone).chain(quiet.iter().copied()).collect();
+        let deadline = Instant::now() + patience;
+        loop {
+            let heard = self.heard(&frequencies)?;
+            let (loudest, rest) = heard.levels.split_first().ok_or("no levels")?;
+            if *loudest >= LOUD && rest.iter().all(|&level| level < SILENT) {
+                return Ok(());
+            }
+            if Instant::now() > deadline {
+                return Err(Error::Failed(format!(
+                    "{}: not {tone} Hz alone within {}s: {:?} at {:?}",
+                    self.name,
+                    patience.as_secs(),
+                    frequencies,
+                    heard.levels
+                )));
+            }
+            std::thread::sleep(POLL);
+        }
+    }
+
+    /// Waits until each of `tones` is below [`SILENT`] in what it heard, within `patience`.
+    pub fn wait_for_silence(&mut self, tones: &[f64], patience: Duration) -> Result<()> {
+        let deadline = Instant::now() + patience;
+        loop {
+            let heard = self.heard(tones)?;
+            if heard.levels.iter().all(|&level| level < SILENT) {
+                return Ok(());
+            }
+            if Instant::now() > deadline {
+                return Err(Error::Failed(format!(
+                    "{}: {tones:?} still at {:?} after {}s",
+                    self.name,
+                    heard.levels,
+                    patience.as_secs()
+                )));
+            }
+            std::thread::sleep(POLL);
+        }
     }
 
     /// The room's state once `holds` says so, within `patience`; fails saying what it was, as

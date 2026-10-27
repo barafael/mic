@@ -113,6 +113,10 @@ pub(crate) struct Joined {
     pub url: url::Url,
     pub origin: moq_net::origin::Producer,
     pub runtime: tokio::runtime::Handle,
+    /// Sends this participant's voice, if it has one.
+    pub voice: Option<tokio::task::JoinHandle<()>>,
+    /// Where the others' voices play, if anywhere.
+    pub mixer: Option<mic_media::audio::Mixer>,
 }
 
 impl Room {
@@ -147,6 +151,7 @@ impl Room {
             joined.crypto,
             shared.invite.room,
             roster,
+            joined.mixer,
         ));
         let task = Task {
             publication: joined.publication,
@@ -157,6 +162,7 @@ impl Room {
             url: joined.url,
             origin: joined.origin,
             following,
+            voice: joined.voice,
             roster: followed,
             state,
             events,
@@ -264,6 +270,8 @@ struct Task {
     /// What the session publishes and subscribes to; a new connection takes it up as it was.
     origin: moq_net::origin::Producer,
     following: tokio::task::JoinHandle<()>,
+    /// Sends the voice, until the room is left.
+    voice: Option<tokio::task::JoinHandle<()>>,
     roster: watch::Receiver<Roster>,
     state: watch::Sender<RoomState>,
     events: broadcast::Sender<Event>,
@@ -390,6 +398,9 @@ impl Task {
     /// that doesn't drain in time is closed all the same.
     async fn leave(&mut self) {
         self.following.abort();
+        if let Some(voice) = self.voice.take() {
+            voice.abort();
+        }
         let Some(connection) = self.connection.take() else {
             return;
         };
@@ -412,6 +423,9 @@ impl Task {
 impl Drop for Task {
     fn drop(&mut self) {
         self.following.abort();
+        if let Some(voice) = &self.voice {
+            voice.abort();
+        }
     }
 }
 

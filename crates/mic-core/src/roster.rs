@@ -172,6 +172,7 @@ pub(crate) async fn follow(
     crypto: RoomCrypto,
     room: RoomId,
     roster: watch::Sender<Roster>,
+    mixer: Option<mic_media::audio::Mixer>,
 ) {
     // What each peer's readers find, from tasks of their own, by its broadcast's path.
     let (found, mut finds) = mpsc::unbounded_channel::<(String, Found)>();
@@ -185,8 +186,13 @@ pub(crate) async fn follow(
                     let path = peer.path().to_owned();
                     known.insert(path.clone(), Known::default());
                     rejected.retain(|gone| gone.path != path);
-                    let reader =
-                        tokio::spawn(read_peer(peer, crypto.clone(), room, found.clone()));
+                    let reader = tokio::spawn(read_peer(
+                        peer,
+                        crypto.clone(),
+                        room,
+                        found.clone(),
+                        mixer.clone(),
+                    ));
                     if let Some(former) = readers.insert(path, reader) {
                         former.abort();
                     }
@@ -293,6 +299,7 @@ async fn read_peer(
     crypto: RoomCrypto,
     room: RoomId,
     found: mpsc::UnboundedSender<(String, Found)>,
+    mixer: Option<mic_media::audio::Mixer>,
 ) {
     let path = peer.path().to_owned();
     let send = |find: Found| found.send((path.clone(), find)).is_ok();
@@ -306,6 +313,9 @@ async fn read_peer(
     let segment_of = |key: &ParticipantKey| crypto.participant_segment(key.as_bytes()).ok();
     let mut last: Option<u64> = None;
     let mut _profiles: Option<Task> = None;
+    // Its voice, played once a catalog names it, until the broadcast goes or is rejected.
+    let mut _voice: Option<Task> = None;
+    let mut verification: Option<Verification> = None;
     let mut verifying: Option<tokio::task::JoinHandle<sig::Forgery>> = None;
     loop {
         let received = tokio::select! {
@@ -354,6 +364,14 @@ async fn read_peer(
         if !send(Found::Verified(catalog.participant)) {
             return;
         }
+        if let (None, Some(mixer), Some(verification)) = (&_voice, &mixer, &verification)
+            && catalog
+                .tracks
+                .iter()
+                .any(|track| track == crate::audio::AUDIO)
+        {
+            _voice = play_voice(&peer, verification, mixer.clone()).await;
+        }
         if verifying.is_some() {
             continue;
         }
@@ -364,10 +382,11 @@ async fn read_peer(
                 return;
             }
         };
-        let verification = Verification::default();
+        let checked = Verification::default();
+        verification = Some(checked.clone());
         verifying = Some(tokio::spawn(sig::verify(
             checkpoints,
-            verification.clone(),
+            checked.clone(),
             catalog.participant,
             room,
             crypto.kid(),
@@ -375,9 +394,32 @@ async fn read_peer(
         )));
         _profiles = Some(Task(tokio::spawn(read_profiles(
             peer.clone(),
-            verification,
+            checked.clone(),
             found.clone(),
         ))));
+        if let Some(mixer) = &mixer
+            && catalog
+                .tracks
+                .iter()
+                .any(|track| track == crate::audio::AUDIO)
+        {
+            _voice = play_voice(&peer, &checked, mixer.clone()).await;
+        }
+    }
+}
+
+/// `peer`'s voice into a stream of `mixer`'s, its frames confirmed as any others are.
+async fn play_voice(
+    peer: &Peer,
+    verification: &Verification,
+    mixer: mic_media::audio::Mixer,
+) -> Option<Task> {
+    match peer.verified_track(crate::audio::AUDIO, verification).await {
+        Ok(track) => Some(Task(tokio::spawn(crate::audio::play(track, mixer)))),
+        Err(error) => {
+            tracing::debug!(%error, path = peer.path(), "no voice");
+            None
+        }
     }
 }
 

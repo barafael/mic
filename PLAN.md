@@ -413,6 +413,10 @@ Each numbered item below is about one commit. Box phases are in **bold**.
     `testbox: the measurement lock` arrives here, with the first check that measures.
     Tests: tones through `mic-testrelay`, and after a relay restart. **`audio`**: each client
     hears every other's frequency and not its own. **`impersonation`** reruns with audio.
+    *Done:* a voice is a group a second, not a packet each, so checkpoints stay small (§5.7).
+    The measurement lock is `runs_alone`, which `audio` takes. The harness answers `heard` from
+    the client's analyzer (`mic_harness::synthetic`), and the window takes `--tone` with the
+    harness feature until devices arrive (commit 28).
 27. `mic-core, mic-slint: mute`. `Command::SetMuted`, and a button. **`audio`**: muted means
     silence on the far end, and the tile shows it.
 28. `testbox: PipeWire in the clients` with a speaker-to-mic loopback **⚠ unverified**.

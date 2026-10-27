@@ -828,12 +828,21 @@ capture or its PCM `encode::Input` path.
 
 | Track | Codec | Priority (moq-lite, higher wins) | Order | Max age | Notes |
 |---|---|---|---|---|---|
-| mic audio | Opus, DTX | highest | ascending | ~500 ms | Never on an ABR ladder |
+| mic audio | Opus, 48 kHz mono, 20 ms packets (DTX later) | highest (100) | ascending | 500 ms | Never on an ABR ladder. A group a second, not a packet each, so checkpoints stay small (below) |
 | camera video | VP9 (§5.4), simulcast, e.g. 180p + 720p | medium; raised for the active speaker | descending | ~1–2 s | 1 s GoP; thumbnails pull the low rung |
 | screen video | VP9, screen-content mode (§5.4) | high when focused | descending | ~2 s | A low frame rate is likely enough **(inference)** |
 | chat | JSON stream | below A/V | ascending | n/a | |
 | reactions | JSON stream | below A/V | descending | short | |
-| `sig` | Checkpoint signatures (D18) | above video, below audio | ascending | ~1 s | One per broadcast, every 250 ms (§5.3.2) |
+| `sig` | Checkpoint signatures (D18) | above video, below audio (90) | ascending | 1 s | One per broadcast, every 250 ms (§5.3.2) |
+
+**Audio groups and checkpoints (commit 26).** moq-audio puts each Opus packet in a group of its
+own, so one lost packet doesn't hold up the next. But each group is an entry of about 60 bytes in
+every checkpoint for 3 s (§5.3.2): at 50 groups a second that's some 9 KB per checkpoint, four
+times a second, far more than the voice itself. `mic` puts a second's packets in a group. The
+price is head-of-line blocking within a group under loss, which the jitter buffer and a 120 ms cap
+on what a stream queues ride out; the `network` phase (M8) measures it. The same cap keeps a
+subscriber that came mid-group from playing the group's backlog a second late. Smaller entries
+(a track index, a shorter hash) would allow smaller groups; that's a checkpoint format change.
 
 Active-speaker detection runs on the clients, using `moq-audio`'s per-packet
 voice activity. Relays can't see audio under E2EE.

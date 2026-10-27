@@ -9,6 +9,7 @@ publish.workspace = true
 [dependencies]
 clap = { version = "4.6.7", features = ["derive"] }
 mic-core = { version = "0.1.0", path = "../../crates/mic-core" }
+moq-audio = { version = "=0.1.16", default-features = false }
 moq-e2ee = "=0.0.17"
 moq-net = "=0.3.16"
 moq-tokio = { version = "=0.19.29", default-features = false, features = ["noq", "aws-lc-rs"] }

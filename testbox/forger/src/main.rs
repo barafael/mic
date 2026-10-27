@@ -6,6 +6,9 @@
 //! - `forger unsigned`: a broadcast at the forger's own path, its catalog standing, but its frames
 //!   covered by no checkpoint.
 //!
+//! Either way it speaks: a voice track with an 880 Hz tone (`FORGED_TONE`), which a listener may
+//! hear only until the broadcast is rejected.
+//!
 //! A participant must show neither as anyone, and list both as rejected, the second within the
 //! grace (D18).
 //!
@@ -19,6 +22,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::Parser;
+use mic_core::audio::AUDIO;
 use mic_core::catalog::{CATALOG, Catalog};
 use mic_core::roster::PROFILE;
 use mic_core::sig::SIG;
@@ -107,7 +111,12 @@ async fn forge(cli: Cli) -> Result<(), String> {
         kid: crypto.kid(),
         epoch: epoch.as_str().to_owned(),
         seq: 0,
-        tracks: vec![CATALOG.to_owned(), SIG.to_owned(), PROFILE.to_owned()],
+        tracks: vec![
+            CATALOG.to_owned(),
+            SIG.to_owned(),
+            PROFILE.to_owned(),
+            AUDIO.to_owned(),
+        ],
         app: env!("CARGO_PKG_VERSION").to_owned(),
     };
     let origin = moq_tokio::origin::spawn();
@@ -122,6 +131,8 @@ async fn forge(cli: Cli) -> Result<(), String> {
         // before they'd count; at its own, that's the forgery.
         (SIG, None),
         (PROFILE, Some(profile.into_bytes())),
+        // Written once the session is up.
+        (AUDIO, None),
     ] {
         let name = generation
             .name(semantic)
@@ -147,7 +158,45 @@ async fn forge(cli: Cli) -> Result<(), String> {
     // Kept: dropping it ends the session.
     let _connection = connect(&cli, &crypto, origin).await?;
     println!("forger: publishing at {path}");
-    std::future::pending::<()>().await;
+    let voice = tracks.pop().ok_or("no voice track")?;
+    speak(voice).await
+}
+
+/// The tone a forger's voice is, apart from the clients' (xtask's `podman::tone`).
+const FORGED_TONE: f32 = 880.0;
+
+/// [`FORGED_TONE`] in Opus onto `track`, a 20 ms packet each 20 ms and a group each second, as
+/// mic sends a voice (mic-core's `audio`), but unsigned, until it's stopped.
+async fn speak(mut track: moq_e2ee::track::Producer) -> Result<(), String> {
+    use moq_audio::encode::{Encoder, Settings};
+    let mut encoder = Encoder::new(&Settings::new(48_000, moq_audio::Layout::Mono))
+        .map_err(|error| error.to_string())?;
+    let frame = encoder.frame_size();
+    let mut ticks = tokio::time::interval(std::time::Duration::from_millis(20));
+    let mut group = None;
+    for packet in 0_u64.. {
+        ticks.tick().await;
+        let pcm: Vec<f32> = (0..frame)
+            .map(|i| {
+                let at = (packet as usize * frame + i) as f32 / 48_000.0;
+                (at * FORGED_TONE * std::f32::consts::TAU).sin() * 0.5
+            })
+            .collect();
+        let encoded = encoder.encode(&pcm).map_err(|error| error.to_string())?;
+        if packet.is_multiple_of(50) {
+            if let Some(full) = group.take() {
+                moq_e2ee::group::Producer::finish(full).map_err(|error| error.to_string())?;
+            }
+            group = Some(track.append_group().map_err(|error| error.to_string())?);
+        }
+        let timestamp =
+            moq_net::Timestamp::from_micros(packet * 20_000).map_err(|error| error.to_string())?;
+        group
+            .as_mut()
+            .ok_or("no group")?
+            .write_frame(timestamp, &encoded.payload)
+            .map_err(|error| error.to_string())?;
+    }
     Ok(())
 }
 

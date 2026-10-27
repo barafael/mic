@@ -45,6 +45,9 @@ pub enum TrackError {
     /// A broadcast under the room's prefix that isn't shaped as a participant's.
     #[display("{_0:?} isn't a participant's broadcast")]
     NotAParticipant(#[error(not(source))] String),
+    /// A codec refused: its settings, or a packet.
+    #[display("a codec: {_0}")]
+    Codec(#[error(not(source))] String),
 }
 
 impl From<moq_e2ee::Error> for TrackError {
@@ -127,14 +130,32 @@ impl RoomCrypto {
     }
 }
 
-/// Track `semantic` of `broadcast`, encrypted under `generation`.
+/// How a track is served (§1.6, §5.7): its priority, higher first (moq-lite), and how old a
+/// group may get before it's skipped, at the publisher and in each subscription alike. The voice
+/// comes before everything; the checkpoints next, since a frame waits on them to be confirmed.
+/// The rest take moq-net's defaults.
+fn policy(semantic: &str) -> Option<(u8, std::time::Duration)> {
+    use std::time::Duration;
+    match semantic {
+        crate::audio::AUDIO => Some((100, Duration::from_millis(500))),
+        SIG => Some((90, Duration::from_secs(1))),
+        _ => None,
+    }
+}
+
+/// Track `semantic` of `broadcast`, encrypted under `generation`, served by its [`policy`].
 fn produce(
     generation: &Generation,
     broadcast: &moq_net::broadcast::Producer,
     semantic: &str,
 ) -> Result<moq_e2ee::track::Producer, TrackError> {
     let name = generation.name(semantic)?;
-    let track = broadcast.create_track(name.as_str(), None)?;
+    let info = policy(semantic).map(|(priority, max_age)| {
+        moq_net::track::Info::default()
+            .with_priority(priority)
+            .with_max_age(max_age)
+    });
+    let track = broadcast.create_track(name.as_str(), info)?;
     Ok(generation.produce(track)?)
 }
 
@@ -357,7 +378,16 @@ impl Peer {
     /// Its track `semantic`, decrypted as it's read: a frame that doesn't open fails the track.
     pub async fn track(&self, semantic: &str) -> Result<moq_e2ee::track::Consumer, TrackError> {
         let name = self.generation.name(semantic)?;
-        let track = self.broadcast.track(name.as_str())?.subscribe(None).await?;
+        let subscription = policy(semantic).map(|(priority, max_age)| {
+            moq_net::track::Subscription::default()
+                .with_priority(priority)
+                .with_max_age(max_age)
+        });
+        let track = self
+            .broadcast
+            .track(name.as_str())?
+            .subscribe(subscription)
+            .await?;
         Ok(self.generation.consume(track)?)
     }
 }

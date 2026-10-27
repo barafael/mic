@@ -28,7 +28,8 @@ struct Cli {
     /// The directory the harnesses' sockets go in, one a participant, by its name.
     #[arg(long)]
     harness: PathBuf,
-    /// The participants, by name.
+    /// The participants, by name, each with the tone it sends for a voice, if any:
+    /// `carol=880`.
     #[arg(required = true)]
     names: Vec<String>,
 }
@@ -76,14 +77,31 @@ async fn run(cli: Cli) -> Result<(), String> {
     std::fs::create_dir_all(&cli.harness)
         .map_err(|error| format!("{}: {error}", cli.harness.display()))?;
     let mut served = tokio::task::JoinSet::new();
-    for name in cli.names {
+    // Each participant's speaker: playing for as long as the crowd runs.
+    let mut speakers = Vec::new();
+    for participant in cli.names {
+        let (name, tone) = match participant.split_once('=') {
+            Some((name, tone)) => (
+                name.to_owned(),
+                Some(
+                    tone.parse::<f64>()
+                        .map_err(|error| format!("{participant}'s tone: {error}"))?,
+                ),
+            ),
+            None => (participant, None),
+        };
         let client = Client::new(
             config.clone(),
             &InMemory::default(),
             tokio::runtime::Handle::current(),
         )
         .map_err(|error| format!("{name}: {error}"))?;
-        let harness = mic_harness::server::Harness::new(App::new(client), &name, None);
+        let synthetic = mic_harness::synthetic::Synthetic::new(tone)
+            .map_err(|error| format!("{name}'s audio: {error}"))?;
+        let app = App::with_media(client, synthetic.media());
+        let harness =
+            mic_harness::server::Harness::new(app, &name, None).hearing(synthetic.analyzer.clone());
+        speakers.push(synthetic);
         let socket = cli.harness.join(&name);
         served.spawn(async move {
             harness
@@ -92,6 +110,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                 .map_err(|error| format!("{name}'s harness at {}: {error}", socket.display()))
         });
     }
+    let _speakers = speakers;
     let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
         .map_err(|error| format!("SIGTERM's handler: {error}"))?;
     tokio::select! {

@@ -1,6 +1,6 @@
 # A participant, @NAME@, in a pod of its own: all containers of a pod share a network namespace,
 # so shaping one participant's network takes a pod of its own. `cargo testbox up` plays one per
-# client from this file, filling in its name and the image placeholders.
+# client from this file, filling in its name, its tone and the image placeholders.
 {
   apiVersion: "v1",
   kind: "Pod",
@@ -25,6 +25,8 @@
           "--relay", "https://mic-testbox-relay:4443/",
           "--ca", "/keys/ca.pem",
           "--harness", "/run/mic/@NAME@",
+          # Its voice: a tone of its own (xtask's `podman::tone`), and an analyzer for a speaker.
+          "--tone", "@TONE@",
         ],
         env: [
           # Plain logs: the record merges them into one timeline.
