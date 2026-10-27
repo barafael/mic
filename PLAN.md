@@ -523,11 +523,18 @@ from; the git pins move to releases as they land.
     flag in the signed profile. 1280×720 at 5 fps, letterboxed, through moq-video's capture
     (X11 here); the picker lists displays and windows; the stage shows a screen beside the
     tiles. In the box, carol shares her real Xvnc display.
-46. `testbox: netem`, in a `NET_ADMIN` sidecar **⚠ unverified**. **`network`**: loss and delay
+46. `testbox: netem`, in a `NET_ADMIN` sidecar. **`network`**: loss and delay
     keep audio intelligible (tone still dominant), and video recovers at the next keyframe.
+    *Done:* a `shaper` sidecar in every client pod; netem's module loads on the host when first
+    asked for, from a rootless pod's own namespace. Under 10 % loss the tone stays over a hundred
+    times louder than any other frequency, but clicks take 30-50 % of the power: a jitter buffer
+    with loss concealment is a follow-up (docs/observations.md).
 47. `mic-core: the WebSocket fallback and its opt-out` (D9), if the pinned `moq-relay` serves
-    WebSocket and `moq-tokio` can turn its fallback off **⚠ unverified**. **`network`**: with
-    UDP blocked, clients fall back; with the opt-out, they report it.
+    WebSocket and `moq-tokio` can turn its fallback off. **`network`**: with
+    UDP blocked, clients fall back; with the opt-out, they report it. *Done:* the box's relay
+    serves the fallback over TLS on TCP 4443 (its plain HTTP moved to 4080); `Config::websocket`,
+    `--no-websocket` and `MIC_NO_WEBSOCKET` are the opt-out, and a join that fails without the
+    fallback says it's off.
 48. **`room-40`**: 40 participants, mostly the crowd. Records CPU, GPU, memory and the relay's
     egress per minute against the budget in §5.8 and this host's baseline. It runs alone, and not
     in every round.
@@ -584,8 +591,8 @@ Each is checked by the commit named, which settles it in its body and in the des
 | libvpx builds and links on the Windows and macOS CI runners | 32 | A vendored static build through the binding's build script |
 | lavapipe renders offscreen in GitHub's Linux runners | 34 | `mic-render`'s pixel tests run in the box only |
 | `moq-vaapi` can take a VP9 decoder | 37 | VP9 decodes in software everywhere; the box's GPU is used for rendering |
-| A `NET_ADMIN` sidecar can shape traffic for one pod in rootless Podman | 46 | Shaping on the relay's side, per client address |
-| The pinned `moq-relay` serves WebSocket, and `moq-tokio`'s fallback can be turned off | 47 | The fallback waits for upstream; D9's opt-out is reported as missing |
+| A `NET_ADMIN` sidecar can shape traffic for one pod in rootless Podman (*holds*, commit 46) | 46 | Shaping on the relay's side, per client address |
+| The pinned `moq-relay` serves WebSocket, and `moq-tokio`'s fallback can be turned off (*holds*, commit 47) | 47 | The fallback waits for upstream; D9's opt-out is reported as missing |
 | 40 participants in one `mic-crowd` process stay within the §5.8 budget | 48 | The crowd is split over several pods |
 
 ## Open points for this plan

@@ -37,6 +37,9 @@ struct Cli {
     /// Claims to decode no video: a crowd that fills a room without decoding every camera in it.
     #[arg(long)]
     no_decoders: bool,
+    /// QUIC only: no WebSocket fallback over TCP (D9).
+    #[arg(long)]
+    no_websocket: bool,
     /// Plays nobody's voice: a crowd that fills a room without a decoder for every voice in it.
     /// The harness then hears nothing.
     #[arg(long)]
@@ -94,6 +97,7 @@ async fn run(cli: Cli) -> Result<(), String> {
     if cli.no_decoders {
         config.decoders = Vec::new();
     }
+    config.websocket = !cli.no_websocket;
     let invite = cli
         .join
         .map(|invite| invite.parse::<mic_core::Invite>())

@@ -33,6 +33,9 @@ pub struct Config {
     /// The video codecs it says it decodes: every one it has, unless told fewer (the box's
     /// `--decoders`, to see a codec go unsupported).
     pub decoders: Vec<mic_media::video::Codec>,
+    /// Whether a WebSocket over TCP races QUIC, for networks that block UDP (D9): on unless
+    /// opted out of, QUIC only then.
+    pub websocket: bool,
 }
 
 impl Config {
@@ -43,6 +46,7 @@ impl Config {
             trust: Trust::System,
             connect_timeout: CONNECT_TIMEOUT,
             decoders: mic_media::video::Codec::ALL.to_vec(),
+            websocket: true,
         }
     }
 }
@@ -219,7 +223,11 @@ impl Inner {
             .map_err(|error| Error::Unreachable {
                 relay: self.config.relay.to_string(),
                 after: self.config.connect_timeout,
-                why: error.to_string(),
+                why: if self.config.websocket {
+                    error.to_string()
+                } else {
+                    format!("{error} (QUIC only: the WebSocket fallback is off)")
+                },
             })?;
         let participant = ParticipantKey::from_bytes(key.public().to_bytes());
         let mut publication = Publication::new(
@@ -306,6 +314,7 @@ impl Inner {
 fn connect_config(config: &Config) -> moq_tokio::connect::Config {
     let mut connect = moq_tokio::connect::Config::default();
     connect.url = Some(config.relay.clone());
+    connect.websocket.enabled = Some(config.websocket);
     // moq-tokio's window for redialing: a first connect gives up after it, with the last
     // attempt's error, and no attempt outlasts it. The same window bounds how long a dropped
     // session tries again, which reconnecting (PLAN.md, commit 17) settles.

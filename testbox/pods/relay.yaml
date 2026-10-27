@@ -22,8 +22,9 @@
       },
     ],
     containers: [
-      # QUIC on UDP 4443, and HTTP (and later the WebSocket fallback) on TCP 4443. Anyone may
-      # publish and subscribe, as on moq.pro's public prefix (D8).
+      # QUIC on UDP 4443, and the WebSocket fallback on TCP 4443, over TLS as a client dials it
+      # (`wss://`, from the same `https://` URL); plain HTTP on TCP 4080, for what the checks ask
+      # (`/announced`). Anyone may publish and subscribe, as on moq.pro's public prefix (D8).
       {
         name: "relay",
         image: "@IMAGE:moq@",
@@ -32,7 +33,10 @@
           "--listen", "[::]:4443",
           "--listen-tls-cert", "/keys/relay.pem",
           "--listen-tls-key", "/keys/relay.key",
-          "--web-http-listen", "[::]:4443",
+          "--web-https-listen", "[::]:4443",
+          "--web-https-cert", "/keys/relay.pem",
+          "--web-https-key", "/keys/relay.key",
+          "--web-http-listen", "[::]:4080",
           "--auth-public", "**",
         ],
         # Plain logs: the record merges them into one timeline.

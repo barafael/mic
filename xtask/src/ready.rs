@@ -57,13 +57,13 @@ pub fn crowd_up(the_box: &TestBox, index: u32) -> Result<()> {
     }
 }
 
-/// The relay answers HTTP on TCP 4443 (`/announced`, what is announced), which it serves beside
-/// QUIC, as asked from inside the box.
+/// The relay answers HTTP on TCP 4080 (`/announced`, what is announced), which it serves beside
+/// QUIC and the WebSocket fallback, as asked from inside the box.
 pub fn relay(the_box: &TestBox) -> Result<()> {
     answers(
         the_box,
         "the relay",
-        "http://mic-testbox-relay:4443/announced",
+        "http://mic-testbox-relay:4080/announced",
     )
 }
 

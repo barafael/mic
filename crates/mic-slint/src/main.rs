@@ -45,12 +45,16 @@ struct Cli {
     #[arg(long, env = "MIC_RELAY", required_unless_present = "register")]
     relay: Option<url::Url>,
     /// Makes this binary what opens `mic://` links, for this user (Linux), and exits. The
-    /// `--relay`, `--ca` and `--version-url` given with it are what a link starts mic with.
+    /// `--relay`, `--ca`, `--version-url` and `--no-websocket` given with it are what a link
+    /// starts mic with.
     #[arg(long)]
     register: bool,
     /// A CA's certificate (PEM) that the relay's is trusted by; the system's roots otherwise.
     #[arg(long, conflicts_with = "fingerprint")]
     ca: Option<PathBuf>,
+    /// QUIC only: no WebSocket over TCP raced against it, for a network that blocks UDP (D9).
+    #[arg(long, env = "MIC_NO_WEBSOCKET")]
+    no_websocket: bool,
     /// Where to read the latest version from (the site's `version.json`), at start. No check
     /// without one, until mic has a domain.
     #[arg(long, env = "MIC_VERSION_URL")]
@@ -158,6 +162,9 @@ fn main() -> ExitCode {
         if let Some(url) = &cli.version_url {
             passed.extend(["--version-url".to_owned(), url.clone()]);
         }
+        if cli.no_websocket {
+            passed.push("--no-websocket".to_owned());
+        }
         return match links::register(&passed) {
             Ok(said) => {
                 println!("{said}");
@@ -187,6 +194,7 @@ fn run(cli: Cli) -> Result<(), String> {
     if let Some(fingerprint) = cli.fingerprint {
         config.trust = Trust::Fingerprints(vec![fingerprint]);
     }
+    config.websocket = !cli.no_websocket;
     #[cfg(all(unix, feature = "harness"))]
     if let Some(Decoders(decoders)) = cli.decoders {
         config.decoders = decoders;

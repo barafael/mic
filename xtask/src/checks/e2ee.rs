@@ -18,7 +18,7 @@ use super::Checks;
 /// How long a roster may take to show a change.
 const PATIENCE: Duration = Duration::from_secs(15);
 /// The relay's HTTP interface, as the pods reach it.
-const RELAY: &str = "http://mic-testbox-relay:4443";
+const RELAY: &str = "http://mic-testbox-relay:4080";
 
 pub fn e2ee(checks: &mut Checks, the_box: &TestBox) -> Result<()> {
     let (mut alice, mut bob) = checks.require("alice and bob answer", || {

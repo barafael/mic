@@ -6,6 +6,7 @@ mod crashed;
 mod e2ee;
 mod impersonation;
 mod links;
+mod network;
 mod record;
 mod relay;
 mod room;
@@ -48,10 +49,12 @@ pub enum Phase {
     Room,
     /// A shared screen reaches everyone; a real one too.
     Screenshare,
+    /// Loss, delay, and UDP blocked: what's heard and seen holds, and the WebSocket fallback.
+    Network,
 }
 
 impl Phase {
-    pub const ALL: [Phase; 12] = [
+    pub const ALL: [Phase; 13] = [
         Phase::Box,
         Phase::Relay,
         Phase::Roster,
@@ -64,6 +67,7 @@ impl Phase {
         Phase::Links,
         Phase::Room,
         Phase::Screenshare,
+        Phase::Network,
     ];
 
     pub fn name(self) -> String {
@@ -87,6 +91,7 @@ impl Phase {
                 | Phase::Links
                 | Phase::Room
                 | Phase::Screenshare
+                | Phase::Network
         )
     }
 
@@ -97,7 +102,7 @@ impl Phase {
     pub fn runs_alone(self) -> bool {
         matches!(
             self,
-            Phase::Roster | Phase::Audio | Phase::AudioDevices | Phase::Video
+            Phase::Roster | Phase::Audio | Phase::AudioDevices | Phase::Video | Phase::Network
         )
     }
 
@@ -115,6 +120,7 @@ impl Phase {
             Phase::Links => links::links(checks, the_box),
             Phase::Room => room::room(checks, the_box),
             Phase::Screenshare => screenshare::screenshare(checks, the_box),
+            Phase::Network => network::network(checks, the_box),
         }
     }
 }

@@ -6,6 +6,24 @@ measurements, and things to revisit. Newest first within each milestone. Each sa
 
 ## M8: Rooms
 
+- **Under loss, a voice clicks** (open, commit 46). With 10 % of alice's packets lost and 80 ms
+  added, her tone at bob stays over a hundred times louder than any other frequency, but only
+  30-70 % of what he hears by power: the rest is clicks. A packet lost within a voice group
+  holds up the rest of the group until QUIC sends it again, some 200-260 ms here. bob's stream
+  sits near its 120 ms cap (90-110 ms queued in steady state, as nothing drains it), so it
+  runs dry, playing silence, then overflows with the burst, which is dropped. A larger cap
+  didn't help, nor did the camera off (it isn't congestion). The answer is a jitter buffer
+  that aims at a target, conceals what's late (Opus PLC) and catches up, rather than a cap;
+  smaller groups would cost checkpoint size (§5.7). Video loses nothing visible at 30 %:
+  QUIC's resends arrive within its 2 s.
+- **Blocking UDP blocks DNS** (settled, commit 47): the WebSocket fallback couldn't resolve the
+  relay either. The `network` phase blocks UDP but port 53.
+- **The box's relay never served the fallback** (settled, commit 47). TCP 4443 was plain HTTP,
+  so every connect raced a `wss://` dial that failed. The relay serves the fallback over TLS
+  there now, and plain HTTP on 4080.
+- **Rootless netem works** (settled, commit 46): a NET_ADMIN sidecar, over its pod's network
+  namespace alone, adds netem's qdisc, and the host loads `sch_netem` when first asked.
+
 - **A screen is a track, not a broadcast of its own** (settled, commit 45). §5.6 has a
   `screen.hang` broadcast; a track of the participant's broadcast needs no second catalog,
   epoch or checkpoint signer, and a subscriber is told it's shared by the signed profile. The
