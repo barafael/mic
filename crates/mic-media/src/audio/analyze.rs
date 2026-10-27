@@ -81,6 +81,13 @@ impl Analyzer {
     }
 }
 
+/// The amplitude of `frequency` (Hz) in `samples` at 48 kHz: about a sine's own amplitude for a
+/// tone at that frequency, about 0 without one. For what's recorded elsewhere, as the box records
+/// a speaker.
+pub fn level(samples: &[f32], frequency: f64) -> f64 {
+    goertzel(samples.iter().copied(), samples.len(), frequency)
+}
+
 /// The amplitude of `frequency` in `count` samples, by Goertzel's algorithm.
 fn goertzel(samples: impl Iterator<Item = f32>, count: usize, frequency: f64) -> f64 {
     if count == 0 {

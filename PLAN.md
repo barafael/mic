@@ -422,7 +422,10 @@ Each numbered item below is about one commit. Box phases are in **bold**.
     and `audio` also clicks the button.
 28. `testbox: PipeWire in the clients` with a speaker-to-mic loopback **⚠ unverified**.
     **`audio-devices`**: the `cpal` path end to end. The CI smoke job now builds `cpal` on
-    Windows and macOS.
+    Windows and macOS. *Done* with a third client, carol, on the devices (alice and bob keep
+    their tones, which other phases measure exactly). PipeWire runs rootless with a speaker
+    and a microphone fed by a sink of its own; the loopback between them comes with commit 29,
+    which needs it.
 29. `mic-media: echo cancellation with sonora` (D14). **`audio-devices`**: with the loopback on,
     alice doesn't hear her own tone back.
 30. `mic-media: noise suppression`. `nnnoiseless` and `sonora-ns` measured in the box against
@@ -542,7 +545,7 @@ Each is checked by the commit named, which settles it in its body and in the des
 | Assumption | Checked in | If it's wrong |
 |---|---|---|
 | The keyring works on GitHub's Windows and macOS runners, and GNOME Keyring on its Linux one (it does in a container here) | 11 (CI) | The keyring test is skipped in CI where it can't run, and the box's clients cover Linux |
-| PipeWire runs in a rootless container with a speaker-to-mic loopback | 28 | A virtual sink and source in the `cpal` test path only, without PipeWire |
+| A speaker-to-mic loopback in the clients' PipeWire (PipeWire itself runs rootless: commit 28) | 29 | A virtual sink and source in the `cpal` test path only, without PipeWire |
 | libvpx builds and links on the Windows and macOS CI runners | 32 | A vendored static build through the binding's build script |
 | lavapipe renders offscreen in GitHub's Linux runners | 34 | `mic-render`'s pixel tests run in the box only |
 | `moq-vaapi` can take a VP9 decoder | 37 | VP9 decodes in software everywhere; the box's GPU is used for rendering |

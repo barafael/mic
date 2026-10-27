@@ -24,7 +24,10 @@ pub fn audio(checks: &mut Checks, the_box: &TestBox) -> Result<()> {
             Participant::connect(the_box, "bob")?,
         ))
     })?;
-    let (alices, bobs) = (f64::from(tone("alice")), f64::from(tone("bob")));
+    let (alices, bobs) = (
+        f64::from(tone("alice").ok_or("alice sends no tone")?),
+        f64::from(tone("bob").ok_or("bob sends no tone")?),
+    );
     let invite = Invite::new_room();
     let alice_key = checks.require("alice and bob are in a room", || {
         let key = alice.join(&invite, "Alice")?.me.key.to_string();

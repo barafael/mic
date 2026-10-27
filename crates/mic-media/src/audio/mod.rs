@@ -1,9 +1,9 @@
 //! Audio: mono PCM at 48 kHz, as `f32` in -1..1, which is what Opus takes and gives.
 //!
-//! A [`Source`] (a microphone, or a [`ToneSource`]) runs on a thread of its own, as a device's
+//! A [`Source`] (a microphone, `Microphone` with the `devices` feature, or a [`ToneSource`]) runs on a thread of its own, as a device's
 //! callback does, and writes samples into a [`Writer`]; the async side reads them a frame at a
-//! time from the [`Capture`] at the ring's other end. A [`Sink`] (a speaker, or an
-//! [`AnalyzingSink`]) runs on a thread of its own too, and takes what it plays from a [`Mixer`],
+//! time from the [`Capture`] at the ring's other end. A [`Sink`] (a speaker, `Speaker`,
+//! or an [`AnalyzingSink`]) runs on a thread of its own too, and takes what it plays from a [`Mixer`],
 //! which sums a [`Playout`] per stream the async side writes decoded audio into.
 //!
 //! Nothing on a source's or sink's thread waits for the async side: rings are lock-free, the
@@ -11,6 +11,8 @@
 //! being woken (a wake takes locks a real-time thread mustn't).
 
 mod analyze;
+#[cfg(feature = "devices")]
+mod device;
 mod mixer;
 mod ring;
 mod tone;
@@ -19,7 +21,9 @@ use std::time::Duration;
 
 use derive_more::{Display, Error};
 
-pub use analyze::{Analyzer, AnalyzingSink};
+pub use analyze::{Analyzer, AnalyzingSink, level};
+#[cfg(feature = "devices")]
+pub use device::{Microphone, Speaker};
 pub use mixer::{Mixer, Playout};
 pub use ring::{Capture, Writer, capture};
 pub use tone::ToneSource;

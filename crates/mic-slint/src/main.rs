@@ -9,6 +9,7 @@
 // Every outcome is handled: a discarded `Result` would hide a failure.
 #![deny(clippy::let_underscore_must_use, clippy::let_underscore_untyped)]
 
+mod devices;
 mod view;
 
 use std::path::PathBuf;
@@ -88,8 +89,8 @@ fn run(cli: Cli) -> Result<(), String> {
     let keyring = Keyring::system().map_err(|error| error.to_string())?;
     let client = Client::new(config, &keyring, runtime.handle().clone())
         .map_err(|error| error.to_string())?;
-    // The box's synthetic devices, with the harness and `--tone`; no audio otherwise, until
-    // devices arrive (PLAN.md, commit 28).
+    // The system's microphone and speaker; with the harness and `--tone`, the box's synthetic
+    // ones instead.
     #[cfg(all(unix, feature = "harness"))]
     let synthetic = cli
         .tone
@@ -97,12 +98,20 @@ fn run(cli: Cli) -> Result<(), String> {
         .transpose()
         .map_err(|error| format!("the synthetic audio: {error}"))?;
     #[cfg(all(unix, feature = "harness"))]
-    let app = match &synthetic {
-        Some(synthetic) => App::with_media(client, synthetic.media()),
-        None => App::new(client),
+    let devices = synthetic.is_none().then(devices::Devices::new);
+    #[cfg(not(all(unix, feature = "harness")))]
+    let devices = Some(devices::Devices::new());
+    #[cfg(all(unix, feature = "harness"))]
+    let app = match (&synthetic, &devices) {
+        (Some(synthetic), _) => App::with_media(client, synthetic.media()),
+        (None, Some(devices)) => App::with_media(client, devices.media()),
+        (None, None) => App::new(client),
     };
     #[cfg(not(all(unix, feature = "harness")))]
-    let app = App::new(client);
+    let app = match &devices {
+        Some(devices) => App::with_media(client, devices.media()),
+        None => App::new(client),
+    };
 
     select_backend()?;
     let window = AppWindow::new().map_err(|error| format!("the window: {error}"))?;

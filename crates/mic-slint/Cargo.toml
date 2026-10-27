@@ -12,13 +12,13 @@ path = "src/main.rs"
 
 [features]
 # The box's harness on a Unix socket (`--harness`), with the `ui` section filled in.
-harness = ["dep:mic-harness", "dep:mic-media"]
+harness = ["dep:mic-harness"]
 
 [dependencies]
 clap = { version = "4.6.7", features = ["derive", "env"] }
 mic-core = { version = "0.1.0", path = "../mic-core" }
 mic-harness = { version = "0.1.0", path = "../mic-harness", optional = true }
-mic-media = { version = "0.1.0", path = "../mic-media", optional = true }
+mic-media = { version = "0.1.0", path = "../mic-media", features = ["devices"] }
 # wgpu for the video tiles to come (the spike, spikes/video-tiles); the software renderer where
 # there's no wgpu adapter. Slint's royalty-free license: the About screen shows AboutSlint (D24).
 slint = { version = "=1.18.1", default-features = false, features = [

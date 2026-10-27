@@ -29,7 +29,7 @@ pub fn impersonation(checks: &mut Checks, the_box: &TestBox) -> Result<()> {
             Participant::connect(the_box, "bob")?,
         ))
     })?;
-    let alices = f64::from(crate::podman::tone("alice"));
+    let alices = f64::from(crate::podman::tone("alice").ok_or("alice sends no tone")?);
     let invite = Invite::new_room();
     let alice_key = checks.require("alice and bob are in a room", || {
         let key = alice.join(&invite, "Alice")?.me.key;

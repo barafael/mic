@@ -145,11 +145,11 @@ fn keys(room: &RoomState) -> Vec<String> {
 /// (crates/mic-slint/ui/app.slint, `NameTile`).
 const TILES: [[u8; 3]; 2] = [[0x2b, 0x4a, 0x6b], [0x3a, 0x3a, 0x44]];
 
-/// A screenshot of each client's display, kept in the record, shows both kinds of tile, within
+/// A screenshot of alice's and bob's displays, kept in the record, shows both kinds of tile, within
 /// the patience: the window draws a moment after its harness says what it shows.
 fn windows_drawn(the_box: &TestBox, directory: &Path) -> Result<()> {
     let tool = view::tool(the_box.repo(), "testbox-shot")?;
-    for client in crate::podman::CLIENTS {
+    for client in ["alice", "bob"] {
         let display = format!("{client}={}", the_box.view_socket(client).display());
         let path = directory.join(format!("roster-{client}.png"));
         let deadline = std::time::Instant::now() + PATIENCE;

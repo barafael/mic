@@ -77,11 +77,14 @@ flowchart LR
   would, and reads the room's state and what the window shows of it; or it types into the
   window and clicks it with `xdotool`, as a person would (xtask's `checks::window`).
 - **Each client's device secret is in GNOME Keyring**, on a D-Bus session of the client's own
-  (`testbox/client/keyring-session`), as on a desktop. The keyring lives under a home in
+  (`testbox/client/client-session`), as on a desktop. The keyring lives under a home in
   `target/testbox-run/<client>/home`, so a restarted client is the same participant.
-- **Each client's voice is a tone of its own** (`--tone`, from xtask's `podman::tone`), and its
-  speaker an analyzer the harness answers `heard` from (crates/mic-harness, `synthetic`), until
-  PipeWire gives the clients devices (PLAN.md, commit 28).
+- **alice's and bob's voices are tones of their own** (`--tone`, from xtask's `podman::tone`),
+  and their speakers analyzers the harness answers `heard` from (crates/mic-harness,
+  `synthetic`), so phases measure exactly what each sent.
+- **carol uses devices**: PipeWire and WirePlumber run in every client (`client-session`), with
+  the box's speaker, whose monitor a check records, and microphone, fed by a sink of its own a
+  check plays into (`box-devices.conf`). mic reaches them through cpal and ALSA.
 - **Windows present in mailbox mode** (`MESA_VK_WSI_PRESENT_MODE`): Slint presents with Fifo,
   which waits for a vertical blank Xvnc never has (spikes/video-tiles: under 2 fps).
 - **A display shows what runs on it**: `with-display` runs a program on TigerVNC's Xvnc, served on
@@ -151,5 +154,6 @@ Phases don't need a fresh box: each check uses rooms and broadcasts of its own. 
 | `relay` | Frames pass through the relay between moq's own publisher and subscriber; a client without the box's CA is refused. If this fails, the box is broken, not `mic` |
 | `roster` | alice and bob join a room and see each other; their windows show the room's tiles, in the roster's order, as the harness's `ui` section says and a screenshot of each shows; a new name reaches the other; bob leaves and alice sees him go, and his window shows the join screen; bob joins again by typing into his window; after the relay restarts, both are connected again and see each other once; a restarted alice has the same key, her device secret kept in her keyring; an honest room rejects nobody |
 | `impersonation` | The forger (testbox/forger), a member with the invite, run in the tools pod, speaking an 880 Hz tone: at alice's path with a catalog it signed itself, it stands for no one; at its own path with frames no checkpoint covers, it's rejected within the 2 s grace, after bob heard it (frames play before they're confirmed) and before he hears only alice; bob sees alice once |
+| `audio-devices` | carol on PipeWire devices, alice on her tone: what carol's speaker plays (recorded from its monitor) holds alice's tone; a tone played into carol's microphone reaches alice. It measures, so it runs alone |
 | `audio` | alice and bob each send a tone of their own (alice 440 Hz, bob 660 Hz) and hear the other's, never their own, through their harnesses' analyzers; muted, alice is silence on bob's end and her tile in his window says so, and unmuted she's heard again; bob mutes and unmutes with his window's button (xdotool); once bob leaves, alice hears him no more. It measures, so it runs alone |
 | `e2ee` | What a stranger on the relay sees (its HTTP interface: what's announced, a track's latest group): no room id, participant key or name, only ciphertext; a stranger who learned the room's prefix reads its profiles by their real names (the forger's `eavesdrop`): under the room's secret they open, under another every frame fails to authenticate |

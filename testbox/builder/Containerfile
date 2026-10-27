@@ -1,14 +1,14 @@
 # Compiles what the box runs (`cargo testbox build`), incrementally: a long-lived container whose
 # target directory and cargo registry are volumes. Arch, as the client image, so the binaries find
 # the libraries they were linked with; pacman installs from one day of the Arch Linux Archive
-# (ARCH_SNAPSHOT). mold links. Slint links fontconfig and xkbcommon.
+# (ARCH_SNAPSHOT). mold links. Slint links fontconfig and xkbcommon; cpal, ALSA.
 ARG ARCH
 FROM ${ARCH}
 ARG ARCH_SNAPSHOT
 RUN --mount=type=cache,target=/var/cache/pacman/pkg \
     echo "Server = https://archive.archlinux.org/repos/${ARCH_SNAPSHOT}/\$repo/os/\$arch" \
         > /etc/pacman.d/mirrorlist \
-    && pacman -Syu --noconfirm --needed base-devel clang mold rustup fontconfig libxkbcommon
+    && pacman -Syu --noconfirm --needed base-devel clang mold rustup fontconfig libxkbcommon alsa-lib
 # The toolchain rust-toolchain.toml pins (xtask/src/pins.rs holds RUST to it), in the image, so
 # the repository's rust-toolchain.toml finds it installed, with the components it names.
 ARG RUST

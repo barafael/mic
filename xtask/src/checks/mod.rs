@@ -1,6 +1,7 @@
 //! `cargo testbox test <phase>`'s checks. Each phase is a file of its own.
 
 mod audio;
+mod audio_devices;
 mod crashed;
 mod e2ee;
 mod impersonation;
@@ -30,16 +31,19 @@ pub enum Phase {
     Impersonation,
     /// Each hears every other's voice, never their own.
     Audio,
+    /// Voices through real devices: cpal, ALSA, PipeWire.
+    AudioDevices,
 }
 
 impl Phase {
-    pub const ALL: [Phase; 6] = [
+    pub const ALL: [Phase; 7] = [
         Phase::Box,
         Phase::Relay,
         Phase::Roster,
         Phase::E2ee,
         Phase::Impersonation,
         Phase::Audio,
+        Phase::AudioDevices,
     ];
 
     pub fn name(self) -> String {
@@ -54,7 +58,7 @@ impl Phase {
     pub fn uses_clients(self) -> bool {
         matches!(
             self,
-            Phase::Roster | Phase::E2ee | Phase::Impersonation | Phase::Audio
+            Phase::Roster | Phase::E2ee | Phase::Impersonation | Phase::Audio | Phase::AudioDevices
         )
     }
 
@@ -63,7 +67,7 @@ impl Phase {
     /// skew what it measures (`audio`). This is the box-wide measurement lock (PLAN.md, "The test
     /// box").
     pub fn runs_alone(self) -> bool {
-        matches!(self, Phase::Roster | Phase::Audio)
+        matches!(self, Phase::Roster | Phase::Audio | Phase::AudioDevices)
     }
 
     pub fn run(self, checks: &mut Checks, the_box: &TestBox) -> Result<()> {
@@ -74,6 +78,7 @@ impl Phase {
             Phase::E2ee => e2ee::e2ee(checks, the_box),
             Phase::Impersonation => impersonation::impersonation(checks, the_box),
             Phase::Audio => audio::audio(checks, the_box),
+            Phase::AudioDevices => audio_devices::audio_devices(checks, the_box),
         }
     }
 }
