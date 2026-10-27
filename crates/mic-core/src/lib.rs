@@ -12,6 +12,7 @@ pub mod room;
 pub mod roster;
 pub mod secrets;
 pub mod session;
+pub mod sig;
 pub mod tracks;
 
 pub use invite::{Invite, RoomId, RoomSecret};

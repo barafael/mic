@@ -91,7 +91,7 @@ pub struct Expected<'a> {
     pub epoch: &'a str,
     /// The broadcast's participant segment, and how a key derives one.
     pub participant_segment: &'a str,
-    pub segment_of: &'a dyn Fn(&ParticipantKey) -> Option<String>,
+    pub segment_of: &'a (dyn Fn(&ParticipantKey) -> Option<String> + Sync),
     /// The last sequence number verified for the broadcast, if any.
     pub last: Option<u64>,
 }

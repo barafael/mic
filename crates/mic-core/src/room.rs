@@ -94,7 +94,7 @@ enum Request {
     Command(Command, oneshot::Sender<Result<(), Error>>),
     Publish(
         String,
-        oneshot::Sender<Result<moq_e2ee::track::Producer, Error>>,
+        oneshot::Sender<Result<crate::sig::SignedTrack, Error>>,
     ),
 }
 
@@ -106,7 +106,7 @@ pub(crate) struct Joined {
     pub path: String,
     pub publication: Publication,
     pub profile: Profile,
-    pub profile_track: moq_e2ee::track::Producer,
+    pub profile_track: crate::sig::SignedTrack,
     pub connection: moq_tokio::Connection,
     /// What the room dials again with, once a connection gives up.
     pub moq: moq_tokio::Client,
@@ -213,7 +213,7 @@ impl Room {
     }
 
     /// A track `semantic` of this participant's broadcast, encrypted.
-    pub async fn publish(&self, semantic: &str) -> Result<moq_e2ee::track::Producer, Error> {
+    pub async fn publish(&self, semantic: &str) -> Result<crate::sig::SignedTrack, Error> {
         let (reply, answer) = oneshot::channel();
         self.requests
             .send(Request::Publish(semantic.to_owned(), reply))
@@ -256,7 +256,7 @@ struct Task {
     publication: Publication,
     profile: Profile,
     /// Until the room is left.
-    profile_track: Option<moq_e2ee::track::Producer>,
+    profile_track: Option<crate::sig::SignedTrack>,
     /// Until the room is left.
     connection: Option<moq_tokio::Connection>,
     moq: moq_tokio::Client,

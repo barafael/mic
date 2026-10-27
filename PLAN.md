@@ -372,9 +372,16 @@ Each numbered item below is about one commit. Box phases are in **bold**.
     stand are listed in `RoomState::rejected`, and announced as events. Tests: every changed
     byte is refused; a member signing as herself at Alice's path, and a catalog naming Alice
     signed by another key, are both rejected, and Alice is shown once.
-21. `mic-core: the sig track`. Checkpoints every 250 ms; verification fails closed after 2 s.
-    **`impersonation`**: a box-only forger publishes under alice's path with another key; bob
-    marks the tile and drops its tracks within the grace deadline. M5 and M6 rerun it with media.
+21. `mic-core: the sig track`. Every track but the catalog and `sig` keeps a hash chain per
+    group; checkpoints, signed and bound to the room, key id and epoch, list each track's latest
+    group and those changed in the last 3 s, within 250 ms of a frame and once a second all the
+    same (so a late joiner's old frames are covered). Subscribers show frames at once, confirm
+    each against the first checkpoint covering it, and reject the broadcast on a contradiction or
+    a frame left unconfirmed past 2 s. Tests: an honest room with a late joiner raises no alarm
+    past the grace; unsigned frames are rejected within it. **`impersonation`**: a box-only forger
+    (testbox/forger) publishes at alice's path with its own key, and at its own path unsigned;
+    bob lists both as rejected, the second within the grace, and sees alice once. M5 and M6 rerun
+    it with media.
 
 ### M4: The window
 

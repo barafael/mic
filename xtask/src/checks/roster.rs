@@ -67,6 +67,14 @@ pub fn roster(checks: &mut Checks, the_box: &TestBox) -> Result<()> {
         })?;
         Ok(())
     });
+    checks.record("an honest room rejects nobody", || {
+        for participant in [&mut alice, &mut bob] {
+            participant.wait_for("rejecting nobody", Duration::ZERO, |state| {
+                state.rejected.is_empty()
+            })?;
+        }
+        Ok(())
+    });
     for participant in [&mut alice, &mut bob] {
         participant.reset()?;
     }

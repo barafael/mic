@@ -12,6 +12,7 @@ use tokio::sync::{mpsc, watch};
 
 use crate::catalog::{CATALOG, Catalog, Expected};
 use crate::invite::RoomId;
+use crate::sig::{self, SIG, SignedTrack, Verification};
 use crate::tracks::{Peer, PeerEvent, Peers, RoomCrypto, TrackError};
 
 /// The profile track's semantic name.
@@ -117,10 +118,7 @@ impl ProfileFrame {
 }
 
 /// Writes `profile` as the latest group of `track`.
-pub(crate) fn write_profile(
-    track: &mut moq_e2ee::track::Producer,
-    profile: &Profile,
-) -> Result<(), TrackError> {
+pub(crate) fn write_profile(track: &mut SignedTrack, profile: &Profile) -> Result<(), TrackError> {
     let mut group = track.append_group()?;
     group.write_frame(moq_net::Timestamp::now(), &ProfileFrame::encode(profile))?;
     group.finish()?;
@@ -287,8 +285,9 @@ impl Drop for Task {
 }
 
 /// `peer`'s catalog, and each one after it, into `found`: nothing of the broadcast is believed
-/// before its first catalog stands, and once one doesn't, the broadcast is rejected. Its profiles
-/// are read once its catalog stands.
+/// before its first catalog stands, and once one doesn't, the broadcast is rejected. Once it
+/// stands, its checkpoints are verified with the key it names, and its profiles read; a frame the
+/// checkpoints don't confirm rejects the broadcast too.
 async fn read_peer(
     peer: Peer,
     crypto: RoomCrypto,
@@ -306,9 +305,24 @@ async fn read_peer(
     };
     let segment_of = |key: &ParticipantKey| crypto.participant_segment(key.as_bytes()).ok();
     let mut last: Option<u64> = None;
-    let mut profiles: Option<Task> = None;
+    let mut _profiles: Option<Task> = None;
+    let mut verifying: Option<tokio::task::JoinHandle<sig::Forgery>> = None;
     loop {
-        let group = match catalogs.recv_group().await {
+        let received = tokio::select! {
+            received = catalogs.recv_group() => received,
+            forgery = async {
+                match verifying.as_mut() {
+                    Some(task) => task.await.ok(),
+                    None => std::future::pending().await,
+                }
+            } => {
+                if let Some(forgery) = forgery {
+                    send(Found::Rejected(forgery.to_string()));
+                }
+                return;
+            }
+        };
+        let mut group = match received {
             Ok(Some(group)) => group,
             Ok(None) => return,
             Err(error) => {
@@ -318,7 +332,6 @@ async fn read_peer(
                 return;
             }
         };
-        let mut group = group;
         let Ok(Some(frame)) = group.read_frame().await else {
             continue;
         };
@@ -330,30 +343,52 @@ async fn read_peer(
             segment_of: &segment_of,
             last,
         };
-        match Catalog::verify(&frame.plaintext, &expected) {
-            Ok(catalog) => {
-                last = Some(catalog.seq);
-                if !send(Found::Verified(catalog.participant)) {
-                    return;
-                }
-                if profiles.is_none() {
-                    profiles = Some(Task(tokio::spawn(read_profiles(
-                        peer.clone(),
-                        found.clone(),
-                    ))));
-                }
-            }
+        let catalog = match Catalog::verify(&frame.plaintext, &expected) {
+            Ok(catalog) => catalog,
             Err(rejection) => {
                 send(Found::Rejected(rejection.to_string()));
                 return;
             }
+        };
+        last = Some(catalog.seq);
+        if !send(Found::Verified(catalog.participant)) {
+            return;
         }
+        if verifying.is_some() {
+            continue;
+        }
+        let checkpoints = match peer.track(SIG).await {
+            Ok(track) => track,
+            Err(error) => {
+                send(Found::Rejected(format!("no checkpoints: {error}")));
+                return;
+            }
+        };
+        let verification = Verification::default();
+        verifying = Some(tokio::spawn(sig::verify(
+            checkpoints,
+            verification.clone(),
+            catalog.participant,
+            room,
+            crypto.kid(),
+            peer.epoch().to_owned(),
+        )));
+        _profiles = Some(Task(tokio::spawn(read_profiles(
+            peer.clone(),
+            verification,
+            found.clone(),
+        ))));
     }
 }
 
-/// `peer`'s profile, and each change to it, into `found`, until its track ends.
-async fn read_profiles(peer: Peer, found: mpsc::UnboundedSender<(String, Found)>) {
-    let mut track = match peer.track(PROFILE).await {
+/// `peer`'s profile, and each change to it, into `found`, until its track ends: shown at once,
+/// and confirmed by its checkpoints within the grace (`verification`).
+async fn read_profiles(
+    peer: Peer,
+    verification: Verification,
+    found: mpsc::UnboundedSender<(String, Found)>,
+) {
+    let mut track = match peer.verified_track(PROFILE, &verification).await {
         Ok(track) => track,
         Err(error) => {
             tracing::debug!(%error, path = peer.path(), "no profile");

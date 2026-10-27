@@ -18,10 +18,17 @@
         image: "@IMAGE:moq@",
         args: ["bash", "-c", "trap 'exit 0' TERM; sleep infinity & wait"],
         securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: ["ALL"] } },
-        # The box's CA, which clients trust the relay by.
-        volumeMounts: [{ name: "keys", mountPath: "/keys", readOnly: true }],
+        volumeMounts: [
+          # The box's CA, which clients trust the relay by.
+          { name: "keys", mountPath: "/keys", readOnly: true },
+          # What the builder built: the forger, for the `impersonation` phase.
+          { name: "bin", mountPath: "/opt/mic", readOnly: true },
+        ],
       },
     ],
-    volumes: [{ name: "keys", persistentVolumeClaim: { claimName: "mic-testbox-keys" } }],
+    volumes: [
+      { name: "keys", persistentVolumeClaim: { claimName: "mic-testbox-keys" } },
+      { name: "bin", hostPath: { path: "@REPO@/target/testbox-bin", type: "Directory" } },
+    ],
   },
 }

@@ -25,6 +25,7 @@ use crate::catalog::{CATALOG, Catalog};
 use crate::invite::{Invite, RoomId};
 use crate::keys::RoomKey;
 use crate::roster::ParticipantKey;
+use crate::sig::{self, Checkpoint, Ledger, SIG, SignedTrack, Verification, VerifiedTrack};
 
 /// The HKDF info's prefix for a room's broadcast prefix.
 const ROOM_PREFIX: &[u8] = b"mic/v1/room-prefix";
@@ -143,52 +144,84 @@ fn hex(bytes: &[u8]) -> String {
 }
 
 /// This participant's broadcast in the room: every track of it encrypted, its first the signed
-/// catalog (`crate::catalog`), signed again with every track added.
+/// catalog (`crate::catalog`), signed again with every track added, its second the checkpoints
+/// (`crate::sig`) that sign every other track's frames.
 pub struct Publication {
     generation: Generation,
     broadcast: moq_net::broadcast::Producer,
     key: RoomKey,
     catalog: Catalog,
     catalog_track: moq_e2ee::track::Producer,
+    ledger: Ledger,
+    /// Signs the checkpoints for as long as the broadcast is up.
+    _signing: Task,
+}
+
+/// A task of the publication's, stopped with it.
+struct Task(tokio::task::JoinHandle<()>);
+
+impl Drop for Task {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
 }
 
 impl Publication {
-    /// The broadcast with its catalog, announced: whoever finds it finds who publishes it.
+    /// The broadcast with its catalog and checkpoints, announced: whoever finds it finds who
+    /// publishes it. Starts signing on the runtime it's called on.
     pub(crate) fn new(
         generation: Generation,
         broadcast: moq_net::broadcast::Producer,
         key: RoomKey,
         room: RoomId,
     ) -> Result<Self, TrackError> {
+        let epoch = generation.epoch().as_str().to_owned();
         let catalog = Catalog {
             room,
             participant: ParticipantKey::from_bytes(key.public().to_bytes()),
             kid: KID,
-            epoch: generation.epoch().as_str().to_owned(),
+            epoch: epoch.clone(),
             seq: 0,
-            tracks: vec![CATALOG.to_owned()],
+            tracks: vec![CATALOG.to_owned(), SIG.to_owned()],
             app: env!("CARGO_PKG_VERSION").to_owned(),
         };
         let catalog_track = produce(&generation, &broadcast, CATALOG)?;
+        let sig_track = produce(&generation, &broadcast, SIG)?;
+        let ledger = Ledger::default();
+        let signing = Task(tokio::spawn(sig::sign(
+            ledger.clone(),
+            sig_track,
+            key.clone(),
+            Checkpoint {
+                room,
+                kid: KID,
+                epoch,
+                seq: 0,
+                entries: Vec::new(),
+            },
+        )));
         let mut publication = Self {
             generation,
             broadcast,
             key,
             catalog,
             catalog_track,
+            ledger,
+            _signing: signing,
         };
         publication.write_catalog()?;
         publication.broadcast.announce(Default::default())?;
         Ok(publication)
     }
 
-    /// A track `semantic` of this broadcast, encrypted, and the catalog that names it signed.
-    pub fn track(&mut self, semantic: &str) -> Result<moq_e2ee::track::Producer, TrackError> {
+    /// A track `semantic` of this broadcast, encrypted, its frames covered by the checkpoints,
+    /// and the catalog that names it signed.
+    pub fn track(&mut self, semantic: &str) -> Result<SignedTrack, TrackError> {
         let track = produce(&self.generation, &self.broadcast, semantic)?;
         self.catalog.tracks.push(semantic.to_owned());
         self.catalog.seq += 1;
         self.write_catalog()?;
-        Ok(track)
+        Ok(SignedTrack::new(semantic, track, self.ledger.clone()))
     }
 
     /// The catalog, signed, as the track's latest group.
@@ -305,6 +338,20 @@ impl Peer {
     /// Its publisher instance's epoch, which ends its path.
     pub fn epoch(&self) -> &str {
         self.generation.epoch().as_str()
+    }
+
+    /// Its track `semantic`, decrypted as it's read, its frames recorded for its checkpoints to
+    /// confirm (`crate::sig`).
+    pub async fn verified_track(
+        &self,
+        semantic: &str,
+        verification: &Verification,
+    ) -> Result<VerifiedTrack, TrackError> {
+        Ok(VerifiedTrack::new(
+            semantic,
+            self.track(semantic).await?,
+            verification.clone(),
+        ))
     }
 
     /// Its track `semantic`, decrypted as it's read: a frame that doesn't open fails the track.
