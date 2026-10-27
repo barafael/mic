@@ -141,11 +141,11 @@ fn keys(room: &RoomState) -> Vec<String> {
         .collect()
 }
 
-/// The colours of a window's tiles: this participant's, and another's
-/// (crates/mic-slint/ui/app.slint, `NameTile`).
-const TILES: [[u8; 3]; 2] = [[0x2b, 0x4a, 0x6b], [0x3a, 0x3a, 0x44]];
+/// Colours only the room's screen draws: the Leave button's (crates/mic-slint/ui/app.slint,
+/// `Theme.danger`). Not a tile's: with their cameras, the tiles are their video.
+const ROOM: [[u8; 3]; 1] = [[0xe5, 0x48, 0x4d]];
 
-/// A screenshot of alice's and bob's displays, kept in the record, shows both kinds of tile, within
+/// A screenshot of alice's and bob's displays, kept in the record, shows the room's screen, within
 /// the patience: the window draws a moment after its harness says what it shows.
 fn windows_drawn(the_box: &TestBox, directory: &Path) -> Result<()> {
     let tool = view::tool(the_box.repo(), "testbox-shot")?;
@@ -156,7 +156,7 @@ fn windows_drawn(the_box: &TestBox, directory: &Path) -> Result<()> {
         loop {
             view::shot(&tool, directory, "roster", std::slice::from_ref(&display))?;
             let (pixels, channels) = crate::checks::png_pixels(&path)?;
-            let missing = TILES.into_iter().find(|colour| {
+            let missing = ROOM.into_iter().find(|colour| {
                 !pixels
                     .chunks_exact(channels)
                     .any(|pixel| pixel[..3] == *colour)
@@ -165,7 +165,7 @@ fn windows_drawn(the_box: &TestBox, directory: &Path) -> Result<()> {
                 None => break,
                 Some(colour) if std::time::Instant::now() > deadline => {
                     return Err(Error::Failed(format!(
-                        "{}: no #{:02x}{:02x}{:02x} tile",
+                        "{}: no #{:02x}{:02x}{:02x} of the room's screen",
                         path.display(),
                         colour[0],
                         colour[1],

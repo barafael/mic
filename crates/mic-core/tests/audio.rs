@@ -168,6 +168,31 @@ async fn muted_is_silence_on_the_far_end_and_said_in_the_profile() {
     assert!(!bob.room.state().borrow().participants[0].profile.muted);
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn one_who_leaves_mid_sentence_leaves_nothing_unsigned() {
+    let relay = TestRelay::start().await.unwrap();
+    let invite = Invite::new_room();
+    let alice = join(&relay, &invite, "Alice", Some(440.0)).await;
+    let bob = join(&relay, &invite, "Bob", Some(660.0)).await;
+    hears(&bob, 440.0, 660.0).await;
+    let mut events = bob.room.events();
+
+    alice.room.command(mic_core::Command::Leave).await.unwrap();
+    // Past the checkpoints' 2 s grace: Alice's last frames are signed, or they'd be rejected.
+    let watched = tokio::time::timeout(Duration::from_secs(4), async {
+        loop {
+            match events.next().await {
+                Some(mic_core::Event::Rejected { rejected }) => return rejected,
+                Some(_) => {}
+                None => std::future::pending().await,
+            }
+        }
+    })
+    .await;
+    assert!(watched.is_err(), "rejected as she left: {watched:?}");
+    assert!(bob.room.state().borrow().participants.is_empty());
+}
+
 /// Waits until `listener`'s room says `holds` of its active speaker and who's speaking.
 async fn speaker_is(
     listener: &Participant,

@@ -48,12 +48,15 @@ struct Cli {
     #[arg(long)]
     register: bool,
     /// A CA's certificate (PEM) that the relay's is trusted by; the system's roots otherwise.
-    #[arg(long)]
+    #[arg(long, conflicts_with = "fingerprint")]
     ca: Option<PathBuf>,
     /// Where to read the latest version from (the site's `version.json`), at start. No check
     /// without one, until mic has a domain.
     #[arg(long, env = "MIC_VERSION_URL")]
     version_url: Option<String>,
+    /// The relay's certificate's SHA-256 fingerprint, hex: a relay with a self-signed one.
+    #[arg(long)]
+    fingerprint: Option<String>,
     /// Serves the box's harness on a Unix socket here, known by the socket's file name.
     #[cfg(all(unix, feature = "harness"))]
     #[arg(long)]
@@ -73,6 +76,10 @@ struct Cli {
     #[cfg(all(unix, feature = "harness"))]
     #[arg(long, value_parser = parse_decoders)]
     decoders: Option<Decoders>,
+    /// The keyring service the device secret is kept under: another one is another identity, as
+    /// a second window on one machine needs.
+    #[arg(long, hide = true, default_value = "mic")]
+    keyring: String,
     /// An invite to fill in, `mic://join/…`, under the last name joined with; handed to a mic
     /// already running, which asks first if it's in a call.
     invite: Option<String>,
@@ -176,12 +183,15 @@ fn run(cli: Cli) -> Result<(), String> {
     if let Some(ca) = cli.ca {
         config.trust = Trust::Roots(vec![ca]);
     }
+    if let Some(fingerprint) = cli.fingerprint {
+        config.trust = Trust::Fingerprints(vec![fingerprint]);
+    }
     #[cfg(all(unix, feature = "harness"))]
     if let Some(Decoders(decoders)) = cli.decoders {
         config.decoders = decoders;
     }
     // Before the window: the keyring may ask to be unlocked.
-    let keyring = Keyring::system().map_err(|error| error.to_string())?;
+    let keyring = Keyring::named(&cli.keyring).map_err(|error| error.to_string())?;
     let client = Client::new(config, &keyring, runtime.handle().clone())
         .map_err(|error| error.to_string())?;
     // The system's microphone and speaker; with the harness and `--tone` or `--camera-pattern`,
@@ -344,13 +354,20 @@ fn run(cli: Cli) -> Result<(), String> {
             open(link.clone());
         });
     }
+    // A new room is joined at once, as Join joins an invite: its invite is there to copy inside.
     window.on_new_room({
         let window = window.as_weak();
         move || {
             if let Some(window) = window.upgrade() {
-                window.set_invite(Invite::new_room().to_mic_url().into());
+                let invite: slint::SharedString = Invite::new_room().to_mic_url().into();
+                window.set_invite(invite.clone());
+                window.invoke_join(window.get_name(), invite);
             }
         }
+    });
+    window.on_columns_for(|count, width, height| {
+        let count = usize::try_from(count).unwrap_or(0);
+        i32::try_from(view::columns(count, width, height, 8.0, 16.0 / 9.0)).unwrap_or(1)
     });
     window.on_toggle_mute({
         let app = app.clone();
@@ -404,12 +421,13 @@ fn run(cli: Cli) -> Result<(), String> {
         let tiles = tiles.clone();
         async move {
             let mut last = None;
+            let sweep = slint::Timer::default();
             loop {
                 let view = viewed.borrow_and_update().clone();
                 let Some(window) = window.upgrade() else {
                     return;
                 };
-                apply(&window, &tiles, &view, &*tell.view, &mut last);
+                apply(&window, &tiles, &sweep, &view, &*tell.view, &mut last);
                 drop(window);
                 if viewed.changed().await.is_err() {
                     return;
@@ -503,8 +521,10 @@ fn run(cli: Cli) -> Result<(), String> {
     window
         .run()
         .map_err(|error| format!("the window: {error}"))?;
+    // The timeout is made inside the runtime: its timer needs the runtime's clock, and one made
+    // outside panics, and the room is never left.
     if runtime
-        .block_on(tokio::time::timeout(LEAVING, app.leave()))
+        .block_on(async { tokio::time::timeout(LEAVING, app.leave()).await })
         .is_err()
     {
         tracing::warn!("leaving the room took longer than {LEAVING:?}");
@@ -592,10 +612,15 @@ fn join(
     });
 }
 
+/// How long a tile takes to fade out once its participant leaves, before it goes (ui/app.slint,
+/// `TileView`).
+const FADING: Duration = Duration::from_millis(240);
+
 /// Sets `view` on the window, unless it's what shows already, and tells `shown`.
 fn apply(
     window: &AppWindow,
-    tiles: &VecModel<Tile>,
+    tiles: &Rc<VecModel<Tile>>,
+    sweep: &slint::Timer,
     view: &View,
     shown: &dyn Fn(&View),
     last: &mut Option<View>,
@@ -609,45 +634,96 @@ fn apply(
     window.set_warning(view.warning.as_str().into());
     window.set_muted(view.muted);
     window.set_camera_off(view.camera_off);
-    // A tile's video stays with its participant while the roster changes around it.
-    let video_of = |key: &str| {
-        tiles
-            .iter()
-            .find(|row| row.key == key)
-            .map(|row| (row.video, row.has_video))
-            .unwrap_or_default()
-    };
+    window.set_has_camera(view.camera);
+    window.set_overflow(i32::try_from(view.overflow).unwrap_or(i32::MAX));
     let rows: Vec<Tile> = view
         .tiles
         .iter()
-        .map(|tile| Tile {
-            video: video_of(&tile.key).0,
-            has_video: video_of(&tile.key).1,
-            key: tile.key.as_str().into(),
-            name: tile.name.as_str().into(),
-            me: tile.me,
-            muted: tile.muted,
-            camera_off: tile.camera_off,
-            cant_decode: tile
-                .cant_decode
-                .as_deref()
-                .unwrap_or_default()
-                .to_uppercase()
-                .into(),
+        .map(|tile| {
+            let (red, green, blue) = view::tint(&tile.key);
+            Tile {
+                key: tile.key.as_str().into(),
+                name: tile.name.as_str().into(),
+                me: tile.me,
+                muted: tile.muted,
+                camera_off: tile.camera_off,
+                cant_decode: tile
+                    .cant_decode
+                    .as_deref()
+                    .unwrap_or_default()
+                    .to_uppercase()
+                    .into(),
+                initials: view::initials(&tile.name).into(),
+                tint: slint::Color::from_rgb_u8(red, green, blue),
+                speaking: tile.speaking,
+                ..Tile::default()
+            }
         })
         .collect();
-    let unchanged = |a: &Tile, b: &Tile| {
-        (&a.key, &a.name, a.me, a.muted, &a.cant_decode, a.camera_off)
-            == (&b.key, &b.name, b.me, b.muted, &b.cant_decode, b.camera_off)
-    };
-    if tiles.row_count() != rows.len() || tiles.iter().zip(&rows).any(|(a, b)| !unchanged(&a, b)) {
-        tiles.set_vec(rows);
-    }
     if view.screen == Screen::Room {
+        sync(tiles, rows, sweep);
         window.set_error("".into());
+    } else {
+        tiles.set_vec(Vec::new());
     }
     shown(view);
     *last = Some(view.clone());
+}
+
+/// Brings `tiles` to `rows`, participant by participant, so each tile stays itself while the
+/// others come and go around it: it keeps its video, and the window moves it rather than redraws
+/// it with someone else in it. One whose participant left is marked leaving, fades out, and goes
+/// after [`FADING`]; until then it keeps its place.
+fn sync(tiles: &Rc<VecModel<Tile>>, rows: Vec<Tile>, sweep: &slint::Timer) {
+    let mut left = false;
+    for index in 0..tiles.row_count() {
+        let Some(mut row) = tiles.row_data(index) else {
+            continue;
+        };
+        if !row.leaving && !rows.iter().any(|new| new.key == row.key) {
+            row.leaving = true;
+            tiles.set_row_data(index, row);
+            left = true;
+        }
+    }
+    let mut at = 0;
+    for new in rows {
+        while tiles.row_data(at).is_some_and(|row| row.leaving) {
+            at += 1;
+        }
+        match tiles.row_data(at) {
+            Some(old) if old.key == new.key => {
+                let kept = Tile {
+                    video: old.video.clone(),
+                    has_video: old.has_video,
+                    ..new
+                };
+                if kept != old {
+                    tiles.set_row_data(at, kept);
+                }
+            }
+            _ => tiles.insert(at, new),
+        }
+        at += 1;
+    }
+    // What's past them is a tile moved ahead of where it was, shown already.
+    while at < tiles.row_count() {
+        if tiles.row_data(at).is_some_and(|row| row.leaving) {
+            at += 1;
+        } else {
+            tiles.remove(at);
+        }
+    }
+    if left {
+        let tiles = tiles.clone();
+        sweep.start(slint::TimerMode::SingleShot, FADING, move || {
+            for index in (0..tiles.row_count()).rev() {
+                if tiles.row_data(index).is_some_and(|row| row.leaving) {
+                    tiles.remove(index);
+                }
+            }
+        });
+    }
 }
 
 /// The view of the room the app is in, sent on every change of the room and of its state.
@@ -667,7 +743,10 @@ async fn follow(app: App, views: watch::Sender<View>) {
         let mut over = false;
         loop {
             let current = state.borrow_and_update().clone();
-            views.send_replace(view::view(Some((&current, invite.clone()))));
+            views.send_replace(View {
+                camera: room.preview().is_some(),
+                ..view::view(Some((&current, invite.clone())))
+            });
             tokio::select! {
                 changed = rooms.changed() => {
                     if changed.is_err() {

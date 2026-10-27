@@ -17,4 +17,4 @@ url = "2"
 [dev-dependencies]
 anyhow = "1.0.104"
 moq-net = "=0.3.16"
-tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "time"] }
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "signal", "time"] }

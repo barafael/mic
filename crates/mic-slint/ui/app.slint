@@ -2,7 +2,7 @@
 // what's clicked through callbacks; it holds no room logic (PLAN.md, "The core and its
 // frontends").
 
-import { AboutSlint, Button, LineEdit, VerticalBox, HorizontalBox } from "std-widgets.slint";
+import { AboutSlint, LineEdit, Palette, Spinner } from "std-widgets.slint";
 
 // A participant's tile: by key, as the harness's `ui` section names it.
 export struct Tile {
@@ -12,66 +12,318 @@ export struct Tile {
     muted: bool,
     // The codec of its camera, when this client can't decode it; empty otherwise.
     cant-decode: string,
-    // Its camera's latest picture, once there's one.
+    // Its camera's latest picture, once there's one: its own camera's for this participant's.
     video: image,
     has-video: bool,
     // Its camera is off: the name shows, not the last picture.
     camera-off: bool,
+    // What stands for it without video: its initials on its colour.
+    initials: string,
+    tint: color,
+    // It's speaking: the tile is ringed.
+    speaking: bool,
+    // It left: the tile fades out, then goes.
+    leaving: bool,
 }
 
-component NameTile inherits Rectangle {
-    in property <Tile> tile;
-    background: tile.me ? #2b4a6b : #3a3a44;
-    border-radius: 8px;
-    clip: true;
-    if tile.has-video && !tile.camera-off: Image {
-        width: parent.width;
-        height: parent.height;
-        source: tile.video;
-        image-fit: contain;
+// The window's colours and timings: dark, as a call's video wants around it.
+global Theme {
+    out property <color> canvas: #0f1115;
+    out property <color> surface: #181b21;
+    out property <color> raised: #262a33;
+    out property <color> raised-hover: #313642;
+    out property <color> line: #2c313b;
+    out property <color> tile: #1e2128;
+    out property <color> text: #eef0f4;
+    out property <color> text-dim: #9aa1ad;
+    out property <color> accent: #4c8dff;
+    out property <color> accent-hover: #6aa0ff;
+    out property <color> danger: #e5484d;
+    out property <color> danger-hover: #f0646a;
+    out property <color> warn: #f5b041;
+    out property <duration> quick: 120ms;
+    out property <duration> moving: 260ms;
+}
+
+// A line icon on a 24-unit grid, drawn as a path: no image files, the same in every renderer.
+component Icon inherits Path {
+    in property <string> kind;
+    in property <color> tint: Theme.text;
+    property <string> mic: "M12 3 C10.3 3 9 4.3 9 6 L9 12 C9 13.7 10.3 15 12 15 C13.7 15 15 13.7 15 12 L15 6 C15 4.3 13.7 3 12 3 Z M5.5 11 C5.5 14.6 8.4 17.5 12 17.5 C15.6 17.5 18.5 14.6 18.5 11 M12 17.5 L12 21 M8.5 21 L15.5 21";
+    property <string> camera: "M4.5 6 L13.5 6 C14.3 6 15 6.7 15 7.5 L15 16.5 C15 17.3 14.3 18 13.5 18 L4.5 18 C3.7 18 3 17.3 3 16.5 L3 7.5 C3 6.7 3.7 6 4.5 6 Z M15 10.5 L21 7 L21 17 L15 13.5";
+    property <string> slash: " M4 3 L20 21";
+    width: 20px;
+    height: 20px;
+    viewbox-width: 24;
+    viewbox-height: 24;
+    stroke: root.kind == "leave" ? transparent : root.tint;
+    stroke-width: 1.8px;
+    fill: root.kind == "leave" ? root.tint : transparent;
+    commands: root.kind == "mic" ? root.mic
+        : root.kind == "mic-off" ? root.mic + root.slash
+        : root.kind == "camera" ? root.camera
+        : root.kind == "camera-off" ? root.camera + root.slash
+        : root.kind == "leave" ? "M2.5 13.6 C2.5 12.6 3 11.8 3.9 11.3 C6.3 9.9 9.1 9.2 12 9.2 C14.9 9.2 17.7 9.9 20.1 11.3 C21 11.8 21.5 12.6 21.5 13.6 L21.5 15.4 C21.5 16.1 20.9 16.6 20.2 16.5 L16.9 15.9 C16.3 15.8 15.9 15.3 15.9 14.7 L15.9 13 C14.7 12.5 13.4 12.3 12 12.3 C10.6 12.3 9.3 12.5 8.1 13 L8.1 14.7 C8.1 15.3 7.7 15.8 7.1 15.9 L3.8 16.5 C3.1 16.6 2.5 16.1 2.5 15.4 Z"
+        : root.kind == "copy" ? "M9 8 L19 8 C19.6 8 20 8.4 20 9 L20 20 C20 20.6 19.6 21 19 21 L9 21 C8.4 21 8 20.6 8 20 L8 9 C8 8.4 8.4 8 9 8 Z M5 16 L4.5 16 C3.7 16 3 15.3 3 14.5 L3 4.5 C3 3.7 3.7 3 4.5 3 L14.5 3 C15.3 3 16 3.7 16 4.5 L16 5"
+        : root.kind == "check" ? "M5 12.5 L9.5 17 L19 7"
+        : root.kind == "alert" ? "M12 4 L21 19.5 L3 19.5 Z M12 10 L12 14 M12 16.6 L12 17"
+        : "";
+}
+
+// What a control says while the pointer rests on it, after a moment.
+component Tip inherits Rectangle {
+    in property <string> text;
+    property <bool> shown;
+    init => {
+        self.shown = true;
     }
-    if !tile.has-video || tile.camera-off: Text {
-        text: tile.me ? tile.name + " (you)" : tile.name;
-        color: white;
-        font-size: 20px;
-        horizontal-alignment: center;
-        vertical-alignment: center;
-        wrap: word-wrap;
-        width: parent.width - 16px;
+    width: label.preferred-width + 16px;
+    height: label.preferred-height + 8px;
+    border-radius: 6px;
+    background: #000000e0;
+    opacity: self.shown ? 1 : 0;
+    animate opacity {
+        delay: 450ms;
+        duration: Theme.quick;
     }
-    // With video, the name in a corner, over it.
-    if tile.has-video && !tile.camera-off: Rectangle {
-        x: 6px;
-        y: 6px;
-        width: label.preferred-width + 12px;
-        height: label.preferred-height + 6px;
-        background: #000000a0;
-        border-radius: 4px;
-        label := Text {
-            text: tile.name;
-            color: white;
-            font-size: 14px;
+    label := Text {
+        text: root.text;
+        color: Theme.text;
+        font-size: 12px;
+    }
+}
+
+// A round control of the room's bar: the microphone, the camera, leaving.
+component RoundButton inherits Rectangle {
+    in property <string> icon;
+    // A toggle that's off, as a muted microphone: red, so it's seen at a glance.
+    in property <bool> off;
+    in property <bool> danger;
+    in property <bool> enabled: true;
+    in property <string> label;
+    callback clicked;
+    width: 48px;
+    height: 48px;
+    border-radius: self.width / 2;
+    background: !root.enabled ? Theme.raised.transparentize(0.5)
+        : root.danger || root.off ? (touch.has-hover ? Theme.danger-hover : Theme.danger)
+        : touch.has-hover ? Theme.raised-hover : Theme.raised;
+    animate background { duration: Theme.quick; }
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-enabled: root.enabled;
+    accessible-action-default => {
+        root.clicked();
+    }
+    Icon {
+        kind: root.icon;
+        tint: root.enabled ? Theme.text : Theme.text-dim;
+        width: root.danger ? 24px : 20px;
+        height: self.width;
+    }
+    touch := TouchArea {
+        mouse-cursor: root.enabled ? pointer : default;
+        clicked => {
+            if (root.enabled) {
+                root.clicked();
+            }
         }
     }
-    if tile.cant-decode != "": Text {
-        y: parent.height / 2 + 20px;
-        width: parent.width - 16px;
-        horizontal-alignment: center;
-        text: "Can't show their video (" + tile.cant-decode + ")";
-        color: #d0d0d8;
-        font-size: 14px;
-        wrap: word-wrap;
-    }
-    if tile.muted: Text {
-        x: 8px;
-        y: parent.height - self.height - 8px;
-        text: "muted";
-        color: #ffb0b0;
-        font-size: 14px;
+    if touch.has-hover && root.label != "": Tip {
+        text: root.label;
+        x: (root.width - self.width) / 2;
+        y: -self.height - 8px;
     }
 }
 
-component JoinScreen inherits VerticalBox {
+// A wide button: Join, a new room, the overlay's answers.
+component PillButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> primary;
+    in property <bool> enabled: true;
+    in property <bool> busy;
+    callback clicked;
+    height: 40px;
+    min-width: label.preferred-width + 32px;
+    border-radius: 8px;
+    background: !root.enabled ? Theme.raised.transparentize(0.4)
+        : root.primary ? (touch.has-hover ? Theme.accent-hover : Theme.accent)
+        : touch.has-hover ? Theme.raised-hover : Theme.raised;
+    animate background { duration: Theme.quick; }
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-enabled: root.enabled;
+    accessible-action-default => {
+        root.clicked();
+    }
+    HorizontalLayout {
+        alignment: center;
+        spacing: 8px;
+        if root.busy: Spinner {
+            indeterminate: true;
+            width: 18px;
+            height: 18px;
+            y: (parent.height - self.height) / 2;
+        }
+        label := Text {
+            text: root.text;
+            color: root.enabled ? (root.primary ? white : Theme.text) : Theme.text-dim;
+            font-size: 14px;
+            font-weight: 600;
+            vertical-alignment: center;
+        }
+    }
+    touch := TouchArea {
+        mouse-cursor: root.enabled ? pointer : default;
+        clicked => {
+            if (root.enabled) {
+                root.clicked();
+            }
+        }
+    }
+}
+
+// A line across the top: reconnecting, a broadcast that didn't stand, a newer version.
+component Banner inherits Rectangle {
+    in property <string> text;
+    in property <color> tint;
+    // Pulsing, while something is under way.
+    in property <bool> pulsing;
+    property <bool> shown;
+    init => {
+        self.shown = true;
+    }
+    height: row.preferred-height;
+    border-radius: 8px;
+    background: root.tint.transparentize(0.85);
+    border-width: 1px;
+    border-color: root.tint.transparentize(0.6);
+    opacity: self.shown ? 1 : 0;
+    animate opacity { duration: Theme.moving; }
+    row := HorizontalLayout {
+        padding: 8px;
+        padding-left: 12px;
+        spacing: 10px;
+        Rectangle {
+            width: 8px;
+            Rectangle {
+                width: 8px;
+                height: 8px;
+                border-radius: 4px;
+                background: root.tint;
+                opacity: root.pulsing ? 0.35 + 0.65 * Math.abs(Math.sin(animation-tick() / 1ms * 0.18deg)) : 1;
+            }
+        }
+        Text {
+            text: root.text;
+            color: Theme.text;
+            font-size: 13px;
+            wrap: word-wrap;
+            vertical-alignment: center;
+        }
+    }
+}
+
+component TileView inherits Rectangle {
+    in property <Tile> tile;
+    property <bool> born;
+    property <bool> present: self.born && !root.tile.leaving;
+    property <bool> showing-video: root.tile.has-video && !root.tile.camera-off;
+    property <length> side: Math.min(self.width, self.height);
+    // A tile comes in growing a little, and goes out shrinking.
+    init => {
+        self.born = true;
+    }
+    opacity: root.present ? 1 : 0;
+    animate opacity {
+        duration: 220ms;
+        easing: ease-out;
+    }
+    transform-scale: root.present ? 1 : 0.92;
+    animate transform-scale {
+        duration: 220ms;
+        easing: ease-out;
+    }
+    background: Theme.tile;
+    border-radius: 12px;
+    clip: true;
+    accessible-role: text;
+    accessible-label: root.tile.me ? root.tile.name + " (you)" : root.tile.name;
+    avatar := Rectangle {
+        width: Math.clamp(root.side * 0.36, 32px, 120px);
+        height: self.width;
+        y: (root.height - self.height) / 2 - (root.tile.cant-decode != "" ? 14px : 0px);
+        border-radius: self.width / 2;
+        background: root.tile.tint;
+        opacity: root.showing-video ? 0 : 1;
+        animate opacity { duration: Theme.moving; }
+        Text {
+            text: root.tile.initials;
+            color: white;
+            font-size: parent.width * 0.4;
+            font-weight: 600;
+        }
+    }
+    if root.tile.cant-decode != "" && !root.showing-video: Text {
+        y: avatar.y + avatar.height + 8px;
+        width: root.width - 24px;
+        horizontal-alignment: center;
+        text: "Can't show their video (" + root.tile.cant-decode + ")";
+        color: Theme.text-dim;
+        font-size: 12px;
+        overflow: elide;
+    }
+    // Its own camera comes mirrored already (videos.rs).
+    Image {
+        width: root.width;
+        height: root.height;
+        source: root.tile.video;
+        image-fit: cover;
+        opacity: root.showing-video ? 1 : 0;
+        visible: self.opacity > 0;
+        animate opacity { duration: Theme.moving; }
+    }
+    // The name, and whether it's muted, at the bottom, over the video if there's one.
+    Rectangle {
+        x: 8px;
+        y: root.height - self.height - 8px;
+        width: Math.min(name-row.preferred-width, root.width - 16px);
+        height: 26px;
+        border-radius: 13px;
+        background: #000000a0;
+        name-row := HorizontalLayout {
+            padding-left: root.tile.muted ? 6px : 10px;
+            padding-right: 10px;
+            spacing: 4px;
+            if root.tile.muted: Icon {
+                kind: "mic-off";
+                tint: Theme.danger-hover;
+                width: 16px;
+                height: 16px;
+                y: (parent.height - self.height) / 2;
+            }
+            Text {
+                text: root.tile.me ? root.tile.name + " (you)" : root.tile.name;
+                color: white;
+                font-size: 13px;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+        }
+    }
+    // Ringed while it speaks.
+    Rectangle {
+        border-radius: 12px;
+        border-width: root.tile.speaking ? 3px : 0px;
+        border-color: Theme.accent;
+        animate border-width {
+            duration: 150ms;
+            easing: ease-out;
+        }
+    }
+}
+
+component JoinScreen inherits Rectangle {
     in-out property <string> name;
     in-out property <string> invite;
     in property <bool> joining;
@@ -80,117 +332,391 @@ component JoinScreen inherits VerticalBox {
     // Counts the links filled in: each gives the name field the keyboard, for Enter to join.
     in property <int> filled;
     callback new-room();
-    alignment: center;
+    callback about();
+    property <bool> born;
+    // A short window gets the card without its greeting, so Join stays in it.
+    property <bool> compact: root.height < 480px;
     // Typing starts with the name, whenever the screen shows.
     init => {
         name-field.focus();
+        self.born = true;
     }
     changed filled => {
         name-field.focus();
     }
-    Text {
-        text: "mic";
-        font-size: 32px;
-        horizontal-alignment: center;
-    }
-    name-field := LineEdit {
-        placeholder-text: "Your name";
-        text <=> root.name;
-        enabled: !root.joining;
-        accepted => {
-            root.join(root.name, root.invite);
+    background: Theme.canvas;
+    card := Rectangle {
+        width: Math.min(400px, root.width - 32px);
+        height: column.preferred-height;
+        x: (root.width - self.width) / 2;
+        y: Math.max(8px, (root.height - self.height) / 2 - (root.compact ? 0px : 20px)) + (root.born ? 0px : 16px);
+        animate y {
+            duration: 320ms;
+            easing: ease-out;
         }
-    }
-    LineEdit {
-        placeholder-text: "Invite: mic://join/…";
-        text <=> root.invite;
-        enabled: !root.joining;
-        accepted => {
-            root.join(root.name, root.invite);
-        }
-    }
-    HorizontalBox {
-        padding: 0;
-        Button {
-            text: "New room";
-            enabled: !root.joining;
-            clicked => {
-                root.new-room();
+        opacity: root.born ? 1 : 0;
+        animate opacity { duration: 320ms; }
+        background: Theme.surface;
+        border-radius: 16px;
+        border-width: 1px;
+        border-color: Theme.line;
+        column := VerticalLayout {
+            padding: root.compact ? 16px : 28px;
+            spacing: root.compact ? 8px : 12px;
+            if !root.compact: HorizontalLayout {
+                alignment: center;
+                spacing: 10px;
+                Rectangle {
+                    width: 40px;
+                    height: 40px;
+                    border-radius: 20px;
+                    background: Theme.accent;
+                    Icon {
+                        kind: "mic";
+                        tint: white;
+                        width: 22px;
+                        height: 22px;
+                    }
+                }
+                Text {
+                    text: "mic";
+                    color: Theme.text;
+                    font-size: 30px;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                }
+            }
+            if !root.compact: Text {
+                text: "Video calls, end-to-end encrypted.";
+                color: Theme.text-dim;
+                font-size: 13px;
+                horizontal-alignment: center;
+                wrap: word-wrap;
+            }
+            if !root.compact: Rectangle { height: 4px; }
+            name-field := LineEdit {
+                placeholder-text: "Your name";
+                accessible-label: "Your name";
+                text <=> root.name;
+                enabled: !root.joining;
+                accepted => {
+                    if (root.invite == "") {
+                        invite-field.focus();
+                    } else {
+                        root.join(root.name, root.invite);
+                    }
+                }
+            }
+            invite-field := LineEdit {
+                placeholder-text: "Invite: mic://join/…";
+                accessible-label: "Invite";
+                text <=> root.invite;
+                enabled: !root.joining;
+                accepted => {
+                    root.join(root.name, root.invite);
+                }
+            }
+            PillButton {
+                text: root.joining ? "Joining…" : "Join";
+                primary: true;
+                busy: root.joining;
+                enabled: !root.joining && root.name != "" && root.invite != "";
+                clicked => {
+                    root.join(root.name, root.invite);
+                }
+            }
+            HorizontalLayout {
+                spacing: 10px;
+                Rectangle {
+                    height: 1px;
+                    y: (parent.height - self.height) / 2;
+                    background: Theme.line;
+                }
+                Text {
+                    text: "or";
+                    color: Theme.text-dim;
+                    font-size: 12px;
+                    horizontal-stretch: 0;
+                }
+                Rectangle {
+                    height: 1px;
+                    y: (parent.height - self.height) / 2;
+                    background: Theme.line;
+                }
+            }
+            PillButton {
+                text: "Start a new room";
+                enabled: !root.joining && root.name != "";
+                clicked => {
+                    root.new-room();
+                }
+            }
+            if root.name == "" && root.error == "" && !root.compact: Text {
+                text: "Type your name to join a room or start one.";
+                color: Theme.text-dim;
+                font-size: 12px;
+                horizontal-alignment: center;
+                wrap: word-wrap;
+            }
+            if root.error != "": Text {
+                text: root.error;
+                color: Theme.danger-hover;
+                font-size: 13px;
+                horizontal-alignment: center;
+                wrap: word-wrap;
             }
         }
-        Button {
-            text: root.joining ? "Joining…" : "Join";
-            primary: true;
-            enabled: !root.joining && root.name != "" && root.invite != "";
-            clicked => {
-                root.join(root.name, root.invite);
-            }
-        }
     }
     Text {
-        text: root.error;
-        color: #d04040;
-        wrap: word-wrap;
-        horizontal-alignment: center;
+        x: root.width - self.width - 14px;
+        y: root.height - self.height - 10px;
+        text: "About mic";
+        color: about-touch.has-hover ? Theme.text : Theme.text-dim;
+        font-size: 12px;
+        accessible-role: button;
+        accessible-action-default => {
+            root.about();
+        }
+        about-touch := TouchArea {
+            mouse-cursor: pointer;
+            clicked => {
+                root.about();
+            }
+        }
     }
 }
 
-component RoomScreen inherits VerticalBox {
+// The room: its tiles, and a bar of its controls. The keyboard stays with the room itself, so its
+// shortcuts work whatever was clicked: nothing in it takes the focus.
+component RoomScreen inherits FocusScope {
     in property <[Tile]> tiles;
+    // Participants not shown, as a last "+N" tile, when there are more than fit.
+    in property <int> overflow;
     in property <string> invite;
     in property <string> status;
     in property <string> warning;
     in property <bool> muted;
     in property <bool> camera-off;
+    in property <bool> has-camera;
+    // While the window asks about a link: the keyboard comes back once it's answered.
+    in property <bool> asking;
     callback leave();
     callback toggle-mute();
     callback toggle-camera();
-    // As square a grid as the tiles make.
-    property <int> columns: Math.max(1, Math.ceil(Math.sqrt(root.tiles.length)));
-    property <int> rows: Math.max(1, Math.ceil(root.tiles.length / root.columns));
-    HorizontalBox {
-        padding: 0;
-        LineEdit {
-            text: root.invite;
-            read-only: true;
-            accessible-label: "The room's invite";
-        }
-        Button {
-            text: root.muted ? "Unmute" : "Mute";
-            clicked => {
-                root.toggle-mute();
-            }
-        }
-        Button {
-            text: root.camera-off ? "Camera on" : "Camera off";
-            clicked => {
-                root.toggle-camera();
-            }
-        }
-        Button {
-            text: "Leave";
-            clicked => {
-                root.leave();
-            }
+    // How many columns fit `count` tiles best into a `width` by `height` grid (view.rs).
+    pure callback columns-for(int, length, length) -> int;
+    property <bool> born;
+    property <bool> copied;
+    init => {
+        self.focus();
+        self.born = true;
+    }
+    changed asking => {
+        if (!self.asking) {
+            self.focus();
         }
     }
-    if root.status != "": Text {
-        text: root.status;
-        color: #d0a040;
+    // The shortcuts, as Google Meet has them: Ctrl+D the microphone, Ctrl+E the camera.
+    key-pressed(event) => {
+        if (!event.modifiers.control) {
+            return reject;
+        }
+        if (event.text == "d") {
+            root.toggle-mute();
+            return accept;
+        }
+        if (event.text == "e") {
+            root.toggle-camera();
+            return accept;
+        }
+        reject
     }
-    if root.warning != "": Text {
-        text: root.warning;
-        color: #d04040;
-        wrap: word-wrap;
+    // The invite, for copying: never shown.
+    invite-text := TextInput {
+        text: root.invite;
+        read-only: true;
+        visible: false;
     }
-    grid := Rectangle {
-        vertical-stretch: 1;
-        for tile[i] in root.tiles: NameTile {
-            tile: tile;
-            x: grid.width / root.columns * Math.mod(i, root.columns) + 4px;
-            y: grid.height / root.rows * Math.floor(i / root.columns) + 4px;
-            width: grid.width / root.columns - 8px;
-            height: grid.height / root.rows - 8px;
+    copied-for := Timer {
+        interval: 1600ms;
+        running: false;
+        triggered => {
+            root.copied = false;
+            self.running = false;
+        }
+    }
+    Rectangle {
+        background: Theme.canvas;
+        opacity: root.born ? 1 : 0;
+        animate opacity { duration: Theme.moving; }
+        VerticalLayout {
+            padding: 12px;
+            padding-bottom: 10px;
+            spacing: 10px;
+            if root.status != "": Banner {
+                text: root.status;
+                tint: Theme.warn;
+                pulsing: true;
+            }
+            if root.warning != "": Banner {
+                text: root.warning;
+                tint: Theme.danger;
+            }
+            grid := Rectangle {
+                vertical-stretch: 1;
+                // The tiles at 16:9, as the cameras send, as large as the grid lets them be, the
+                // last row centred.
+                property <int> count: root.tiles.length + (root.overflow > 0 ? 1 : 0);
+                property <int> columns: Math.max(1, root.columns-for(self.count, self.width, self.height));
+                property <int> rows: Math.max(1, Math.ceil(self.count / self.columns));
+                property <length> gap: 8px;
+                property <length> cell-width: (self.width - self.gap * (self.columns - 1)) / self.columns;
+                property <length> cell-height: (self.height - self.gap * (self.rows - 1)) / self.rows;
+                property <length> tile-width: Math.max(0px, Math.min(self.cell-width, self.cell-height * 16 / 9));
+                property <length> tile-height: self.tile-width * 9 / 16;
+                property <length> left: (self.width - self.tile-width * self.columns - self.gap * (self.columns - 1)) / 2;
+                property <length> top: (self.height - self.tile-height * self.rows - self.gap * (self.rows - 1)) / 2;
+                // Moves are animated, but a window being resized is followed at once.
+                property <bool> resizing;
+                changed width => {
+                    self.resizing = true;
+                    settled.running = false;
+                    settled.running = true;
+                }
+                changed height => {
+                    self.resizing = true;
+                    settled.running = false;
+                    settled.running = true;
+                }
+                settled := Timer {
+                    interval: 300ms;
+                    running: false;
+                    triggered => {
+                        grid.resizing = false;
+                        self.running = false;
+                    }
+                }
+                for tile[i] in root.tiles: TileView {
+                    property <int> line: Math.floor(i / grid.columns);
+                    property <int> in-row: self.line == grid.rows - 1 ? grid.count - self.line * grid.columns : grid.columns;
+                    tile: tile;
+                    x: grid.left + (grid.columns - self.in-row) * (grid.tile-width + grid.gap) / 2 + Math.mod(i, grid.columns) * (grid.tile-width + grid.gap);
+                    y: grid.top + self.line * (grid.tile-height + grid.gap);
+                    width: grid.tile-width;
+                    height: grid.tile-height;
+                    animate x, y, width, height {
+                        duration: grid.resizing ? 0ms : Theme.moving;
+                        easing: ease-in-out;
+                    }
+                }
+                if root.overflow > 0: Rectangle {
+                    property <int> i: root.tiles.length;
+                    property <int> line: Math.floor(self.i / grid.columns);
+                    property <int> in-row: grid.count - self.line * grid.columns;
+                    x: grid.left + (grid.columns - self.in-row) * (grid.tile-width + grid.gap) / 2 + Math.mod(self.i, grid.columns) * (grid.tile-width + grid.gap);
+                    y: grid.top + self.line * (grid.tile-height + grid.gap);
+                    width: grid.tile-width;
+                    height: grid.tile-height;
+                    border-radius: 12px;
+                    background: Theme.tile;
+                    Text {
+                        text: "+" + root.overflow;
+                        color: Theme.text-dim;
+                        font-size: 28px;
+                        font-weight: 600;
+                    }
+                }
+            }
+            // The bar: the invite on the left, the controls in the middle.
+            HorizontalLayout {
+                height: 56px;
+                spacing: 12px;
+                Rectangle {
+                    horizontal-stretch: 1;
+                    copy := Rectangle {
+                        property <bool> wide: parent.width >= 140px;
+                        x: 0;
+                        width: self.wide ? copy-row.preferred-width : 40px;
+                        height: 40px;
+                        border-radius: 20px;
+                        background: copy-touch.has-hover ? Theme.raised-hover : Theme.raised;
+                        animate background { duration: Theme.quick; }
+                        accessible-role: button;
+                        accessible-label: "Copy the room's invite";
+                        accessible-action-default => {
+                            copy-touch.clicked();
+                        }
+                        copy-row := HorizontalLayout {
+                            padding-left: copy.wide ? 12px : 10px;
+                            padding-right: copy.wide ? 14px : 10px;
+                            spacing: 8px;
+                            alignment: start;
+                            Icon {
+                                kind: root.copied ? "check" : "copy";
+                                tint: root.copied ? #5fd38d : Theme.text;
+                                y: (parent.height - self.height) / 2;
+                            }
+                            if copy.wide: Text {
+                                text: root.copied ? "Copied" : "Copy invite";
+                                color: Theme.text;
+                                font-size: 13px;
+                                vertical-alignment: center;
+                            }
+                        }
+                        copy-touch := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => {
+                                invite-text.select-all();
+                                invite-text.copy();
+                                invite-text.clear-selection();
+                                root.copied = true;
+                                copied-for.running = false;
+                                copied-for.running = true;
+                            }
+                        }
+                        if copy-touch.has-hover && !copy.wide: Tip {
+                            text: "Copy invite";
+                            y: -self.height - 8px;
+                        }
+                    }
+                }
+                HorizontalLayout {
+                    horizontal-stretch: 0;
+                    spacing: 12px;
+                    alignment: center;
+                    padding-top: 4px;
+                    padding-bottom: 4px;
+                    RoundButton {
+                        icon: root.muted ? "mic-off" : "mic";
+                        off: root.muted;
+                        label: root.muted ? "Unmute (Ctrl+D)" : "Mute (Ctrl+D)";
+                        clicked => {
+                            root.toggle-mute();
+                        }
+                    }
+                    RoundButton {
+                        icon: root.camera-off || !root.has-camera ? "camera-off" : "camera";
+                        off: root.camera-off && root.has-camera;
+                        enabled: root.has-camera;
+                        label: !root.has-camera ? "No camera" : root.camera-off ? "Turn the camera on (Ctrl+E)" : "Turn the camera off (Ctrl+E)";
+                        clicked => {
+                            root.toggle-camera();
+                        }
+                    }
+                    RoundButton {
+                        icon: "leave";
+                        danger: true;
+                        width: 64px;
+                        label: "Leave";
+                        clicked => {
+                            root.leave();
+                        }
+                    }
+                }
+                Rectangle {
+                    horizontal-stretch: 1;
+                }
+            }
         }
     }
 }
@@ -201,6 +727,7 @@ export component AppWindow inherits Window {
     preferred-height: 600px;
     min-width: 360px;
     min-height: 300px;
+    background: Theme.canvas;
     // `join` or `room`.
     in property <string> screen: "join";
     in-out property <string> name;
@@ -208,16 +735,21 @@ export component AppWindow inherits Window {
     in property <bool> joining;
     in property <string> error;
     in property <[Tile]> tiles;
+    // Participants not shown, beyond the tiles.
+    in property <int> overflow;
     in property <string> room-invite;
     in property <string> status;
     in property <string> warning;
     in property <bool> muted;
     in property <bool> camera-off;
+    // Whether this participant has a camera that's sent.
+    in property <bool> has-camera;
     callback join(string, string);
     callback new-room();
     callback leave();
     callback toggle-mute();
     callback toggle-camera();
+    pure callback columns-for(int, length, length) -> int;
     // A link opened during a call, while the window asks whether to leave the call for it; empty
     // otherwise. A link never takes the window to another room without a click (links.rs).
     in property <string> asking;
@@ -225,38 +757,12 @@ export component AppWindow inherits Window {
     in property <int> filled;
     // Its answer: true to leave for the link's room.
     callback answer(bool);
+    in property <string> version;
+    // What it says of the version check, if anything (D15).
+    in property <string> notice;
 
-    // The room's shortcuts, as Google Meet has them: Ctrl+D the microphone, Ctrl+E the camera.
-    // Out of the layout, and given the keyboard whenever the room shows.
-    shortcuts := FocusScope {
-        x: 0;
-        y: 0;
-        width: 0;
-        height: 0;
-        key-pressed(event) => {
-            if (root.screen != "room" || !event.modifiers.control) {
-                return reject;
-            }
-            if (event.text == "d") {
-                root.toggle-mute();
-                return accept;
-            }
-            if (event.text == "e") {
-                root.toggle-camera();
-                return accept;
-            }
-            reject
-        }
-    }
-    changed screen => {
-        if (root.screen == "room") {
-            shortcuts.focus();
-        }
-    }
-    changed asking => {
-        if (root.asking == "" && root.screen == "room") {
-            shortcuts.focus();
-        }
+    init => {
+        Palette.color-scheme = ColorScheme.dark;
     }
 
     about := PopupWindow {
@@ -265,31 +771,32 @@ export component AppWindow inherits Window {
         width: 320px;
         height: 240px;
         Rectangle {
-            background: #202024;
-            border-radius: 8px;
-            VerticalBox {
+            background: Theme.surface;
+            border-radius: 12px;
+            border-width: 1px;
+            border-color: Theme.line;
+            VerticalLayout {
+                padding: 12px;
                 AboutSlint { }
                 Text {
                     text: "mic " + root.version;
                     horizontal-alignment: center;
-                    color: white;
+                    color: Theme.text;
                 }
             }
         }
     }
-    in property <string> version;
-    // What it says of the version check, if anything (D15).
-    in property <string> notice;
 
     VerticalLayout {
         if root.notice != "": Rectangle {
-            background: #2b4a6b;
-            height: notice-text.preferred-height + 12px;
+            background: Theme.accent.transparentize(0.8);
+            height: notice-text.preferred-height + 14px;
             notice-text := Text {
                 text: root.notice;
-                color: white;
+                color: Theme.text;
+                font-size: 13px;
                 wrap: word-wrap;
-                width: parent.width - 16px;
+                width: parent.width - 24px;
             }
         }
         if root.screen == "join": JoinScreen {
@@ -305,15 +812,24 @@ export component AppWindow inherits Window {
             new-room => {
                 root.new-room();
             }
+            about => {
+                about.show();
+            }
         }
         if root.screen == "room": RoomScreen {
             vertical-stretch: 1;
             tiles: root.tiles;
+            overflow: root.overflow;
             invite: root.room-invite;
             status: root.status;
             warning: root.warning;
             muted: root.muted;
             camera-off: root.camera-off;
+            has-camera: root.has-camera;
+            asking: root.asking != "";
+            columns-for(count, width, height) => {
+                return root.columns-for(count, width, height);
+            }
             toggle-mute => {
                 root.toggle-mute();
             }
@@ -323,25 +839,19 @@ export component AppWindow inherits Window {
             leave => {
                 root.leave();
             }
-
-        }
-        HorizontalLayout {
-            vertical-stretch: 0;
-            alignment: end;
-            padding: 4px;
-            Button {
-                text: "About";
-                clicked => {
-                    about.show();
-                }
-            }
         }
     }
     // Over everything while it asks: Enter joins, Escape stays.
     if root.asking != "": Rectangle {
+        property <bool> born;
+        init => {
+            self.born = true;
+        }
         width: root.width;
         height: root.height;
-        background: #000000a0;
+        background: #000000a8;
+        opacity: self.born ? 1 : 0;
+        animate opacity { duration: 180ms; }
         TouchArea { }
         asked := FocusScope {
             init => {
@@ -361,31 +871,36 @@ export component AppWindow inherits Window {
             Rectangle {
                 width: Math.min(420px, root.width - 32px);
                 height: question.preferred-height;
-                background: #202024;
-                border-radius: 8px;
-                question := VerticalBox {
+                background: Theme.surface;
+                border-radius: 14px;
+                border-width: 1px;
+                border-color: Theme.line;
+                question := VerticalLayout {
+                    padding: 20px;
+                    spacing: 10px;
                     Text {
                         text: "Leave this call for the room the link names?";
-                        color: white;
+                        color: Theme.text;
                         font-size: 16px;
+                        font-weight: 600;
                         wrap: word-wrap;
                     }
                     Text {
                         text: root.asking;
-                        color: #d0d0d8;
+                        color: Theme.text-dim;
                         font-size: 12px;
                         overflow: elide;
                     }
-                    HorizontalBox {
-                        padding: 0;
+                    HorizontalLayout {
+                        spacing: 10px;
                         alignment: end;
-                        Button {
+                        PillButton {
                             text: "Stay";
                             clicked => {
                                 root.answer(false);
                             }
                         }
-                        Button {
+                        PillButton {
                             text: "Leave and join";
                             primary: true;
                             clicked => {

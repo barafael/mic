@@ -1,9 +1,10 @@
 //! The tiles' video, on the window's thread: a timer at twice the camera's rate looks at each
-//! tile's camera (`Room::video`), and draws a new picture where one came, with mic-render on
+//! tile's camera (`Room::video`, and `Room::preview` for its own), and draws a new picture where one came, with mic-render on
 //! Slint's own wgpu device, or on the CPU under the software renderer. What it costs is kept for
 //! the harness (`render`).
 
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
@@ -24,7 +25,8 @@ pub struct Gpu {
     pub queue: mic_render::wgpu::Queue,
 }
 
-/// What drawing the tiles costs, over the last second.
+/// What drawing the others' tiles costs, over the last second: its own camera's preview isn't
+/// counted, so it says what decoding the others costs, as the box measures it.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Cost {
     /// The tiles showing video, by key: with a picture, and the camera not off.
@@ -98,33 +100,54 @@ impl Videos {
                 let Some(mut row) = tiles.row_data(index) else {
                     continue;
                 };
-                if row.me {
+                // Its own camera's preview isn't drawn while the camera is off: the tile shows
+                // the name, and it costs nothing.
+                if row.leaving || (row.me && row.camera_off) {
                     continue;
                 }
-                let Ok(key) = row.key.parse::<ParticipantKey>() else {
-                    continue;
+                let drawn = match self.tiles.entry(row.key.to_string()) {
+                    Entry::Occupied(drawn) => drawn.into_mut(),
+                    Entry::Vacant(vacant) => {
+                        let pictures = if row.me {
+                            room.preview()
+                        } else {
+                            row.key
+                                .parse::<ParticipantKey>()
+                                .ok()
+                                .map(|key| room.video(key))
+                        };
+                        let Some(pictures) = pictures else {
+                            continue;
+                        };
+                        vacant.insert(Drawn {
+                            pictures,
+                            tile: None,
+                        })
+                    }
                 };
-                let drawn = self
-                    .tiles
-                    .entry(row.key.to_string())
-                    .or_insert_with(|| Drawn {
-                        pictures: room.video(key),
-                        tile: None,
-                    });
                 if !drawn.pictures.has_changed().unwrap_or(false) {
                     continue;
                 }
                 let Some(picture) = drawn.pictures.borrow_and_update().clone() else {
                     continue;
                 };
+                // Its own camera as a mirror shows a face.
+                let picture = if row.me {
+                    Arc::new(mirrored(&picture))
+                } else {
+                    picture
+                };
                 let started = Instant::now();
                 match draw(self.gpu.as_ref(), &mut drawn.tile, &picture) {
                     Ok(image) => {
                         row.video = image;
                         row.has_video = true;
+                        let me = row.me;
                         tiles.set_row_data(index, row);
-                        self.drawn += 1;
-                        self.drawing += started.elapsed();
+                        if !me {
+                            self.drawn += 1;
+                            self.drawing += started.elapsed();
+                        }
                     }
                     Err(error) => tracing::debug!(%error, "drawing a tile"),
                 }
@@ -143,10 +166,13 @@ impl Videos {
         *self.cost.lock().unwrap_or_else(PoisonError::into_inner) = Cost {
             showing: tiles
                 .iter()
-                .filter(|tile| tile.has_video && !tile.camera_off)
+                .filter(|tile| !tile.me && tile.has_video && !tile.camera_off)
                 .map(|tile| tile.key.to_string())
                 .collect(),
-            tiles: tiles.iter().filter(|tile| tile.has_video).count() as u32,
+            tiles: tiles
+                .iter()
+                .filter(|tile| !tile.me && tile.has_video)
+                .count() as u32,
             pictures: self.drawn as f64 / seconds,
             draw_ms: if self.drawn == 0 {
                 0.0
@@ -192,5 +218,44 @@ fn draw(
             );
             Ok(slint::Image::from_rgba8(buffer))
         }
+    }
+}
+
+/// `picture` flipped left to right: each row of its luma and its two chroma planes (I420).
+fn mirrored(picture: &Picture) -> Picture {
+    let (width, height) = (picture.width as usize, picture.height as usize);
+    let (chroma_width, chroma_height) = (width.div_ceil(2), height.div_ceil(2));
+    let mut data = picture.data.clone();
+    let (luma, chroma) = data.split_at_mut((width * height).min(picture.data.len()));
+    luma.chunks_exact_mut(width.max(1))
+        .for_each(<[u8]>::reverse);
+    chroma
+        .chunks_exact_mut(chroma_width.max(1))
+        .take(2 * chroma_height)
+        .for_each(<[u8]>::reverse);
+    Picture {
+        width: picture.width,
+        height: picture.height,
+        data,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_mirrored_picture_is_flipped_left_to_right_in_every_plane() {
+        // 4 by 2: luma rows 0 1 2 3 and 4 5 6 7, then a row of U (8 9) and of V (10 11).
+        let picture = Picture {
+            width: 4,
+            height: 2,
+            data: (0..12).collect(),
+        };
+        assert_eq!(
+            mirrored(&picture).data,
+            [3, 2, 1, 0, 7, 6, 5, 4, 9, 8, 11, 10]
+        );
+        assert_eq!(mirrored(&mirrored(&picture)).data, picture.data);
     }
 }

@@ -24,6 +24,40 @@ measurements, and things to revisit. Newest first within each milestone. Each sa
   loops it; `cargo testbox media` and `target/testbox-media/` would only add a step to keep fresh.
   The loop repeats frame numbers every two seconds, which no check counts on.
 
+## Window polish (between M7 and M8)
+
+- **Slint's software renderer ignores a negative `transform-scale-x`, and doesn't clip children
+  to a rounded corner** (settled, upstream to check). The self-view is mirrored in Rust, the
+  same under both renderers (`videos::mirrored`); a tile's video has square corners there.
+- **`changed` callbacks run after the change they follow** (settled). A flag set in one comes
+  too late to animate what changed with it, so the grid animates every move and turns that off
+  while the window is resized, rather than on for a roster change.
+- **The join card ran off a short window** (settled): at 330 px tall, Join was below the edge.
+  Under 480 px the card drops its greeting.
+- **Ctrl+D and Ctrl+E stopped working once the invite field had focus** (settled). The
+  shortcuts' FocusScope was a zero-size sibling of the room; clicking the read-only invite field
+  took the focus, and nothing gave it back. The room is the FocusScope now, and nothing in it
+  takes the focus; the invite is copied with a button. The box didn't see it: its checks never
+  touch the field. (by hand, `ui-polish` worktree)
+- **At the minimum width the Leave button was off the window** (settled). The invite field took
+  the row's width first. The controls are a bar of round buttons now, which fits 360 px.
+- **Closing the window never left the room** (settled). `main` made the leaving timeout outside
+  the runtime, and its timer panicked ("there is no reactor running") once the event loop ended:
+  every window close, and every SIGTERM, dropped the session instead of leaving. The others saw
+  the last frames go without a checkpoint and, 2 s later, "Someone in this room publishes what
+  they can't sign", until the relay's Gone cleared it. The box's checks leave through the
+  harness, so none closed a window. A test now keeps a clean leave free of rejections
+  (`one_who_leaves_mid_sentence_leaves_nothing_unsigned`). A crash still shows that warning for
+  a few seconds, as the checkpoints fail closed by design. (by hand, `ui-polish` worktree)
+- **Running the window by hand without touching the desktop** (settled):
+  `kwin_wayland --virtual --xwayland` gives a headless Xwayland that xdotool and `import` drive;
+  on the desktop's own Xwayland, xdotool can't warp the pointer. Under it wgpu stops presenting
+  after the first frames (Fifo, as on Xvnc), so `VK_ICD_FILENAMES=/nonexistent.json` sends the
+  window to the software renderer. A relay comes from `cargo run -p mic-testrelay --example
+  serve`, which prints `--relay … --fingerprint …`; a second window on one machine wants its own
+  identity, `--keyring <service>`. Input in the virtual session went dead twice after a window
+  closed; a fresh kwin brought it back. (`ui-polish` worktree)
+
 ## M7: Invites, version check, site
 
 - **A link joins at once, leaving the call it's in** (settled, after M7). A link handed to a

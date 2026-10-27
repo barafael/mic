@@ -1,7 +1,7 @@
 //! The `video` phase: alice and bob send pattern cameras (`podman::camera`), carol claims to
 //! decode no video (`--decoders none`). Each of alice and bob decodes the other's camera, the
 //! pattern names the right sender, and the frame rate holds; their windows show it, in the
-//! sender's colour, and carol's says on each tile that it can't, rather than show black. Then a
+//! sender's colour, beside their own camera's preview, and carol's says on each tile that it can't, rather than show black. Then a
 //! crowd of six with cameras of their own fills alice's window to nine tiles, and what drawing
 //! them costs is measured and kept in the record (`render.txt`), as the spike measured it. It
 //! measures, so it runs alone. Last, alice turns her camera off: bob's tile of her shows her
@@ -62,11 +62,13 @@ pub fn video(checks: &mut Checks, the_box: &TestBox) -> Result<()> {
         Ok(())
     });
     let directory = checks.record_directory().to_owned();
-    checks.record("their windows show the other's camera, in its colour", || {
+    checks.record("their windows show both cameras, in their colours", || {
         let tool = view::tool(the_box.repo(), "testbox-shot")?;
+        // Each sees the other's camera, and its own on its own tile; carol, who decodes none
+        // and sends none, neither.
         for (client, shows, not) in [
-            ("alice", &[bobs][..], &[alices][..]),
-            ("bob", &[alices][..], &[bobs][..]),
+            ("alice", &[alices, bobs][..], &[][..]),
+            ("bob", &[alices, bobs][..], &[][..]),
             ("carol", &[][..], &[alices, bobs][..]),
         ] {
             let deadline = Instant::now() + PATIENCE;
