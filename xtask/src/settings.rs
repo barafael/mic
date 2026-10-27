@@ -12,11 +12,16 @@ const FILE: &str = "target/testbox-pods/box.settings";
 pub struct Settings {
     /// Whether client pods get the host's GPU (`up --no-gpu` says no).
     pub gpu: bool,
+    /// How many the crowd pod runs (`up --crowd n`): with the six windows, a room of 40.
+    pub crowd: u32,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { gpu: true }
+        Self {
+            gpu: true,
+            crowd: 34,
+        }
     }
 }
 
@@ -45,7 +50,7 @@ impl Settings {
 
     /// `key = value` lines.
     fn to_text(self) -> String {
-        format!("gpu = {}\n", self.gpu)
+        format!("gpu = {}\ncrowd = {}\n", self.gpu, self.crowd)
     }
 
     fn parse(text: &str) -> std::result::Result<Self, String> {
@@ -57,6 +62,9 @@ impl Settings {
             match (key.trim(), value.trim()) {
                 ("gpu", value) => {
                     settings.gpu = value.parse().map_err(|_| format!("gpu = {value:?}"))?;
+                }
+                ("crowd", value) => {
+                    settings.crowd = value.parse().map_err(|_| format!("crowd = {value:?}"))?;
                 }
                 (key, _) => return Err(format!("no setting {key:?}")),
             }
@@ -71,7 +79,10 @@ mod tests {
 
     #[test]
     fn settings_read_back_as_kept() {
-        let settings = Settings { gpu: false };
+        let settings = Settings {
+            gpu: false,
+            crowd: 7,
+        };
         assert_eq!(Settings::parse(&settings.to_text()), Ok(settings));
     }
 

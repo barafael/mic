@@ -125,9 +125,14 @@ pub(crate) async fn publish(
     }
 }
 
-/// Decodes `track`, someone's voice, into a stream of `mixer`'s, until the track ends; the
-/// stream goes with it.
-pub(crate) async fn play(mut track: VerifiedTrack, mixer: Mixer) {
+/// Decodes `track`, `whose` voice, into a stream of `mixer`'s, until the track ends; the stream
+/// goes with it. How loud each packet is goes to `voices`, for who's speaking.
+pub(crate) async fn play(
+    mut track: VerifiedTrack,
+    mixer: Mixer,
+    whose: crate::roster::ParticipantKey,
+    voices: crate::speaker::Voices,
+) {
     let mut decoder = match decoder() {
         Ok(decoder) => decoder,
         Err(error) => {
@@ -156,8 +161,12 @@ pub(crate) async fn play(mut track: VerifiedTrack, mixer: Mixer) {
             };
             // Decoded all the same, so the decoder's state follows the stream.
             match decoder.decode(&frame.plaintext) {
-                Ok(decoded) if stream.queued() <= QUEUE => stream.write(&decoded.samples),
-                Ok(_) => {}
+                Ok(decoded) => {
+                    voices.heard(whose, &decoded.samples);
+                    if stream.queued() <= QUEUE {
+                        stream.write(&decoded.samples);
+                    }
+                }
                 Err(error) => tracing::debug!(%error, "a voice packet didn't decode"),
             }
         }

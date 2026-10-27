@@ -53,6 +53,19 @@
           # @GPU@ { name: "render", mountPath: "/dev/dri/renderD128" },
         ],
       },
+      # Shapes the pod's network, which its containers share: netem's loss and delay, and nft's
+      # dropped UDP, as the `network` phase sets them with `podman exec`. NET_ADMIN over the
+      # pod's own network namespace only, which rootless Podman's user namespace owns; netem's
+      # module loads on the host when first asked for. Idles otherwise.
+      {
+        name: "shaper",
+        image: "@IMAGE:moq@",
+        args: ["bash", "-c", "trap 'exit 0' TERM; sleep infinity & wait"],
+        securityContext: {
+          allowPrivilegeEscalation: false,
+          capabilities: { drop: ["ALL"], add: ["NET_ADMIN"] },
+        },
+      },
     ],
     volumes: [
       # What the builder built (`cargo testbox build`): a change is a restart, not an image build.

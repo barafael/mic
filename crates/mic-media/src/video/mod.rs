@@ -8,6 +8,8 @@
 //! only what they decode, and ignore names they don't know.
 
 mod pattern;
+#[cfg(feature = "screen")]
+pub mod screen;
 #[cfg(feature = "vp9")]
 pub mod vp9;
 
@@ -70,6 +72,13 @@ pub struct Picture {
 }
 
 impl Picture {
+    /// A picture of `width` by `height`, black.
+    pub fn black(width: u32, height: u32) -> Self {
+        let mut picture = Self::grey(width, height);
+        picture.y_mut().fill(16);
+        picture
+    }
+
     /// A picture of `width` by `height`, mid-grey.
     pub fn grey(width: u32, height: u32) -> Self {
         let luma = (width * height) as usize;

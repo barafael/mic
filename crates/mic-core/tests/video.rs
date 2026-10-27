@@ -8,7 +8,7 @@ use mic_core::secrets::InMemory;
 use mic_core::video::CAMERA_SETTINGS;
 use mic_core::{Client, Config, Connection, Invite, Media, ParticipantKey, Profile, Room, Trust};
 use mic_media::audio::Running;
-use mic_media::video::{PatternCamera, read_pattern};
+use mic_media::video::{Pattern, PatternCamera, read_pattern};
 use mic_testrelay::TestRelay;
 
 const PATIENCE: Duration = Duration::from_secs(15);
@@ -26,7 +26,29 @@ struct Participant {
 }
 
 async fn join(invite: &Invite, name: &str, camera: Option<u8>, config: Config) -> Participant {
+    join_sending(invite, name, camera, config, false).await
+}
+
+/// As [`join`], the camera recorded once and sent in a loop if `recorded`.
+async fn join_sending(
+    invite: &Invite,
+    name: &str,
+    camera: Option<u8>,
+    config: Config,
+    recorded: bool,
+) -> Participant {
     let (camera, running) = match camera {
+        Some(sender) if recorded => {
+            let pictures = (0..CAMERA_SETTINGS.fps * 2).map(|frame| {
+                Pattern {
+                    sender,
+                    frame: frame as u16,
+                }
+                .draw(CAMERA_SETTINGS.width, CAMERA_SETTINGS.height)
+            });
+            let recorded = mic_core::video::Recorded::encode(pictures).unwrap();
+            (Some(mic_core::video::Camera::Recorded(recorded)), None)
+        }
         Some(sender) => {
             let (pictures, shown) = tokio::sync::watch::channel(None);
             let running = PatternCamera {
@@ -37,7 +59,7 @@ async fn join(invite: &Invite, name: &str, camera: Option<u8>, config: Config) -
             }
             .start(pictures)
             .unwrap();
-            (Some(shown), Some(running))
+            (Some(mic_core::video::Camera::Live(shown)), Some(running))
         }
         None => (None, None),
     };
@@ -134,6 +156,174 @@ async fn each_decodes_the_others_camera_also_after_a_restart() {
         );
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_recorded_camera_is_seen_at_its_rate() {
+    let relay = TestRelay::start().await.unwrap();
+    let invite = Invite::new_room();
+    let crowd = join_sending(&invite, "Crowd", Some(7), config(&relay), true).await;
+    let bob = join(&invite, "Bob", None, config(&relay)).await;
+    let whose = crowd.room.participant();
+    sees(&bob, whose, 7).await;
+    let fps = f64::from(CAMERA_SETTINGS.fps);
+    let rate = rate(&bob, whose).await;
+    assert!(rate > fps * 0.7, "{rate} pictures a second, of {fps}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn only_the_cameras_watched_are_decoded() {
+    use mic_core::Command;
+    let relay = TestRelay::start().await.unwrap();
+    let invite = Invite::new_room();
+    let alice = join(&invite, "Alice", Some(1), config(&relay)).await;
+    let bob = join(&invite, "Bob", Some(2), config(&relay)).await;
+    let carol = join(&invite, "Carol", None, config(&relay)).await;
+    let (alices, bobs) = (alice.room.participant(), bob.room.participant());
+    sees(&carol, alices, 1).await;
+    sees(&carol, bobs, 2).await;
+    carol
+        .room
+        .command(Command::Watch {
+            participants: Some(vec![alices]),
+        })
+        .await
+        .unwrap();
+    // What was on its way when the camera was dropped.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let fps = f64::from(CAMERA_SETTINGS.fps);
+    let (of_alice, of_bob) = (rate(&carol, alices).await, rate(&carol, bobs).await);
+    assert!(of_alice > fps * 0.7, "alice's at {of_alice} a second");
+    assert_eq!(of_bob, 0.0, "bob's, unwatched");
+    carol
+        .room
+        .command(Command::Watch { participants: None })
+        .await
+        .unwrap();
+    let before = carol.room.video_count(bobs);
+    sees(&carol, bobs, 2).await;
+    let deadline = tokio::time::Instant::now() + PATIENCE;
+    while carol.room.video_count(bobs) < before + 15 {
+        assert!(
+            carol.room.state().borrow().rejected.is_empty(),
+            "bob's broadcast rejected: {:?}",
+            carol.room.state().borrow().rejected
+        );
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "bob's camera not back: {:?}",
+            *carol.room.state().borrow()
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_shared_screen_is_seen_until_it_stops() {
+    use mic_core::Command;
+    use mic_core::video::{SCREEN_SETTINGS, ScreenSource};
+    let relay = TestRelay::start().await.unwrap();
+    let invite = Invite::new_room();
+    let screen: ScreenSource = std::sync::Arc::new(|pictures| {
+        PatternCamera {
+            sender: 77,
+            width: SCREEN_SETTINGS.width,
+            height: SCREEN_SETTINGS.height,
+            fps: SCREEN_SETTINGS.fps,
+        }
+        .start(pictures)
+        .map_err(|error| error.to_string())
+    });
+    let alice = Client::new(
+        config(&relay),
+        &InMemory::default(),
+        tokio::runtime::Handle::current(),
+    )
+    .unwrap()
+    .join_with(
+        invite.clone(),
+        Profile::new("Alice"),
+        Media {
+            screen: Some(screen),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    let bob = join(&invite, "Bob", None, config(&relay)).await;
+    let whose = alice.participant();
+    alice
+        .command(Command::ShareScreen { on: true })
+        .await
+        .unwrap();
+    let deadline = tokio::time::Instant::now() + PATIENCE;
+    loop {
+        let read = bob
+            .room
+            .screen(whose)
+            .borrow()
+            .as_deref()
+            .and_then(read_pattern);
+        if read.is_some_and(|pattern| pattern.sender == 77) {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "no screen: {read:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let mut state = bob.room.state();
+    tokio::time::timeout(
+        PATIENCE,
+        state.wait_for(|state| state.participants.iter().any(|them| them.profile.sharing)),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    alice
+        .command(Command::ShareScreen { on: false })
+        .await
+        .unwrap();
+    tokio::time::timeout(
+        PATIENCE,
+        state.wait_for(|state| state.participants.iter().all(|them| !them.profile.sharing)),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let before = bob.room.screen_count(whose);
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert_eq!(
+        bob.room.screen_count(whose),
+        before,
+        "pictures after it stopped"
+    );
+    // And again.
+    alice
+        .command(Command::ShareScreen { on: true })
+        .await
+        .unwrap();
+    let deadline = tokio::time::Instant::now() + PATIENCE;
+    while bob.room.screen_count(whose) < before + 5 {
+        assert!(tokio::time::Instant::now() < deadline, "no screen again");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    // One with nothing to share says so.
+    assert!(
+        bob.room
+            .command(Command::ShareScreen { on: true })
+            .await
+            .is_err()
+    );
+}
+
+#[test]
+fn under_a_second_isnt_a_recording() {
+    let pictures = (0..CAMERA_SETTINGS.fps - 1)
+        .map(|_| mic_media::video::Picture::grey(CAMERA_SETTINGS.width, CAMERA_SETTINGS.height));
+    assert!(mic_core::video::Recorded::encode(pictures).is_err());
 }
 
 #[tokio::test(flavor = "multi_thread")]

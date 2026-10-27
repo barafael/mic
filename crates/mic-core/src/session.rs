@@ -33,6 +33,9 @@ pub struct Config {
     /// The video codecs it says it decodes: every one it has, unless told fewer (the box's
     /// `--decoders`, to see a codec go unsupported).
     pub decoders: Vec<mic_media::video::Codec>,
+    /// Whether a WebSocket over TCP races QUIC, for networks that block UDP (D9): on unless
+    /// opted out of, QUIC only then.
+    pub websocket: bool,
 }
 
 impl Config {
@@ -43,6 +46,7 @@ impl Config {
             trust: Trust::System,
             connect_timeout: CONNECT_TIMEOUT,
             decoders: mic_media::video::Codec::ALL.to_vec(),
+            websocket: true,
         }
     }
 }
@@ -90,6 +94,14 @@ pub enum Error {
     #[from(ignore)]
     #[display("the room was left")]
     Left,
+    /// Nothing to share a screen from: this client has no screen source.
+    #[from(ignore)]
+    #[display("no screen to share")]
+    NoScreen,
+    /// The screen's capture wouldn't start.
+    #[from(ignore)]
+    #[display("sharing the screen: {_0}")]
+    Screen(#[error(not(source))] String),
 }
 
 fn moq(error: impl std::fmt::Display) -> Error {
@@ -178,8 +190,10 @@ pub struct Media {
     /// What takes the noise out of the capture: a microphone wants it; a synthetic tone, which
     /// a suppressor would take for noise, doesn't.
     pub noise: mic_media::audio::noise::NoiseSuppression,
-    /// Pictures to send as this participant's camera, if it has one.
-    pub camera: Option<crate::video::Pictures>,
+    /// What this participant sends as its camera, if it has one.
+    pub camera: Option<crate::video::Camera>,
+    /// What a screenshare captures, if it can share one.
+    pub screen: Option<crate::video::ScreenSource>,
 }
 
 impl Inner {
@@ -209,7 +223,11 @@ impl Inner {
             .map_err(|error| Error::Unreachable {
                 relay: self.config.relay.to_string(),
                 after: self.config.connect_timeout,
-                why: error.to_string(),
+                why: if self.config.websocket {
+                    error.to_string()
+                } else {
+                    format!("{error} (QUIC only: the WebSocket fallback is off)")
+                },
             })?;
         let participant = ParticipantKey::from_bytes(key.public().to_bytes());
         let mut publication = Publication::new(
@@ -223,6 +241,10 @@ impl Inner {
         // participant finds its name.
         let mut profile_track = publication.track(roster::PROFILE)?;
         roster::write_profile(&mut profile_track, &profile)?;
+        let saying = crate::chat::Saying::new(
+            publication.track(crate::chat::CHAT)?,
+            publication.track(crate::chat::REACTIONS)?,
+        );
         let (muted, follows) = tokio::sync::watch::channel(false);
         let (noise, noise_follows) = tokio::sync::watch::channel(media.noise);
         let voice = match media.capture {
@@ -238,13 +260,17 @@ impl Inner {
         // since one who decodes none of ours is left out; with a second codec, the choice follows
         // the roster as it changes.
         let (camera_on, camera_follows) = tokio::sync::watch::channel(true);
-        let preview = media.camera.clone();
+        // A recorded camera has no pictures to preview.
+        let preview = match &media.camera {
+            Some(crate::video::Camera::Live(pictures)) => Some(pictures.clone()),
+            _ => None,
+        };
         let camera = match (
             media.camera,
             mic_media::video::choose(&mic_media::video::Codec::ALL, std::iter::empty()),
         ) {
-            (Some(pictures), Some(codec)) => Some(tokio::spawn(crate::video::publish(
-                pictures,
+            (Some(camera), Some(codec)) => Some(tokio::spawn(crate::video::publish(
+                camera,
                 publication.video_track(crate::video::CAMERA, codec)?,
                 camera_follows,
             ))),
@@ -260,6 +286,7 @@ impl Inner {
             publication,
             profile,
             profile_track,
+            saying,
             connection,
             moq: self.moq.clone(),
             url,
@@ -272,6 +299,7 @@ impl Inner {
             camera_on,
             noise,
             mixer: media.mixer,
+            screen: media.screen,
             decoders: self
                 .config
                 .decoders
@@ -286,6 +314,7 @@ impl Inner {
 fn connect_config(config: &Config) -> moq_tokio::connect::Config {
     let mut connect = moq_tokio::connect::Config::default();
     connect.url = Some(config.relay.clone());
+    connect.websocket.enabled = Some(config.websocket);
     // moq-tokio's window for redialing: a first connect gives up after it, with the last
     // attempt's error, and no attempt outlasts it. The same window bounds how long a dropped
     // session tries again, which reconnecting (PLAN.md, commit 17) settles.

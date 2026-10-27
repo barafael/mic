@@ -50,6 +50,7 @@ pub fn pods_running(binary: &str) -> Vec<Pod> {
     match binary {
         "mic" => crate::podman::CLIENTS.map(Pod::Client).to_vec(),
         "probe" => vec![Pod::Probe],
+        "mic-crowd" => vec![Pod::Crowd],
         "with-display" => std::iter::once(Pod::Probe)
             .chain(crate::podman::CLIENTS.map(Pod::Client))
             .collect(),

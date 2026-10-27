@@ -48,11 +48,14 @@ impl Tile {
     }
 
     /// Draws `picture`, and hands back the texture holding it: the same texture each time, so
-    /// it's shown or copied before the next.
+    /// it's shown or copied before the next. Every picture of mic's is BT.601, limited range, as
+    /// [`rgba`] draws it, whatever its size: moq-video would guess BT.709 for one taller than
+    /// standard definition, as a screen is.
     pub fn draw(&mut self, picture: &Picture) -> Result<wgpu::Texture, RenderError> {
         let size = moq_video::Size::new(picture.width, picture.height);
         let i420 = moq_video::I420::new(size, picture.data.clone())
-            .map_err(|error| RenderError::Picture(error.to_string()))?;
+            .map_err(|error| RenderError::Picture(error.to_string()))?
+            .with_color(moq_video::Color::Bt601Limited);
         let frame = moq_video::Frame::new(
             moq_video::Surface::I420(i420),
             moq_net::Timestamp::from_micros(0).expect("zero is a timestamp"),

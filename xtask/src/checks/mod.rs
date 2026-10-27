@@ -6,9 +6,13 @@ mod crashed;
 mod e2ee;
 mod impersonation;
 mod links;
+mod network;
 mod record;
 mod relay;
+mod room;
+mod room_40;
 mod roster;
+mod screenshare;
 mod testbox;
 mod version;
 mod video;
@@ -42,10 +46,20 @@ pub enum Phase {
     Version,
     /// A mic:// link joins its room.
     Links,
+    /// Twelve in a room: the tiles shown, their cameras only, the speaker, chat, reactions, hands.
+    Room,
+    /// A shared screen reaches everyone; a real one too.
+    Screenshare,
+    /// Loss, delay, and UDP blocked: what's heard and seen holds, and the WebSocket fallback.
+    Network,
+    /// Forty in a room, measured each minute against the budget: not in a default round.
+    #[value(name = "room-40")]
+    Room40,
 }
 
 impl Phase {
-    pub const ALL: [Phase; 10] = [
+    /// What `run` runs when it isn't told which: every phase but `room-40`, which takes minutes.
+    pub const ROUNDS: [Phase; 13] = [
         Phase::Box,
         Phase::Relay,
         Phase::Roster,
@@ -56,6 +70,9 @@ impl Phase {
         Phase::Video,
         Phase::Version,
         Phase::Links,
+        Phase::Room,
+        Phase::Screenshare,
+        Phase::Network,
     ];
 
     pub fn name(self) -> String {
@@ -77,6 +94,10 @@ impl Phase {
                 | Phase::AudioDevices
                 | Phase::Video
                 | Phase::Links
+                | Phase::Room
+                | Phase::Screenshare
+                | Phase::Network
+                | Phase::Room40
         )
     }
 
@@ -87,7 +108,12 @@ impl Phase {
     pub fn runs_alone(self) -> bool {
         matches!(
             self,
-            Phase::Roster | Phase::Audio | Phase::AudioDevices | Phase::Video
+            Phase::Roster
+                | Phase::Audio
+                | Phase::AudioDevices
+                | Phase::Video
+                | Phase::Network
+                | Phase::Room40
         )
     }
 
@@ -103,6 +129,10 @@ impl Phase {
             Phase::Video => video::video(checks, the_box),
             Phase::Version => version::version(checks, the_box),
             Phase::Links => links::links(checks, the_box),
+            Phase::Room => room::room(checks, the_box),
+            Phase::Screenshare => screenshare::screenshare(checks, the_box),
+            Phase::Network => network::network(checks, the_box),
+            Phase::Room40 => room_40::room_40(checks, the_box),
         }
     }
 }

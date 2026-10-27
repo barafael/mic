@@ -88,7 +88,7 @@ impl Videos {
     }
 
     /// Draws each tile's new picture into `tiles`, the window's model.
-    pub fn look(&mut self, app: &App, tiles: &VecModel<Tile>) {
+    pub fn look(&mut self, app: &App, tiles: &VecModel<Tile>, screens: &VecModel<Tile>) {
         let room = app.current();
         let id = room.as_ref().map(mic_core::Room::id);
         if id != self.room {
@@ -96,62 +96,8 @@ impl Videos {
             self.room = id;
         }
         if let Some(room) = room {
-            for index in 0..tiles.row_count() {
-                let Some(mut row) = tiles.row_data(index) else {
-                    continue;
-                };
-                // Its own camera's preview isn't drawn while the camera is off: the tile shows
-                // the name, and it costs nothing.
-                if row.leaving || (row.me && row.camera_off) {
-                    continue;
-                }
-                let drawn = match self.tiles.entry(row.key.to_string()) {
-                    Entry::Occupied(drawn) => drawn.into_mut(),
-                    Entry::Vacant(vacant) => {
-                        let pictures = if row.me {
-                            room.preview()
-                        } else {
-                            row.key
-                                .parse::<ParticipantKey>()
-                                .ok()
-                                .map(|key| room.video(key))
-                        };
-                        let Some(pictures) = pictures else {
-                            continue;
-                        };
-                        vacant.insert(Drawn {
-                            pictures,
-                            tile: None,
-                        })
-                    }
-                };
-                if !drawn.pictures.has_changed().unwrap_or(false) {
-                    continue;
-                }
-                let Some(picture) = drawn.pictures.borrow_and_update().clone() else {
-                    continue;
-                };
-                // Its own camera as a mirror shows a face.
-                let picture = if row.me {
-                    Arc::new(mirrored(&picture))
-                } else {
-                    picture
-                };
-                let started = Instant::now();
-                match draw(self.gpu.as_ref(), &mut drawn.tile, &picture) {
-                    Ok(image) => {
-                        row.video = image;
-                        row.has_video = true;
-                        let me = row.me;
-                        tiles.set_row_data(index, row);
-                        if !me {
-                            self.drawn += 1;
-                            self.drawing += started.elapsed();
-                        }
-                    }
-                    Err(error) => tracing::debug!(%error, "drawing a tile"),
-                }
-            }
+            self.look_at(&room, tiles, false);
+            self.look_at(&room, screens, true);
         }
         if self.since.elapsed() >= Duration::from_secs(1) {
             self.account(tiles);
@@ -159,6 +105,73 @@ impl Videos {
     }
 
     /// The last second's cost, for the harness.
+    /// The new pictures of `tiles`' participants drawn into them: their screens', if `screens`.
+    fn look_at(&mut self, room: &mic_core::Room, tiles: &VecModel<Tile>, screens: bool) {
+        for index in 0..tiles.row_count() {
+            let Some(mut row) = tiles.row_data(index) else {
+                continue;
+            };
+            // Its own camera's preview isn't drawn while the camera is off: the tile shows
+            // the name, and it costs nothing.
+            if row.leaving || (row.me && row.camera_off) {
+                continue;
+            }
+            // A screen apart from its sharer's camera.
+            let drawn_as = if screens {
+                format!("screen {}", row.key)
+            } else {
+                row.key.to_string()
+            };
+            let drawn = match self.tiles.entry(drawn_as) {
+                Entry::Occupied(drawn) => drawn.into_mut(),
+                Entry::Vacant(vacant) => {
+                    let key = row.key.parse::<ParticipantKey>().ok();
+                    let pictures = if row.me {
+                        room.preview()
+                    } else if screens {
+                        key.map(|key| room.screen(key))
+                    } else {
+                        key.map(|key| room.video(key))
+                    };
+                    let Some(pictures) = pictures else {
+                        continue;
+                    };
+                    vacant.insert(Drawn {
+                        pictures,
+                        tile: None,
+                    })
+                }
+            };
+            if !drawn.pictures.has_changed().unwrap_or(false) {
+                continue;
+            }
+            let Some(picture) = drawn.pictures.borrow_and_update().clone() else {
+                continue;
+            };
+            // Its own camera as a mirror shows a face.
+            let picture = if row.me {
+                Arc::new(mirrored(&picture))
+            } else {
+                picture
+            };
+            let started = Instant::now();
+            match draw(self.gpu.as_ref(), &mut drawn.tile, &picture) {
+                Ok(image) => {
+                    row.video = image;
+                    row.has_video = true;
+                    let me = row.me;
+                    tiles.set_row_data(index, row);
+                    // What a camera costs: a screen's apart.
+                    if !me && !screens {
+                        self.drawn += 1;
+                        self.drawing += started.elapsed();
+                    }
+                }
+                Err(error) => tracing::debug!(%error, "drawing a tile"),
+            }
+        }
+    }
+
     fn account(&mut self, tiles: &VecModel<Tile>) {
         let seconds = self.since.elapsed().as_secs_f64();
         let frames =

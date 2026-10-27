@@ -503,21 +503,43 @@ from; the git pins move to releases as they land.
 
 42. `testbox: pre-encoded media for the crowd`. `cargo testbox media` encodes the patterns with
     `mic-media`'s VP9 encoder and caches them in `target/testbox-media/`; `mic-crowd` publishes
-    them; `up --crowd n`.
+    them; `up --crowd n`. *Done,* without the cache: each crowd participant encodes two seconds
+    of its pattern once at start (`mic_core::video::Recorded`), a second or so for a crowd of 34,
+    and sends it in a loop. The crowd is a pod of its own (`up --crowd n`, 34 by default), and
+    the box has six windows, `alice` to `frank`.
 43. `mic-core: selective subscriptions`. Subscribe only to visible tiles; the active speaker's
-    priority goes up (§1.6, §5.8). **`room`**: 6 windowed clients plus the crowd.
+    priority goes up (§1.6, §5.8). **`room`**: 6 windowed clients plus the crowd. *Done:* the
+    window shows at most nine tiles, the active speaker and those who spoke last first, and a
+    "+N"; it watches those cameras only (`Command::Watch`). A speaker is found from the voices
+    a client decodes (`mic_core::speaker`); their camera goes to priority 60.
 44. `mic-core, mic-slint: chat, reactions and raise hand` on JSON tracks, encrypted like every
-    other. **`room`**: each shows on every other client.
+    other. **`room`**: each shows on every other client. *Done:* a chat panel (Ctrl+Alt+C), six
+    reactions shown a moment on the sender's tile, a raised hand (Ctrl+Alt+H) in the signed
+    profile. The client image gained Noto Color Emoji, which the reactions are drawn in.
 45. `mic-media, mic-slint: screenshare`. Capture in `mic-media`, the picker in the frontend, VP9 in
-    screen-content mode, and a synthetic screen source in the box. **`screenshare`**.
-46. `testbox: netem`, in a `NET_ADMIN` sidecar **⚠ unverified**. **`network`**: loss and delay
+    screen-content mode, and a synthetic screen source in the box. **`screenshare`**. *Done:* a
+    `screen` track of the participant's own broadcast rather than a broadcast of its own (one
+    catalog and one set of checkpoints; a track without pictures costs nothing), its sharing a
+    flag in the signed profile. 1280×720 at 5 fps, letterboxed, through moq-video's capture
+    (X11 here); the picker lists displays and windows; the stage shows a screen beside the
+    tiles. In the box, carol shares her real Xvnc display.
+46. `testbox: netem`, in a `NET_ADMIN` sidecar. **`network`**: loss and delay
     keep audio intelligible (tone still dominant), and video recovers at the next keyframe.
+    *Done:* a `shaper` sidecar in every client pod; netem's module loads on the host when first
+    asked for, from a rootless pod's own namespace. Under 10 % loss the tone stays over a hundred
+    times louder than any other frequency, but clicks take 30-50 % of the power: a jitter buffer
+    with loss concealment is a follow-up (docs/observations.md).
 47. `mic-core: the WebSocket fallback and its opt-out` (D9), if the pinned `moq-relay` serves
-    WebSocket and `moq-tokio` can turn its fallback off **⚠ unverified**. **`network`**: with
-    UDP blocked, clients fall back; with the opt-out, they report it.
+    WebSocket and `moq-tokio` can turn its fallback off. **`network`**: with
+    UDP blocked, clients fall back; with the opt-out, they report it. *Done:* the box's relay
+    serves the fallback over TLS on TCP 4443 (its plain HTTP moved to 4080); `Config::websocket`,
+    `--no-websocket` and `MIC_NO_WEBSOCKET` are the opt-out, and a join that fails without the
+    fallback says it's off.
 48. **`room-40`**: 40 participants, mostly the crowd. Records CPU, GPU, memory and the relay's
     egress per minute against the budget in §5.8 and this host's baseline. It runs alone, and not
-    in every round.
+    in every round. *Done:* `cargo testbox run room-40`; alice at about 60 % of a core, the
+    relay at 29 Mbit/s (docs/observations.md). Over the WebSocket fallback only about ten others
+    fit, an upstream limit to report.
 
 ### M9: Recording
 
@@ -571,9 +593,9 @@ Each is checked by the commit named, which settles it in its body and in the des
 | libvpx builds and links on the Windows and macOS CI runners | 32 | A vendored static build through the binding's build script |
 | lavapipe renders offscreen in GitHub's Linux runners | 34 | `mic-render`'s pixel tests run in the box only |
 | `moq-vaapi` can take a VP9 decoder | 37 | VP9 decodes in software everywhere; the box's GPU is used for rendering |
-| A `NET_ADMIN` sidecar can shape traffic for one pod in rootless Podman | 46 | Shaping on the relay's side, per client address |
-| The pinned `moq-relay` serves WebSocket, and `moq-tokio`'s fallback can be turned off | 47 | The fallback waits for upstream; D9's opt-out is reported as missing |
-| 40 participants in one `mic-crowd` process stay within the §5.8 budget | 48 | The crowd is split over several pods |
+| A `NET_ADMIN` sidecar can shape traffic for one pod in rootless Podman (*holds*, commit 46) | 46 | Shaping on the relay's side, per client address |
+| The pinned `moq-relay` serves WebSocket, and `moq-tokio`'s fallback can be turned off (*holds*, commit 47) | 47 | The fallback waits for upstream; D9's opt-out is reported as missing |
+| 40 participants in one `mic-crowd` process stay within the §5.8 budget (*holds*, commit 48) | 48 | The crowd is split over several pods |
 
 ## Open points for this plan
 

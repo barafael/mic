@@ -31,8 +31,9 @@ pub const NEWER: &str = "99.0.0";
 /// A directory per client for its harness's socket, which only that client mounts.
 pub const RUN: &str = "target/testbox-run";
 /// The clients `up` plays, each a pod of its own from testbox/pods/client.yaml: a window.
-/// alice and bob send tones and listen through analyzers; carol uses the box's PipeWire devices.
-pub const CLIENTS: [&str; 3] = ["alice", "bob", "carol"];
+/// alice and bob send tones and listen through analyzers; carol uses the box's PipeWire devices;
+/// dave, erin and frank send cameras and no voice, for rooms of six windows (M8).
+pub const CLIENTS: [&str; 6] = ["alice", "bob", "carol", "dave", "erin", "frank"];
 /// The tone a client sends for a voice, in Hz, if it sends one (crates/mic-harness,
 /// `synthetic`): apart from each other and from their harmonics, so an analyzer tells whose it
 /// hears. One that doesn't uses its PipeWire devices.
@@ -44,14 +45,27 @@ pub fn tone(client: &str) -> Option<u32> {
     }
 }
 
-/// The camera pattern a client sends, by id (mic-media's `PatternCamera`), if it sends one: the
-/// ones that send a tone do.
+/// The camera pattern a client sends, by id (mic-media's `PatternCamera`), if it sends one: all
+/// but carol do.
 pub fn camera(client: &str) -> Option<u8> {
     match client {
         "alice" => Some(1),
         "bob" => Some(2),
+        "dave" => Some(3),
+        "erin" => Some(4),
+        "frank" => Some(5),
         _ => None,
     }
+}
+
+/// The crowd's participant `index`'s name (from 1).
+pub fn crowd_name(index: u32) -> String {
+    format!("crowd-{index}")
+}
+
+/// The camera pattern the crowd's participant `index` sends: 10 and up, apart from the windows'.
+pub fn crowd_camera(index: u32) -> u8 {
+    u8::try_from(10 + index).unwrap_or(u8::MAX)
 }
 
 /// What a client pod's `@VOICE@` line says: its tone and camera, or that it uses the box's
@@ -62,12 +76,13 @@ fn voice(client: &str) -> String {
             format!("\"--tone\", \"{tone}\", \"--camera-pattern\", \"{camera}\",")
         }
         (Some(tone), None) => format!("\"--tone\", \"{tone}\","),
+        (None, Some(camera)) => format!("\"--camera-pattern\", \"{camera}\","),
         _ => "\"--decoders\", \"none\", # The box's PipeWire devices.".to_owned(),
     }
 }
 
 /// The pods with a display: the probe's, and each client's.
-pub const DISPLAYS: [&str; 4] = ["probe", "alice", "bob", "carol"];
+pub const DISPLAYS: [&str; 7] = ["probe", "alice", "bob", "carol", "dave", "erin", "frank"];
 
 /// A pod of the box, from `testbox/pods/<name>.yaml`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -82,6 +97,8 @@ pub enum Pod {
     Probe,
     /// A participant, by name.
     Client(&'static str),
+    /// The crowd's headless participants (`up --crowd n`).
+    Crowd,
     /// Builds what the box runs (`crate::builder`). Not part of the box: it fetches crates, so
     /// it's on podman's default network, and it outlives `down`.
     Builder,
@@ -93,6 +110,7 @@ impl Pod {
         [Pod::Relay, Pod::Tools, Pod::Site, Pod::Probe]
             .into_iter()
             .chain(CLIENTS.map(Pod::Client))
+            .chain([Pod::Crowd])
             .collect()
     }
 
@@ -103,6 +121,7 @@ impl Pod {
             Pod::Site => "site",
             Pod::Probe => "probe",
             Pod::Client(name) => name,
+            Pod::Crowd => "crowd",
             Pod::Builder => "builder",
         }
     }
@@ -118,7 +137,9 @@ impl Pod {
     /// The network it's played on.
     fn network(self) -> &'static str {
         match self {
-            Pod::Relay | Pod::Tools | Pod::Site | Pod::Probe | Pod::Client(_) => NETWORK,
+            Pod::Relay | Pod::Tools | Pod::Site | Pod::Probe | Pod::Client(_) | Pod::Crowd => {
+                NETWORK
+            }
             Pod::Builder => "podman",
         }
     }
@@ -194,10 +215,23 @@ impl TestBox {
         self.view_directories()?;
         self.run_directories()?;
         self.site()?;
-        for pod in Pod::all() {
+        for pod in self.pods() {
             self.play(pod)?;
         }
         crate::ready::all(self)
+    }
+
+    /// The pods this box plays: every one, but the crowd's when it has none.
+    pub fn pods(&self) -> Vec<Pod> {
+        Pod::all()
+            .into_iter()
+            .filter(|pod| *pod != Pod::Crowd || self.settings.crowd > 0)
+            .collect()
+    }
+
+    /// How many the crowd runs.
+    pub fn crowd(&self) -> u32 {
+        self.settings.crowd
     }
 
     /// The site as the box serves it (site/build.sh) into target/testbox-site, announcing
@@ -220,7 +254,7 @@ impl TestBox {
 
     /// Each client's directory for its harness's socket.
     fn run_directories(&self) -> Result<()> {
-        for client in CLIENTS {
+        for client in CLIENTS.into_iter().chain(["crowd"]) {
             self.private_directory(&self.repo.join(RUN), client)?;
         }
         Ok(())
@@ -254,6 +288,11 @@ impl TestBox {
     /// Where `client`'s harness serves on the host (mic's `--harness`, /run/mic/<client>).
     pub fn harness_socket(&self, client: &str) -> PathBuf {
         self.repo.join(RUN).join(client).join(client)
+    }
+
+    /// Where the crowd's participant `name` serves its harness on the host.
+    pub fn crowd_socket(&self, name: &str) -> PathBuf {
+        self.repo.join(RUN).join("crowd").join(name)
     }
 
     /// Plays `pod`, replacing what runs under its name.
@@ -383,7 +422,16 @@ impl TestBox {
         })?;
         Ok(gpu_lines(&rendered, self.settings.gpu)
             .replace("@NAME@", pod.name())
-            .replace("@VOICE@", &voice(pod.name())))
+            .replace("@VOICE@", &voice(pod.name()))
+            .replace("@CROWD@", &self.crowd_names()))
+    }
+
+    /// The crowd pod's `@CROWD@`: each participant's name and camera, as mic-crowd takes them.
+    fn crowd_names(&self) -> String {
+        (1..=self.settings.crowd)
+            .map(|index| format!("\"{}@{}\",", crowd_name(index), crowd_camera(index)))
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 
     /// Stops and removes the box's pods; `wipe` also removes the builder, and then every volume

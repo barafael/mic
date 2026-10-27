@@ -11,6 +11,7 @@
 
 mod devices;
 mod links;
+mod screens;
 mod videos;
 mod view;
 
@@ -35,7 +36,7 @@ mod ui {
     slint::include_modules!();
 }
 
-use ui::{AppWindow, Tile};
+use ui::{AppWindow, ChatLine, Tile};
 
 #[derive(Parser)]
 #[command(name = "mic", version, about)]
@@ -44,12 +45,16 @@ struct Cli {
     #[arg(long, env = "MIC_RELAY", required_unless_present = "register")]
     relay: Option<url::Url>,
     /// Makes this binary what opens `mic://` links, for this user (Linux), and exits. The
-    /// `--relay`, `--ca` and `--version-url` given with it are what a link starts mic with.
+    /// `--relay`, `--ca`, `--version-url` and `--no-websocket` given with it are what a link
+    /// starts mic with.
     #[arg(long)]
     register: bool,
     /// A CA's certificate (PEM) that the relay's is trusted by; the system's roots otherwise.
     #[arg(long, conflicts_with = "fingerprint")]
     ca: Option<PathBuf>,
+    /// QUIC only: no WebSocket over TCP raced against it, for a network that blocks UDP (D9).
+    #[arg(long, env = "MIC_NO_WEBSOCKET")]
+    no_websocket: bool,
     /// Where to read the latest version from (the site's `version.json`), at start. No check
     /// without one, until mic has a domain.
     #[arg(long, env = "MIC_VERSION_URL")]
@@ -66,9 +71,10 @@ struct Cli {
     #[cfg(all(unix, feature = "harness"))]
     #[arg(long)]
     tone: Option<f64>,
-    /// Sends a pattern naming this id for a camera (mic-media's `PatternCamera`), with `--tone`.
+    /// Sends a pattern naming this id for a camera (mic-media's `PatternCamera`), and plays the
+    /// others into an analyzer, as `--tone` does.
     #[cfg(all(unix, feature = "harness"))]
-    #[arg(long, requires = "tone")]
+    #[arg(long)]
     camera_pattern: Option<u8>,
     /// Claims to decode only these video codecs, comma-separated, or `none`: the box's way to
     /// see a codec go unsupported.
@@ -156,6 +162,9 @@ fn main() -> ExitCode {
         if let Some(url) = &cli.version_url {
             passed.extend(["--version-url".to_owned(), url.clone()]);
         }
+        if cli.no_websocket {
+            passed.push("--no-websocket".to_owned());
+        }
         return match links::register(&passed) {
             Ok(said) => {
                 println!("{said}");
@@ -185,6 +194,7 @@ fn run(cli: Cli) -> Result<(), String> {
     if let Some(fingerprint) = cli.fingerprint {
         config.trust = Trust::Fingerprints(vec![fingerprint]);
     }
+    config.websocket = !cli.no_websocket;
     #[cfg(all(unix, feature = "harness"))]
     if let Some(Decoders(decoders)) = cli.decoders {
         config.decoders = decoders;
@@ -193,14 +203,15 @@ fn run(cli: Cli) -> Result<(), String> {
     let keyring = Keyring::named(&cli.keyring).map_err(|error| error.to_string())?;
     let client = Client::new(config, &keyring, runtime.handle().clone())
         .map_err(|error| error.to_string())?;
-    // The system's microphone and speaker; with the harness and `--tone`, the box's synthetic
-    // ones instead.
+    // The system's microphone and speaker; with the harness and `--tone` or `--camera-pattern`,
+    // the box's synthetic ones instead.
     #[cfg(all(unix, feature = "harness"))]
-    let synthetic = cli
-        .tone
-        .map(|tone| mic_harness::synthetic::Synthetic::new(Some(tone), cli.camera_pattern))
+    let synthetic = (cli.tone.is_some() || cli.camera_pattern.is_some())
+        .then(|| mic_harness::synthetic::Synthetic::new(cli.tone, cli.camera_pattern))
         .transpose()
-        .map_err(|error| format!("the synthetic audio: {error}"))?;
+        .map_err(|error| format!("the synthetic media: {error}"))?;
+    // What a share captures: the picker's choice.
+    let screens = screens::Screens::default();
     #[cfg(all(unix, feature = "harness"))]
     let devices = synthetic.is_none().then(devices::Devices::new);
     #[cfg(not(all(unix, feature = "harness")))]
@@ -208,12 +219,12 @@ fn run(cli: Cli) -> Result<(), String> {
     #[cfg(all(unix, feature = "harness"))]
     let app = match (&synthetic, &devices) {
         (Some(synthetic), _) => App::with_media(client, synthetic.media()),
-        (None, Some(devices)) => App::with_media(client, devices.media()),
+        (None, Some(devices)) => App::with_media(client, devices.media(screens.source())),
         (None, None) => App::new(client),
     };
     #[cfg(not(all(unix, feature = "harness")))]
     let app = match &devices {
-        Some(devices) => App::with_media(client, devices.media()),
+        Some(devices) => App::with_media(client, devices.media(screens.source())),
         None => App::new(client),
     };
 
@@ -222,6 +233,15 @@ fn run(cli: Cli) -> Result<(), String> {
     window.set_version(env!("CARGO_PKG_VERSION").into());
     let tiles = Rc::new(VecModel::<Tile>::default());
     window.set_tiles(ModelRc::from(tiles.clone()));
+    let chat = Rc::new(VecModel::<ChatLine>::default());
+    window.set_chat(ModelRc::from(chat.clone()));
+    let shared = Rc::new(VecModel::<Tile>::default());
+    window.set_screens(ModelRc::from(shared.clone()));
+    window.set_reactions(ModelRc::new(VecModel::from(
+        mic_core::chat::Reaction::ALL
+            .map(|reaction| slint::SharedString::from(reaction.emoji()))
+            .to_vec(),
+    )));
 
     // What drawing the tiles costs, and the version's notice, for the harness.
     let cost = Arc::new(Mutex::new(videos::Cost::default()));
@@ -403,6 +423,92 @@ fn run(cli: Cli) -> Result<(), String> {
             });
         }
     });
+    // What's said, and the hand, go to the room as the buttons do.
+    let command = {
+        let app = app.clone();
+        let runtime = runtime.handle().clone();
+        move |command: Command| {
+            let Some(room) = app.current() else {
+                return;
+            };
+            runtime.spawn(async move {
+                if let Err(error) = room.command(command).await {
+                    tracing::warn!(%error, "a command from the window");
+                }
+            });
+        }
+    };
+    window.on_toggle_hand({
+        let command = command.clone();
+        let window = window.as_weak();
+        move || {
+            let raised = window.upgrade().is_some_and(|window| window.get_hand());
+            command(Command::SetHand { raised: !raised });
+        }
+    });
+    window.on_react({
+        let command = command.clone();
+        move |index| {
+            if let Some(reaction) = usize::try_from(index)
+                .ok()
+                .and_then(|index| mic_core::chat::Reaction::ALL.get(index))
+            {
+                command(Command::React {
+                    reaction: *reaction,
+                });
+            }
+        }
+    });
+    // Sharing: the picker asks what, the core shares it until asked to stop.
+    let offered = Rc::new(std::cell::RefCell::new(Vec::<screens::Choice>::new()));
+    window.on_toggle_share({
+        let command = command.clone();
+        let window = window.as_weak();
+        let offered = offered.clone();
+        move || {
+            let Some(window) = window.upgrade() else {
+                return;
+            };
+            if window.get_sharing() {
+                command(Command::ShareScreen { on: false });
+                return;
+            }
+            let choices = screens::Screens::choices();
+            if choices.is_empty() {
+                tracing::warn!("nothing to share: no display or window found");
+                return;
+            }
+            window.set_share_choices(ModelRc::new(VecModel::from(
+                choices
+                    .iter()
+                    .map(|choice| slint::SharedString::from(choice.label.as_str()))
+                    .collect::<Vec<_>>(),
+            )));
+            *offered.borrow_mut() = choices;
+        }
+    });
+    window.on_share({
+        let command = command.clone();
+        let window = window.as_weak();
+        let screens = screens.clone();
+        move |index| {
+            if let Some(window) = window.upgrade() {
+                window.set_share_choices(ModelRc::default());
+            }
+            let chosen = usize::try_from(index)
+                .ok()
+                .and_then(|index| offered.borrow().get(index).cloned());
+            if let Some(chosen) = chosen {
+                screens.choose(chosen.source);
+                command(Command::ShareScreen { on: true });
+            }
+        }
+    });
+    window.on_say(move |text| {
+        command(Command::Say {
+            text: text.to_string(),
+        });
+    });
     window.on_leave({
         let app = app.clone();
         let runtime = runtime.handle().clone();
@@ -419,6 +525,8 @@ fn run(cli: Cli) -> Result<(), String> {
     let _following = slint::spawn_local({
         let window = window.as_weak();
         let tiles = tiles.clone();
+        let chat = chat.clone();
+        let shared = shared.clone();
         async move {
             let mut last = None;
             let sweep = slint::Timer::default();
@@ -427,7 +535,12 @@ fn run(cli: Cli) -> Result<(), String> {
                 let Some(window) = window.upgrade() else {
                     return;
                 };
-                apply(&window, &tiles, &sweep, &view, &*tell.view, &mut last);
+                let models = Models {
+                    tiles: &tiles,
+                    chat: &chat,
+                    screens: &shared,
+                };
+                apply(&window, &models, &sweep, &view, &*tell.view, &mut last);
                 drop(window);
                 if viewed.changed().await.is_err() {
                     return;
@@ -512,9 +625,9 @@ fn run(cli: Cli) -> Result<(), String> {
     let looking = slint::Timer::default();
     {
         let mut videos = videos::Videos::new(gpu, frames, cost.clone());
-        let (app, tiles) = (app.clone(), tiles.clone());
+        let (app, tiles, shared) = (app.clone(), tiles.clone(), shared.clone());
         looking.start(slint::TimerMode::Repeated, videos::LOOK, move || {
-            videos.look(&app, &tiles);
+            videos.look(&app, &tiles, &shared);
         });
     }
 
@@ -617,9 +730,16 @@ fn join(
 const FADING: Duration = Duration::from_millis(240);
 
 /// Sets `view` on the window, unless it's what shows already, and tells `shown`.
+/// The window's models, which `apply` brings to each view.
+struct Models<'a> {
+    tiles: &'a Rc<VecModel<Tile>>,
+    chat: &'a VecModel<ChatLine>,
+    screens: &'a VecModel<Tile>,
+}
+
 fn apply(
     window: &AppWindow,
-    tiles: &Rc<VecModel<Tile>>,
+    models: &Models<'_>,
     sweep: &slint::Timer,
     view: &View,
     shown: &dyn Fn(&View),
@@ -636,6 +756,51 @@ fn apply(
     window.set_camera_off(view.camera_off);
     window.set_has_camera(view.camera);
     window.set_overflow(i32::try_from(view.overflow).unwrap_or(i32::MAX));
+    window.set_hand(view.hand);
+    window.set_sharing(view.sharing);
+    let Models {
+        tiles,
+        chat,
+        screens,
+    } = models;
+    if last
+        .as_ref()
+        .is_none_or(|last| last.screens != view.screens)
+    {
+        // A screen still shared keeps its last picture.
+        let rows: Vec<Tile> = view
+            .screens
+            .iter()
+            .map(|screen| {
+                let kept = screens.iter().find(|old| old.key == screen.key.as_str());
+                Tile {
+                    key: screen.key.as_str().into(),
+                    name: screen.name.as_str().into(),
+                    initials: view::initials(&screen.name).into(),
+                    video: kept
+                        .as_ref()
+                        .map(|old| old.video.clone())
+                        .unwrap_or_default(),
+                    has_video: kept.as_ref().is_some_and(|old| old.has_video),
+                    screen: true,
+                    ..Tile::default()
+                }
+            })
+            .collect();
+        screens.set_vec(rows);
+    }
+    if last.as_ref().is_none_or(|last| last.chat != view.chat) {
+        chat.set_vec(
+            view.chat
+                .iter()
+                .map(|line| ChatLine {
+                    name: line.name.as_str().into(),
+                    text: line.text.as_str().into(),
+                    me: line.me,
+                })
+                .collect::<Vec<_>>(),
+        );
+    }
     let rows: Vec<Tile> = view
         .tiles
         .iter()
@@ -656,6 +821,16 @@ fn apply(
                 initials: view::initials(&tile.name).into(),
                 tint: slint::Color::from_rgb_u8(red, green, blue),
                 speaking: tile.speaking,
+                hand: tile.hand,
+                reaction: tile
+                    .reaction
+                    .map(|(reaction, _)| reaction.emoji())
+                    .unwrap_or_default()
+                    .into(),
+                // 0 is none: the room's count starts at 0.
+                reaction_seq: tile
+                    .reaction
+                    .map_or(0, |(_, seq)| i32::try_from(seq + 1).unwrap_or(i32::MAX)),
                 ..Tile::default()
             }
         })
@@ -741,11 +916,25 @@ async fn follow(app: App, views: watch::Sender<View>) {
         let invite = room.invite().to_mic_url();
         let mut state = room.state();
         let mut over = false;
+        // Whose tiles show, and so whose cameras are watched (§5.8).
+        let mut shown = view::Shown::default();
+        let mut watched: Option<Vec<mic_core::ParticipantKey>> = None;
         loop {
             let current = state.borrow_and_update().clone();
+            let others = shown.choose(&current);
+            if watched.as_ref() != Some(&others) {
+                watched = Some(others.clone());
+                // In order, as the tiles change: awaited, not spawned.
+                let watch = Command::Watch {
+                    participants: Some(others.clone()),
+                };
+                if let Err(error) = room.command(watch).await {
+                    tracing::debug!(%error, "watching the tiles shown");
+                }
+            }
             views.send_replace(View {
                 camera: room.preview().is_some(),
-                ..view::view(Some((&current, invite.clone())))
+                ..view::view_of(&current, invite.clone(), &others)
             });
             tokio::select! {
                 changed = rooms.changed() => {
@@ -821,13 +1010,7 @@ mod harness {
             .unwrap_or_default();
         let ui = Arc::new(Mutex::new(Ui {
             screen: "join".to_owned(),
-            tiles: Vec::new(),
-            muted: Vec::new(),
-            cant_decode: Vec::new(),
-            render: None,
-            video: Vec::new(),
-            notice: None,
-            asking: None,
+            ..Ui::default()
         }));
         let source = ui.clone();
         let harness = Harness::new(
@@ -870,25 +1053,42 @@ mod harness {
         let view = Box::new(move |view: &View| {
             let mut ui = ui.lock().unwrap_or_else(PoisonError::into_inner);
             let asking = ui.asking.take();
+            let keys = |shows: fn(&crate::view::Tile) -> bool| {
+                view.tiles
+                    .iter()
+                    .filter(|tile| shows(tile))
+                    .map(|tile| tile.key.clone())
+                    .collect()
+            };
             *ui = Ui {
                 screen: view.screen.name().to_owned(),
-                tiles: view.tiles.iter().map(|tile| tile.key.clone()).collect(),
-                muted: view
-                    .tiles
-                    .iter()
-                    .filter(|tile| tile.muted)
-                    .map(|tile| tile.key.clone())
-                    .collect(),
-                cant_decode: view
-                    .tiles
-                    .iter()
-                    .filter(|tile| tile.cant_decode.is_some())
-                    .map(|tile| tile.key.clone())
-                    .collect(),
-                render: None,
-                video: Vec::new(),
-                notice: None,
+                tiles: keys(|_| true),
+                muted: keys(|tile| tile.muted),
+                cant_decode: keys(|tile| tile.cant_decode.is_some()),
                 asking,
+                overflow: view.overflow,
+                speaking: keys(|tile| tile.speaking),
+                hands: keys(|tile| tile.hand),
+                reactions: view
+                    .tiles
+                    .iter()
+                    .filter_map(|tile| {
+                        let (reaction, _) = tile.reaction?;
+                        Some(format!("{} {}", tile.key, reaction.name()))
+                    })
+                    .collect(),
+                chat: view
+                    .chat
+                    .iter()
+                    .map(|line| format!("{}: {}", line.name, line.text))
+                    .collect(),
+                screens: view
+                    .screens
+                    .iter()
+                    .map(|screen| screen.key.clone())
+                    .collect(),
+                sharing: view.sharing,
+                ..Ui::default()
             };
             drop(ui);
             harness.ui_changed();

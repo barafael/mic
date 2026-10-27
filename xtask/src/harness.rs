@@ -21,20 +21,29 @@ pub const SILENT: f64 = 0.02;
 const POLL: Duration = Duration::from_millis(100);
 
 pub struct Participant {
-    pub name: &'static str,
+    pub name: String,
     client: Client,
 }
 
 impl Participant {
     /// `client`'s harness, connected.
     pub fn connect(the_box: &TestBox, client: &'static str) -> Result<Self> {
-        let socket = the_box.harness_socket(client);
-        let connected = Client::connect(&socket, REPLY).map_err(|source| Error::Io {
+        Self::at(&the_box.harness_socket(client), client)
+    }
+
+    /// The crowd's participant `index` (from 1), connected (`Pod::Crowd`).
+    pub fn crowd(the_box: &TestBox, index: u32) -> Result<Self> {
+        let name = crate::podman::crowd_name(index);
+        Self::at(&the_box.crowd_socket(&name), &name)
+    }
+
+    fn at(socket: &std::path::Path, name: &str) -> Result<Self> {
+        let connected = Client::connect(socket, REPLY).map_err(|source| Error::Io {
             what: socket.display().to_string(),
             source,
         })?;
         Ok(Self {
-            name: client,
+            name: name.to_owned(),
             client: connected,
         })
     }

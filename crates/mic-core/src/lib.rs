@@ -8,6 +8,7 @@
 pub mod app;
 pub mod audio;
 pub mod catalog;
+pub mod chat;
 pub mod invite;
 pub mod keys;
 pub mod local;
@@ -16,6 +17,7 @@ pub mod roster;
 pub mod secrets;
 pub mod session;
 pub mod sig;
+pub mod speaker;
 pub mod tracks;
 pub mod version;
 pub mod video;

@@ -9,7 +9,7 @@ ARG ARCH_SNAPSHOT
 # userspace drivers, close to the host's kernel driver: radeonsi for VA-API and GL, RADV for
 # Vulkan, and llvmpipe and lavapipe for a box without the GPU (`up --no-gpu`); vainfo. The X
 # libraries winit loads at run time. A font, without which Slint doesn't start (the spike,
-# spikes/video-tiles). D-Bus and GNOME Keyring, for the device secret, and PipeWire with the
+# spikes/video-tiles), and one with emoji, which reactions show as. D-Bus and GNOME Keyring, for the device secret, and PipeWire with the
 # box's speaker and microphone, which ALSA reaches (client-session, box-devices.conf).
 # libvpx, which mic links for VP9. xdg-utils, whose xdg-open opens a mic:// link as a desktop
 # would. xdotool, which types and clicks into a window as a person would, for checks of its screens.
@@ -17,7 +17,8 @@ RUN --mount=type=cache,target=/var/cache/pacman/pkg \
     echo "Server = https://archive.archlinux.org/repos/${ARCH_SNAPSHOT}/\$repo/os/\$arch" \
         > /etc/pacman.d/mirrorlist \
     && pacman -Syu --noconfirm --needed tigervnc mesa vulkan-radeon vulkan-swrast libva-utils \
-        libxkbcommon-x11 libxcursor libxi libxrandr ttf-dejavu dbus gnome-keyring \
+        libxkbcommon-x11 libxcursor libxi libxrandr ttf-dejavu noto-fonts-emoji dbus \
+        gnome-keyring \
         xdotool alsa-lib pipewire pipewire-alsa wireplumber libvpx \
         xdg-utils
 COPY client-session /usr/local/bin/client-session

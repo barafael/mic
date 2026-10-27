@@ -17,6 +17,10 @@ use crate::tracks::{Peers, Publication, RoomCrypto};
 
 /// How many events a slow reader may fall behind by before it misses some.
 const EVENTS: usize = 256;
+/// How many messages the state keeps, the newest.
+pub const CHAT_KEPT: usize = 500;
+/// How many reactions the state keeps, the newest.
+pub const REACTIONS_KEPT: usize = 32;
 
 /// What a frontend shows of a room: plain data, no toolkit types.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -31,6 +35,39 @@ pub struct RoomState {
     /// can't sign, as when they pose as someone else. A frontend warns of them.
     pub rejected: Vec<Rejected>,
     pub connection: Connection,
+    /// The active speaker among the others (`crate::speaker`), once someone has spoken: kept
+    /// after they stop, until someone else speaks.
+    #[serde(default)]
+    pub speaker: Option<ParticipantKey>,
+    /// The others speaking now.
+    #[serde(default)]
+    pub speaking: Vec<ParticipantKey>,
+    /// The chat since this participant joined, oldest first, its own messages among them: the
+    /// newest [`CHAT_KEPT`].
+    #[serde(default)]
+    pub chat: Vec<Message>,
+    /// The newest reactions, this participant's among them: the newest [`REACTIONS_KEPT`].
+    #[serde(default)]
+    pub reactions: Vec<Reacted>,
+}
+
+/// A chat message.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Message {
+    pub from: ParticipantKey,
+    /// Its sender's name when it came.
+    pub name: String,
+    pub text: String,
+}
+
+/// A reaction, as it came.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Reacted {
+    /// Counts the reactions this participant saw in the room, from 0: what tells two of the same
+    /// apart.
+    pub seq: u64,
+    pub from: ParticipantKey,
+    pub reaction: crate::chat::Reaction,
 }
 
 /// The room's session with the relay.
@@ -62,6 +99,20 @@ pub enum Command {
     SetNoiseSuppression {
         mode: mic_media::audio::noise::NoiseSuppression,
     },
+    /// Say `text` in the chat: trimmed, and cut to `chat::TEXT_LIMIT` characters; nothing is
+    /// said if nothing's left.
+    Say { text: String },
+    /// React, for everyone in the room.
+    React { reaction: crate::chat::Reaction },
+    /// Raise a hand, or lower it; everyone's tile of this participant says which.
+    SetHand { raised: bool },
+    /// Share the screen the screen source captures, or stop.
+    ShareScreen { on: bool },
+    /// Show the cameras of these participants only, as a frontend's visible tiles do; every
+    /// camera with none (as at the start). Only those are subscribed to and decoded (§5.8).
+    Watch {
+        participants: Option<Vec<ParticipantKey>>,
+    },
 }
 
 /// One-off things that happen in a room, beside its state.
@@ -74,6 +125,10 @@ pub enum Event {
     Departed { participant: Participant },
     /// A broadcast in the room didn't stand, and nothing of it is shown.
     Rejected { rejected: Rejected },
+    /// A message in the chat, this participant's own among them.
+    Said { message: Message },
+    /// A reaction, this participant's own among them.
+    Reacted { reacted: Reacted },
 }
 
 /// A room joined. Cheap to clone; every clone is the same room.
@@ -97,6 +152,8 @@ struct Shared {
     runtime: tokio::runtime::Handle,
     /// What the others' cameras show.
     board: crate::video::Board,
+    /// What the others' screens show.
+    screens: crate::video::Board,
     /// What this participant's camera sends, if it sends one.
     preview: Option<crate::video::Pictures>,
 }
@@ -119,6 +176,7 @@ pub(crate) struct Joined {
     pub publication: Publication,
     pub profile: Profile,
     pub profile_track: crate::sig::SignedTrack,
+    pub saying: crate::chat::Saying,
     pub connection: moq_tokio::Connection,
     /// What the room dials again with, once a connection gives up.
     pub moq: moq_tokio::Client,
@@ -135,6 +193,8 @@ pub(crate) struct Joined {
     pub muted: watch::Sender<bool>,
     /// Whether the camera is on, which it follows.
     pub camera_on: watch::Sender<bool>,
+    /// What a screenshare captures, if this participant can share one.
+    pub screen: Option<crate::video::ScreenSource>,
     /// What suppresses the voice's noise, which it follows.
     pub noise: watch::Sender<mic_media::audio::noise::NoiseSuppression>,
     /// Where the others' voices play, if anywhere.
@@ -158,6 +218,10 @@ impl Room {
             participants: Vec::new(),
             rejected: Vec::new(),
             connection: Connection::Connected,
+            speaker: None,
+            speaking: Vec::new(),
+            chat: Vec::new(),
+            reactions: Vec::new(),
         });
         let (events, _) = broadcast::channel(EVENTS);
         let weak_events = events.downgrade();
@@ -170,11 +234,16 @@ impl Room {
             origin: joined.origin.consume(),
             runtime: joined.runtime.clone(),
             board: crate::video::Board::default(),
+            screens: crate::video::Board::default(),
             preview: joined.preview,
         });
         let (roster, followed) = watch::channel(Roster::default());
         let peers = Peers::new(joined.crypto.clone(), joined.path, joined.origin.consume());
         let board = shared.board.clone();
+        let voices = crate::speaker::Voices::default();
+        let (watching, watched_cameras) = watch::channel(None);
+        let (speaker, followed_speaker) = watch::channel(None);
+        let (heard, hearing) = mpsc::unbounded_channel();
         let following = joined.runtime.spawn(roster::follow(
             peers,
             joined.crypto,
@@ -183,13 +252,22 @@ impl Room {
             roster::Playing {
                 mixer: joined.mixer,
                 board: board.clone(),
+                screens: shared.screens.clone(),
                 decoders: joined.decoders.clone(),
+                voices: voices.clone(),
+                watching: watched_cameras,
+                speaker: followed_speaker,
+                heard,
             },
         ));
         let task = Task {
             publication: joined.publication,
             profile: joined.profile,
             profile_track: Some(joined.profile_track),
+            saying: Some(joined.saying),
+            hearing,
+            heard_last: std::collections::HashMap::new(),
+            reactions_seen: 0,
             connection: Some(joined.connection),
             moq: joined.moq,
             url: joined.url,
@@ -199,10 +277,14 @@ impl Room {
             camera: joined.camera,
             muted: joined.muted,
             camera_on: joined.camera_on,
+            screen: joined.screen.map(Screen::new),
             noise: joined.noise,
             roster: followed,
             state,
             events,
+            voices,
+            watching,
+            speaker,
         };
         joined.runtime.spawn(task.run(received));
         Self {
@@ -282,6 +364,16 @@ impl Room {
         self.shared.board.count(whose)
     }
 
+    /// `whose` screen's pictures, as they're decoded: none until they share one.
+    pub fn screen(&self, whose: ParticipantKey) -> crate::video::Pictures {
+        self.shared.screens.pictures(whose)
+    }
+
+    /// How many of `whose` screen's pictures were decoded.
+    pub fn screen_count(&self, whose: ParticipantKey) -> u64 {
+        self.shared.screens.count(whose)
+    }
+
     /// The other participants' broadcasts as they arrive and go, those there already first.
     pub fn peers(&self) -> Peers {
         let _entered = self.shared.runtime.enter();
@@ -318,6 +410,15 @@ struct Task {
     profile: Profile,
     /// Until the room is left.
     profile_track: Option<crate::sig::SignedTrack>,
+    /// The chat and reactions tracks, until the room is left.
+    saying: Option<crate::chat::Saying>,
+    /// What the others say.
+    hearing: mpsc::UnboundedReceiver<crate::chat::Heard>,
+    /// By broadcast and track, the count of the last thing heard on it: what's heard again is
+    /// shown once.
+    heard_last: std::collections::HashMap<(String, bool), u64>,
+    /// How many reactions were seen.
+    reactions_seen: u64,
     /// Until the room is left.
     connection: Option<moq_tokio::Connection>,
     moq: moq_tokio::Client,
@@ -331,15 +432,25 @@ struct Task {
     camera: Option<tokio::task::JoinHandle<()>>,
     muted: watch::Sender<bool>,
     camera_on: watch::Sender<bool>,
+    /// The screenshare, if it can share one.
+    screen: Option<Screen>,
     noise: watch::Sender<mic_media::audio::noise::NoiseSuppression>,
     roster: watch::Receiver<Roster>,
     state: watch::Sender<RoomState>,
     events: broadcast::Sender<Event>,
+    /// When each voice was last loud.
+    voices: crate::speaker::Voices,
+    /// Whose cameras are shown: all, if none are named.
+    watching: watch::Sender<Option<Vec<ParticipantKey>>>,
+    /// The active speaker, whose camera's priority is raised.
+    speaker: watch::Sender<Option<ParticipantKey>>,
 }
 
 impl Task {
     async fn run(mut self, mut requests: mpsc::UnboundedReceiver<Request>) {
         let mut roster_open = true;
+        let mut looking = tokio::time::interval(crate::speaker::LOOK);
+        looking.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             tokio::select! {
                 request = requests.recv() => match request {
@@ -372,8 +483,88 @@ impl Task {
                     self.roster_changed(roster);
                 }
                 status = status(&mut self.connection) => self.status(status),
+                _ = looking.tick() => self.look_at_speakers(),
+                Some(heard) = self.hearing.recv() => self.heard(heard),
             }
         }
+    }
+
+    /// What someone said into the state and the events, unless it was heard before.
+    fn heard(&mut self, heard: crate::chat::Heard) {
+        use crate::chat::Said;
+        let key = (heard.path, matches!(heard.said, Said::Message { .. }));
+        if self
+            .heard_last
+            .get(&key)
+            .is_some_and(|last| heard.n <= *last)
+        {
+            return;
+        }
+        self.heard_last.insert(key, heard.n);
+        self.said(heard.from, heard.said);
+    }
+
+    /// `said` by `from`, into the state and the events.
+    fn said(&mut self, from: ParticipantKey, said: crate::chat::Said) {
+        use crate::chat::Said;
+        let event = match said {
+            Said::Message { text } => {
+                let name = {
+                    let state = self.state.borrow();
+                    std::iter::once(&state.me)
+                        .chain(&state.participants)
+                        .find(|participant| participant.key == from)
+                        .map(|participant| participant.profile.name.clone())
+                        .unwrap_or_default()
+                };
+                let message = Message { from, name, text };
+                self.state.send_modify(|state| {
+                    state.chat.push(message.clone());
+                    let over = state.chat.len().saturating_sub(CHAT_KEPT);
+                    state.chat.drain(..over);
+                });
+                Event::Said { message }
+            }
+            Said::Reaction { reaction } => {
+                let reacted = Reacted {
+                    seq: self.reactions_seen,
+                    from,
+                    reaction,
+                };
+                self.reactions_seen += 1;
+                self.state.send_modify(|state| {
+                    state.reactions.push(reacted.clone());
+                    let over = state.reactions.len().saturating_sub(REACTIONS_KEPT);
+                    state.reactions.drain(..over);
+                });
+                Event::Reacted { reacted }
+            }
+        };
+        let _unheard: Result<usize, _> = self.events.send(event);
+    }
+
+    /// Who speaks now, and who the active speaker is, into the state.
+    fn look_at_speakers(&self) {
+        let now = std::time::Instant::now();
+        let (present, last) = {
+            let state = self.state.borrow();
+            let present: Vec<ParticipantKey> =
+                state.participants.iter().map(|other| other.key).collect();
+            (present, state.speaker)
+        };
+        let speaking = self.voices.speaking(&present, now);
+        let speaker = self.voices.active(last, &present, now);
+        self.speaker.send_if_modified(|shown| {
+            let changed = *shown != speaker;
+            *shown = speaker;
+            changed
+        });
+        self.state.send_if_modified(|state| {
+            let changed = state.speaker != speaker || state.speaking != speaking;
+            state.speaker = speaker;
+            state.speaking = speaking;
+            changed
+        });
     }
 
     async fn command(&mut self, command: Command) -> Result<(), Error> {
@@ -383,9 +574,33 @@ impl Task {
                 Ok(())
             }
             Command::SetName { name } => self.set_profile(Profile {
-                muted: self.profile.muted,
-                ..Profile::new(&name)
+                name: Profile::new(&name).name,
+                ..self.profile.clone()
             }),
+            Command::Say { text } => {
+                let text = crate::chat::trimmed(&text);
+                if text.is_empty() {
+                    return Ok(());
+                }
+                self.say(crate::chat::Said::Message { text })
+            }
+            Command::React { reaction } => self.say(crate::chat::Said::Reaction { reaction }),
+            Command::SetHand { raised } => self.set_profile(Profile {
+                hand: raised,
+                ..self.profile.clone()
+            }),
+            Command::ShareScreen { on } => {
+                let screen = self.screen.as_mut().ok_or(Error::NoScreen)?;
+                if on {
+                    screen.start(&mut self.publication)?;
+                } else {
+                    screen.stop();
+                }
+                self.set_profile(Profile {
+                    sharing: on,
+                    ..self.profile.clone()
+                })
+            }
             Command::SetMuted { muted } => {
                 self.set_profile(Profile {
                     muted,
@@ -406,7 +621,23 @@ impl Task {
                 self.noise.send_replace(mode);
                 Ok(())
             }
+            Command::Watch { participants } => {
+                self.watching.send_if_modified(|watching| {
+                    let changed = *watching != participants;
+                    *watching = participants;
+                    changed
+                });
+                Ok(())
+            }
         }
+    }
+
+    /// `said`, for everyone in the room, and in the state as anyone's is.
+    fn say(&mut self, said: crate::chat::Said) -> Result<(), Error> {
+        self.saying.as_mut().ok_or(Error::Left)?.say(said.clone())?;
+        let me = self.state.borrow().me.key;
+        self.said(me, said);
+        Ok(())
     }
 
     /// `profile`, for everyone in the room, and in the state.
@@ -489,6 +720,7 @@ impl Task {
         {
             sending.abort();
         }
+        self.screen = None;
         let Some(connection) = self.connection.take() else {
             return;
         };
@@ -496,6 +728,9 @@ impl Task {
             && let Err(error) = track.finish()
         {
             tracing::debug!(%error, "finishing the profile track");
+        }
+        if let Some(saying) = self.saying.take() {
+            saying.finish();
         }
         self.publication.close();
         if let Err(error) = connection.close().await {
@@ -512,6 +747,64 @@ impl Drop for Task {
     fn drop(&mut self) {
         self.following.abort();
         for sending in [&self.voice, &self.camera].into_iter().flatten() {
+            sending.abort();
+        }
+    }
+}
+
+/// A participant's screenshare: its track, made at the first share and kept, and what captures
+/// it while it's shared.
+struct Screen {
+    source: crate::video::ScreenSource,
+    /// What the capture sends into, and the track's sender reads.
+    pictures: watch::Sender<Option<Arc<mic_media::video::Picture>>>,
+    on: watch::Sender<bool>,
+    /// Sends the track, from the first share until the room is left.
+    sending: Option<tokio::task::JoinHandle<()>>,
+    /// The capture, while it's shared.
+    capturing: Option<mic_media::audio::Running>,
+}
+
+impl Screen {
+    fn new(source: crate::video::ScreenSource) -> Self {
+        Self {
+            source,
+            pictures: watch::channel(None).0,
+            on: watch::channel(false).0,
+            sending: None,
+            capturing: None,
+        }
+    }
+
+    /// Starts capturing and sending, the track made and named in the catalog the first time.
+    fn start(&mut self, publication: &mut Publication) -> Result<(), Error> {
+        if self.capturing.is_some() {
+            return Ok(());
+        }
+        self.capturing = Some((self.source)(self.pictures.clone()).map_err(Error::Screen)?);
+        if self.sending.is_none() {
+            let codec = mic_media::video::Codec::Vp9;
+            let track = publication.video_track(crate::video::SCREEN, codec)?;
+            self.sending = Some(tokio::spawn(crate::video::publish_screen(
+                self.pictures.subscribe(),
+                track,
+                self.on.subscribe(),
+            )));
+        }
+        self.on.send_replace(true);
+        Ok(())
+    }
+
+    /// Stops capturing; the next share starts with a keyframe.
+    fn stop(&mut self) {
+        self.on.send_replace(false);
+        self.capturing = None;
+    }
+}
+
+impl Drop for Screen {
+    fn drop(&mut self) {
+        if let Some(sending) = &self.sending {
             sending.abort();
         }
     }

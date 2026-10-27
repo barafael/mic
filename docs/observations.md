@@ -4,6 +4,84 @@ What turned up while building `mic` that the plan didn't expect: surprises, upst
 measurements, and things to revisit. Newest first within each milestone. Each says whether it's
 **open**, **settled** (and where), or **upstream** (to report or follow).
 
+## M8: Rooms
+
+- **Forty in a room fit the budget** (settled, commit 48). Over three minutes with the six
+  windows and 34 of the crowd: alice's mic at 58-65 % of a core and 285 MiB (one alone, 33 %
+  and 137 MiB), the six windows 3-3.4 cores together, the crowd of 34 about a core in one
+  process, the GPU 18-20 % busy (the host's, its desktop included), and the relay sending 29
+  Mbit/s, against §5.8's 130 for 40: each window watches eight cameras at 500 kbit/s and one
+  voice. (`target/testbox-record/room-40/room-40.txt`) It measures the host as it is: with a
+  game running on the desktop, the same room took twice the CPU (alice 132 %, the baseline
+  66 %) and the GPU was 98 % busy, past the budget. Its baseline says when the host is loaded.
+- **Over the WebSocket fallback, a client sees about ten others** (upstream, commit 48). The
+  relay's WebSocket sessions take qmux's default of 100 bidirectional streams (raw TCP gets
+  1000), not the QUIC side's `--quic-max-streams`, and a moq-lite subscription is a stream: mic
+  subscribes to some seven tracks of each other participant (catalog, checkpoints, profile,
+  voice, chat, reactions, screen, and a camera if shown). In room-40, alice on the fallback saw
+  10 of 39 within a minute. To report: the relay's qmux limit, configurable as QUIC's is.
+  Fewer tracks a participant (chat and reactions on one, the screen only while shared) would
+  raise mic's ceiling, not remove it.
+- **A WebSocket win sticks for the process's life** (upstream, commit 48). moq-tokio remembers
+  each relay where the WebSocket won the race, in a process-wide set that never empties, and
+  gives QUIC no head start there again: TCP then tends to win every dial, though UDP works
+  again. The box restarts alice after the `network` phase. To report: forget the win when QUIC
+  later succeeds, or after a while.
+
+- **Under loss, a voice clicks** (open, commit 46). With 10 % of alice's packets lost and 80 ms
+  added, her tone at bob stays over a hundred times louder than any other frequency, but only
+  30-70 % of what he hears by power: the rest is clicks. A packet lost within a voice group
+  holds up the rest of the group until QUIC sends it again, some 200-260 ms here. bob's stream
+  sits near its 120 ms cap (90-110 ms queued in steady state, as nothing drains it), so it
+  runs dry, playing silence, then overflows with the burst, which is dropped. A larger cap
+  didn't help, nor did the camera off (it isn't congestion). The answer is a jitter buffer
+  that aims at a target, conceals what's late (Opus PLC) and catches up, rather than a cap;
+  smaller groups would cost checkpoint size (§5.7). Video loses nothing visible at 30 %:
+  QUIC's resends arrive within its 2 s.
+- **Blocking UDP blocks DNS** (settled, commit 47): the WebSocket fallback couldn't resolve the
+  relay either. The `network` phase blocks UDP but port 53.
+- **The box's relay never served the fallback** (settled, commit 47). TCP 4443 was plain HTTP,
+  so every connect raced a `wss://` dial that failed. The relay serves the fallback over TLS
+  there now, and plain HTTP on 4080.
+- **Rootless netem works** (settled, commit 46): a NET_ADMIN sidecar, over its pod's network
+  namespace alone, adds netem's qdisc, and the host loads `sch_netem` when first asked.
+
+- **A screen is a track, not a broadcast of its own** (settled, commit 45). §5.6 has a
+  `screen.hang` broadcast; a track of the participant's broadcast needs no second catalog,
+  epoch or checkpoint signer, and a subscriber is told it's shared by the signed profile. The
+  track is subscribed to from the first share on: without pictures it costs nothing. The
+  encoder runs whenever it's shared, watched or not: demand-gating it (§5.7) waits for the
+  encoder to ask the track whether it's used.
+- **HD pictures came out in BT.709 on the GPU and BT.601 on the CPU** (settled, commit 45).
+  moq-video's renderer guesses a matrix from a picture's height when nothing says, BT.709 above
+  576 lines, while mic-render's CPU path, and every picture mic makes, are BT.601. Cameras are
+  360 lines, so it only showed with screens: a screen's colours differed with and without a
+  GPU, and the box's colour check missed it. mic-render now tags every picture BT.601, and a
+  capture in BT.709 is converted.
+- **Edits during a box run break its build check** (settled, by practice). The builder compiles
+  from the working tree, so `box`'s "a second build is a no-op" fails on a half-edited tree.
+  Edit between runs, not during them.
+- **Emoji need a font** (settled, commit 44): the client image has Noto Color Emoji, which
+  Slint's renderers draw in colour. A desktop without one shows boxes for reactions.
+
+- **Dropping a camera mid-group rejected its sender** (settled, commit 43). A camera no longer
+  watched is unsubscribed wherever its group stands. The frames read of that group can't be
+  confirmed without the rest, which the checkpoints' chain needs (D18), so after the 2 s grace
+  the whole broadcast was rejected as a forgery. The subscriber now lets go of what it read
+  and didn't confirm when it drops the track on purpose (`Verification::abandon`). A track
+  that ends any other way still counts against its sender.
+- **Watch channels must be marked seen** (settled, commit 43). A `watch::Receiver` whose
+  `changed()` fires and is then only `borrow`ed stays changed, and a `select!` on it spins.
+  The roster's readers `mark_unchanged` after each change.
+- **moq-net reuses a lingering track on resubscribe** (upstream, noted). Re-subscribing within
+  moq-net's linger window gets the dropped subscription's producer back, its newest group again
+  from its start. mic reads it as a new group: the abandoned frames are forgotten.
+
+- **The crowd's media isn't cached on disk** (settled, commit 42). Encoding two seconds of a
+  pattern takes well under a second, so each crowd participant encodes its own at start and
+  loops it; `cargo testbox media` and `target/testbox-media/` would only add a step to keep fresh.
+  The loop repeats frame numbers every two seconds, which no check counts on.
+
 ## Window polish (between M7 and M8)
 
 - **Slint's software renderer ignores a negative `transform-scale-x`, and doesn't clip children

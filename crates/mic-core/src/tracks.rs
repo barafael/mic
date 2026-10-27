@@ -134,14 +134,52 @@ impl RoomCrypto {
 /// group may get before it's skipped, at the publisher and in each subscription alike. The voice
 /// comes before everything; the checkpoints next, since a frame waits on them to be confirmed;
 /// the camera after them.
-/// The rest take moq-net's defaults.
+/// The rest take moq-net's defaults. The active speaker's camera is raised above the others'
+/// ([`RAISED`]), still below the checkpoints.
 fn policy(semantic: &str) -> Option<(u8, std::time::Duration)> {
     use std::time::Duration;
     match semantic {
         crate::audio::AUDIO => Some((100, Duration::from_millis(500))),
         SIG => Some((90, Duration::from_secs(1))),
         crate::video::CAMERA => Some((50, Duration::from_secs(2))),
+        // Below the media; a message late is still worth having, a reaction isn't.
+        crate::chat::CHAT => Some((30, Duration::from_secs(30))),
+        crate::chat::REACTIONS => Some((30, Duration::from_secs(1))),
         _ => None,
+    }
+}
+
+/// The priority of the active speaker's camera, in each subscriber's subscription to it (§1.6).
+pub(crate) const RAISED: u8 = 60;
+
+/// How `semantic` is subscribed to: by its [`policy`], its priority `raised` to [`RAISED`] if
+/// asked.
+fn subscription(semantic: &str, raised: bool) -> Option<moq_net::track::Subscription> {
+    policy(semantic).map(|(priority, max_age)| {
+        moq_net::track::Subscription::default()
+            .with_priority(if raised {
+                RAISED.max(priority)
+            } else {
+                priority
+            })
+            .with_max_age(max_age)
+    })
+}
+
+/// A subscription's preferences, changed as it runs: a camera raised as its sender speaks.
+pub struct Preferences {
+    semantic: String,
+    control: moq_net::track::Control,
+}
+
+impl Preferences {
+    /// Raises the track to [`RAISED`], or back to its policy's priority.
+    pub fn raise(&self, raised: bool) {
+        if let Some(subscription) = subscription(&self.semantic, raised)
+            && let Err(error) = self.control.update(subscription)
+        {
+            tracing::debug!(%error, semantic = self.semantic, "a track's subscription ended");
+        }
     }
 }
 
@@ -397,20 +435,39 @@ impl Peer {
         ))
     }
 
+    /// As [`Self::verified_track`], with what changes its subscription as it runs.
+    pub async fn verified_track_with_preferences(
+        &self,
+        semantic: &str,
+        verification: &Verification,
+    ) -> Result<(VerifiedTrack, Preferences), TrackError> {
+        let (track, preferences) = self.subscribe(semantic).await?;
+        Ok((
+            VerifiedTrack::new(semantic, track, verification.clone()),
+            preferences,
+        ))
+    }
+
     /// Its track `semantic`, decrypted as it's read: a frame that doesn't open fails the track.
     pub async fn track(&self, semantic: &str) -> Result<moq_e2ee::track::Consumer, TrackError> {
+        Ok(self.subscribe(semantic).await?.0)
+    }
+
+    async fn subscribe(
+        &self,
+        semantic: &str,
+    ) -> Result<(moq_e2ee::track::Consumer, Preferences), TrackError> {
         let name = self.generation.name(semantic)?;
-        let subscription = policy(semantic).map(|(priority, max_age)| {
-            moq_net::track::Subscription::default()
-                .with_priority(priority)
-                .with_max_age(max_age)
-        });
         let track = self
             .broadcast
             .track(name.as_str())?
-            .subscribe(subscription)
+            .subscribe(subscription(semantic, false))
             .await?;
-        Ok(self.generation.consume(track)?)
+        let preferences = Preferences {
+            semantic: semantic.to_owned(),
+            control: track.control(),
+        };
+        Ok((self.generation.consume(track)?, preferences))
     }
 }
 
