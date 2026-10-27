@@ -34,7 +34,7 @@ mod ui {
 use ui::{AppWindow, Tile};
 
 #[derive(Parser)]
-#[command(version, about)]
+#[command(name = "mic", version, about)]
 struct Cli {
     /// The relay, `https://…`.
     #[arg(long, env = "MIC_RELAY")]

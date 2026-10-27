@@ -402,6 +402,8 @@ Each numbered item below is about one commit. Box phases are in **bold**.
     to see its key kept. The relay is `--relay` (or `MIC_RELAY`) until moq.pro's public prefix
     is settled (D8).
 24. `ci: a release build of mic on Linux, Windows and macOS`. The smoke job, `mic --version`.
+    *Written, not yet run:* there's no remote, so no CI run has happened; Slint's build on the
+    Windows and macOS runners is still **⚠ unverified**.
 
 ### M5: Audio
 

@@ -49,6 +49,29 @@ jobs:
           MIC_TEST_KEYRING: "1"
         run: cargo test --workspace --all-features --locked
 
+  # A release build of the `mic` binary on each platform, and that it runs (PLAN.md, commit 24):
+  # each native dependency is built on Windows and macOS when it arrives, not first at release.
+  release:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev libxkbcommon-dev
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - run: cargo build --release --locked -p mic-slint
+      # Git Bash on Windows finds mic.exe by this name too.
+      - shell: bash
+        run: ./target/release/mic --version
+
   # The box's display tooling, a workspace of its own: Linux only (Unix sockets, Landlock).
   testbox-view:
     runs-on: ubuntu-24.04
