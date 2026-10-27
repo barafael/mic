@@ -48,12 +48,15 @@ struct Cli {
     #[arg(long)]
     register: bool,
     /// A CA's certificate (PEM) that the relay's is trusted by; the system's roots otherwise.
-    #[arg(long)]
+    #[arg(long, conflicts_with = "fingerprint")]
     ca: Option<PathBuf>,
     /// Where to read the latest version from (the site's `version.json`), at start. No check
     /// without one, until mic has a domain.
     #[arg(long, env = "MIC_VERSION_URL")]
     version_url: Option<String>,
+    /// The relay's certificate's SHA-256 fingerprint, hex: a relay with a self-signed one.
+    #[arg(long)]
+    fingerprint: Option<String>,
     /// Serves the box's harness on a Unix socket here, known by the socket's file name.
     #[cfg(all(unix, feature = "harness"))]
     #[arg(long)]
@@ -72,6 +75,10 @@ struct Cli {
     #[cfg(all(unix, feature = "harness"))]
     #[arg(long, value_parser = parse_decoders)]
     decoders: Option<Decoders>,
+    /// The keyring service the device secret is kept under: another one is another identity, as
+    /// a second window on one machine needs.
+    #[arg(long, hide = true, default_value = "mic")]
+    keyring: String,
     /// An invite to fill in, `mic://join/…`, under the last name joined with; handed to a mic
     /// already running, which asks first if it's in a call.
     invite: Option<String>,
@@ -175,12 +182,15 @@ fn run(cli: Cli) -> Result<(), String> {
     if let Some(ca) = cli.ca {
         config.trust = Trust::Roots(vec![ca]);
     }
+    if let Some(fingerprint) = cli.fingerprint {
+        config.trust = Trust::Fingerprints(vec![fingerprint]);
+    }
     #[cfg(all(unix, feature = "harness"))]
     if let Some(Decoders(decoders)) = cli.decoders {
         config.decoders = decoders;
     }
     // Before the window: the keyring may ask to be unlocked.
-    let keyring = Keyring::system().map_err(|error| error.to_string())?;
+    let keyring = Keyring::named(&cli.keyring).map_err(|error| error.to_string())?;
     let client = Client::new(config, &keyring, runtime.handle().clone())
         .map_err(|error| error.to_string())?;
     // The system's microphone and speaker; with the harness and `--tone`, the box's synthetic
