@@ -103,6 +103,70 @@ measurements, and things to revisit. Newest first within each milestone. Each sa
   loops it; `cargo testbox media` and `target/testbox-media/` would only add a step to keep fresh.
   The loop repeats frame numbers every two seconds, which no check counts on.
 
+## Window polish after M8, on a real desktop
+
+Found by driving five windows on KDE Plasma 6 (Wayland, GPU renderer), after the headless review;
+three of the headless findings (square video corners, a lost first click, blank emoji) were the
+software renderer's or the virtual session's.
+
+- **Screenshare never worked on Wayland** (settled). moq-video captured through X11 only, and
+  XWayland's root can't be read (`GetImage` fails at once); the picker listed only XWayland's
+  windows. moq-video's `pipewire` feature takes the desktop's portal: on Wayland the window offers
+  one choice and the desktop's own dialog asks which screen. The box runs X11, so it never saw it.
+  The builder image needs `pipewire` for the bindings.
+- **A capture that ended was never told** (settled). mic-media's capture logged its end and
+  stopped; the share stayed on, the button lit, the others' stage frozen. The room now copies
+  each capture's pictures through a channel of its own and stops the share, for everyone, when it
+  ends (`a_share_whose_capture_ends_stops_for_everyone`); the window says so when it didn't ask.
+- **Starting a share waited on the desktop inside the room's task** (settled). The capture opens
+  only once the portal's dialog is answered, which can take as long as the user takes, and the
+  room's task waited: no roster, no commands, and leaving timed out. It opens on a blocking
+  thread now, the share is answered once it's open, and a stop meanwhile cancels it
+  (`a_share_waiting_on_the_desktop_leaves_the_room_free_and_can_be_stopped`). The window says to
+  choose in the desktop's dialog, with Cancel: KDE opens it behind mic's window when it likes,
+  as no parent window reaches the portal (moq-video passes none).
+- **Stop never stopped a Wayland share** (settled). The capture's loop saw a stop only while
+  waiting for a frame, and PipeWire's next frame was always ready while scaling a 4K one (debug
+  build) took longer than a frame: the room hung joining the capture. The stop is asked before
+  each frame now.
+- **The second share never reached the desktop** (settled). ashpd keeps one D-Bus connection for
+  the process, whose tasks run on the runtime that made it; each capture had a runtime of its
+  own, dropped when it stopped, so the next portal call went out on a dead connection. Every
+  capture runs on one runtime for the process.
+- **A share resumed the last screen without asking** (settled, on a fork). moq-video replays
+  the portal's restore token and asks the desktop to remember the choice, with no way to turn it
+  off in 0.1.16; mic's fork adds `Config::restore`. Every moq crate comes from that fork's one commit
+  (`[patch.crates-io]`; patching moq-video alone made two of moq-net), away from the plan's pinned
+  crates.io releases, as the user chose, until moq-dev/moq releases the fixes. moq-dev/moq's `main` keeps the token per
+  `portal::Selection`, so a new share asks there already: the fork's commit goes once mic takes
+  the next release.
+- **When the desktop stopped a share, the capture never ended, and a later stop segfaulted**
+  (settled, on a fork; upstream moq-dev/moq#6939). The producer's node goes and the stream only
+  pauses, which moq-video doesn't take for an end; its buffers are freed, and a lease still out
+  on one was queued back into libpipewire. The fork ends the capture when the node goes and
+  retires leases on removed buffers. Seen with KDE's stop button and `pw-cli destroy <node>`.
+- **KDE's dialog named mic "Konsole"** (settled). An unsandboxed app is known to the portal by
+  the scope it runs in; mic registers as `io.github.barafael.mic` (the portal's host registry,
+  on the captures' runtime, before the first call), sets the same Wayland app id, and `--register`
+  installs `io.github.barafael.mic.desktop` (removing an older `mic.desktop`).
+- **Debug builds abort when they exit** (open; release and the box's builds are fine). Slint keeps
+  its platform in a thread-local, dropped among the main thread's after wgpu's debug-only
+  `snatch` trace thread-local, which it reads: "cannot access a Thread Local Storage value during
+  or after destruction", then a core dump. `process::exit` doesn't avoid it (glibc runs the TLS
+  destructors); only `_exit` would.
+- **The bar and the chat in narrow windows, the shortcuts in the chat field, the reactions picker,
+  colour emoji, the join card's jump** (settled): under 600 px a "More" menu holds the invite,
+  the hand, the screen, recording and reactions; under 720 px (900 px beside a shared screen) the chat lies
+  over the tiles; the shortcuts are caught before the focused field (`capture-key-pressed`), and
+  Escape closes a menu, then the chat; the emoji ask for Noto Color Emoji by name, as fallback
+  takes a monochrome font first for four of the six; the join hint keeps its space.
+- **Driving the real desktop** (settled): `ydotoold` on a socket of its own and `ydotool` for
+  input; KWin scripts over D-Bus (`org.kde.kwin.Scripting`) place windows by pid and read the
+  pointer, their `print` landing in the user journal up to seconds late, so a pointer move is
+  checked and corrected; `spectacle -b -n -f` for screenshots. Pointer acceleration overshoots a
+  long relative move, and the top-left corner opens the Overview. A wrong reading clicked on the
+  desktop: watching was cheaper than driving, the user clicked share and stop.
+
 ## Window polish (between M7 and M8)
 
 - **Slint's software renderer ignores a negative `transform-scale-x`, and doesn't clip children
