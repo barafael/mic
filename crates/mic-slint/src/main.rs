@@ -10,6 +10,7 @@
 #![deny(clippy::let_underscore_must_use, clippy::let_underscore_untyped)]
 
 mod devices;
+mod links;
 mod videos;
 mod view;
 
@@ -40,8 +41,11 @@ use ui::{AppWindow, Tile};
 #[command(name = "mic", version, about)]
 struct Cli {
     /// The relay, `https://…`.
-    #[arg(long, env = "MIC_RELAY")]
-    relay: url::Url,
+    #[arg(long, env = "MIC_RELAY", required_unless_present = "register")]
+    relay: Option<url::Url>,
+    /// Makes this binary what opens `mic://` links, for this user (Linux), and exits.
+    #[arg(long)]
+    register: bool,
     /// A CA's certificate (PEM) that the relay's is trusted by; the system's roots otherwise.
     #[arg(long)]
     ca: Option<PathBuf>,
@@ -67,7 +71,8 @@ struct Cli {
     #[cfg(all(unix, feature = "harness"))]
     #[arg(long, value_parser = parse_decoders)]
     decoders: Option<Decoders>,
-    /// An invite to fill in, `mic://join/…`.
+    /// An invite to open, `mic://join/…`: as a link opens it, joining under the last name used,
+    /// or filling it in.
     invite: Option<String>,
 }
 
@@ -117,7 +122,27 @@ fn main() -> ExitCode {
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
         )
         .init();
+    // A link opened while mic runs: the mic already there opens it (links.rs).
+    let arguments: Vec<String> = std::env::args().skip(1).collect();
+    if let [link] = arguments.as_slice()
+        && link.starts_with("mic://")
+        && links::hand_over(link)
+    {
+        return ExitCode::SUCCESS;
+    }
     let cli = Cli::parse();
+    if cli.register {
+        return match links::register() {
+            Ok(said) => {
+                println!("{said}");
+                ExitCode::SUCCESS
+            }
+            Err(error) => {
+                eprintln!("mic: {error}");
+                ExitCode::FAILURE
+            }
+        };
+    }
     match run(cli) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
@@ -129,7 +154,7 @@ fn main() -> ExitCode {
 
 fn run(cli: Cli) -> Result<(), String> {
     let runtime = tokio::runtime::Runtime::new().map_err(|error| format!("a runtime: {error}"))?;
-    let mut config = Config::new(cli.relay);
+    let mut config = Config::new(cli.relay.clone().ok_or("no relay: --relay or MIC_RELAY")?);
     if let Some(ca) = cli.ca {
         config.trust = Trust::Roots(vec![ca]);
     }
@@ -168,9 +193,6 @@ fn run(cli: Cli) -> Result<(), String> {
     let gpu = select_backend()?;
     let window = AppWindow::new().map_err(|error| format!("the window: {error}"))?;
     window.set_version(env!("CARGO_PKG_VERSION").into());
-    if let Some(invite) = cli.invite {
-        window.set_invite(invite.into());
-    }
     let tiles = Rc::new(VecModel::<Tile>::default());
     window.set_tiles(ModelRc::from(tiles.clone()));
 
@@ -226,6 +248,38 @@ fn run(cli: Cli) -> Result<(), String> {
             });
         }
     });
+    // A link, handed over by another mic or given at start: joined under the last name used, as
+    // the Join button joins, or filled in for a name.
+    let open = {
+        let window = window.as_weak();
+        let app = app.clone();
+        move |link: String| {
+            let Some(window) = window.upgrade() else {
+                return;
+            };
+            window.set_invite(link.as_str().into());
+            match app.last_profile() {
+                Some(profile) => window.invoke_join(profile.name.as_str().into(), link.into()),
+                None => window.set_error("Enter your name to join.".into()),
+            }
+        }
+    };
+    {
+        let open = open.clone();
+        if let Err(error) = links::listen(move |link| {
+            let open = open.clone();
+            let _opened = slint::invoke_from_event_loop(move || open(link));
+        }) {
+            tracing::warn!(%error, "links opened elsewhere won't reach this window");
+        }
+    }
+    // Kept for as long as the window runs, so it fires once the event loop does.
+    let opening = slint::Timer::default();
+    if let Some(link) = cli.invite.clone() {
+        opening.start(slint::TimerMode::SingleShot, Duration::ZERO, move || {
+            open(link.clone());
+        });
+    }
     window.on_new_room({
         let window = window.as_weak();
         move || {

@@ -497,7 +497,7 @@ from; the git pins move to releases as they land.
     scheme handler (an AppImage can't do that by itself). On Windows, it's a registry entry; on
     macOS, `Info.plist`, which works only from the bundle, so it lands with the dmg in M10.
     **`links`**: `xdg-open mic://join/…` in the box joins the room. Windows and macOS are steps in
-    TESTPLAN.
+    TESTPLAN. *Done* on Linux, with one window: a link opened while mic runs is handed to it.
 
 ### M8: Rooms
 

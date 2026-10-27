@@ -5,6 +5,7 @@ mod audio_devices;
 mod crashed;
 mod e2ee;
 mod impersonation;
+mod links;
 mod record;
 mod relay;
 mod roster;
@@ -39,10 +40,12 @@ pub enum Phase {
     Video,
     /// A newer version on the site is said.
     Version,
+    /// A mic:// link joins its room.
+    Links,
 }
 
 impl Phase {
-    pub const ALL: [Phase; 9] = [
+    pub const ALL: [Phase; 10] = [
         Phase::Box,
         Phase::Relay,
         Phase::Roster,
@@ -52,6 +55,7 @@ impl Phase {
         Phase::AudioDevices,
         Phase::Video,
         Phase::Version,
+        Phase::Links,
     ];
 
     pub fn name(self) -> String {
@@ -72,6 +76,7 @@ impl Phase {
                 | Phase::Audio
                 | Phase::AudioDevices
                 | Phase::Video
+                | Phase::Links
         )
     }
 
@@ -97,6 +102,7 @@ impl Phase {
             Phase::AudioDevices => audio_devices::audio_devices(checks, the_box),
             Phase::Video => video::video(checks, the_box),
             Phase::Version => version::version(checks, the_box),
+            Phase::Links => links::links(checks, the_box),
         }
     }
 }

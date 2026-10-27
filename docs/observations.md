@@ -6,6 +6,17 @@ measurements, and things to revisit. Newest first within each milestone. Each sa
 
 ## M7: Invites, version check, site
 
+- **xdg-open's generic mode reads `Exec` naively** (settled). It takes a quoted path's quotes for
+  part of the command, finds none, and falls back to a browser; and it looks for a scheme's
+  handler only with a `$DISPLAY`. mic's desktop file quotes its path only when it must.
+  (commit 41)
+- **Opening a link needs a name** (settled, revisit): it joins under the last name the app
+  joined with, or fills in the invite and asks for one. A remembered name across starts would
+  want a settings file mic doesn't have yet.
+- **Links on Windows and macOS** (open): the registry entry and `Info.plist` come with the
+  installers (M10), their steps with TESTPLAN (commit 51). The hand-over to a running mic is a
+  Unix socket; Windows wants a named pipe.
+
 - **The Pages actions' SHAs come from GitHub's API, read through a summarizer** (open). Confirm
   them on the first run of `site.yml`: a wrong pin fails loudly, not silently.
 - **No version check by default** (open): without a domain, mic checks only where it's told to
