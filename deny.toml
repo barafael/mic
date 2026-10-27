@@ -17,6 +17,12 @@ ignore = [
 # mic is MIT OR Apache-2.0 (D24), so only permissive licenses, and Slint's royalty-free one: Slint
 # is GPL-3.0-only OR royalty-free OR commercial, and mic takes the royalty-free terms, whose
 # condition the About screen meets with AboutSlint (design §5.10).
+#
+# MPL-2.0 for one crate only, libvpx's binding (libvpx-native-sys): MPL is copyleft per file, so
+# its files stay MPL and mic's stay MIT OR Apache-2.0. libvpx itself is BSD-3-Clause.
+exceptions = [
+    { allow = ["MPL-2.0"], crate = "libvpx-native-sys" },
+]
 allow = [
     "0BSD",
     "Apache-2.0",

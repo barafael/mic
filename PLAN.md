@@ -451,7 +451,9 @@ Each numbered item below is about one commit. Box phases are in **bold**.
 32. `mic-media: VP9 with libvpx`, both ways: real-time encoding for camera, its screen-content
     mode for screenshare, and decoding through `moq-video`'s `vpx` feature (a git pin on
     upstream `main`). Tests: encode the pattern, decode it, read it back. The CI smoke job now
-    builds libvpx on Windows and macOS **⚠ unverified**.
+    builds libvpx on Windows and macOS **⚠ unverified**. *Done,* decoding through
+    `libvpx-native-sys` directly: a git pin on moq-video would bring a second, git copy of the
+    moq crates beside mic's (docs/observations.md).
 33. `mic-core: publish and subscribe the camera`. Tests through `mic-testrelay`, and after a
     relay restart. **`video`**: each client decodes every other's camera, the pattern names the
     right sender, and the frame rate holds; a client started with `--decoders none` shows that

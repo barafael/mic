@@ -8,6 +8,8 @@
 //! only what they decode, and ignore names they don't know.
 
 mod pattern;
+#[cfg(feature = "vp9")]
+pub mod vp9;
 
 use derive_more::{Display, Error};
 use serde::{Deserialize, Serialize};

@@ -6,7 +6,21 @@ measurements, and things to revisit. Newest first within each milestone. Each sa
 
 ## M6: Video (VP9)
 
-(Entries are added as the milestone goes.)
+- **VP9 decodes through libvpx directly, not moq-video's `vpx` feature** (settled, revisit). The
+  feature is only on moq-video's git `main`, and a git dependency on moq-video brings moq-net,
+  hang and moq-mux from git too, beside the crates.io ones mic is pinned to (moq-relay 0.17.8 and
+  its set): two copies whose types don't meet. mic encodes with libvpx anyway, so both directions
+  go through `libvpx-native-sys`, the binding upstream's decoder uses. The decoder moves upstream
+  once a moq-video release has it. (commit 32)
+- **moq's `main` reads older than its releases** (open, odd). Fetched raw, the workspace on
+  `main` names moq-net 0.3.10 and moq-video 0.1.10, where crates.io has 0.3.16 and 0.1.16: a stale
+  view, or releases cut from elsewhere. Worth asking upstream before pinning to git.
+- **`libvpx-native-sys` is MPL-2.0** (settled): file-level copyleft, allowed for that crate only in
+  `deny.toml`. libvpx itself is BSD-3-Clause.
+- **libvpx at 150 kbit/s keeps the pattern readable at 180p** (settled): 59 of 60 frames read back
+  in the unit test, the rest while rate control settles. (commit 32)
+- **libvpx on Windows and macOS CI** (open): vcpkg's static build by `VPX_LIB_DIR`, and Homebrew's
+  through pkg-config, written but not run.
 
 ## M5: Audio
 
