@@ -4,6 +4,25 @@ What turned up while building `mic` that the plan didn't expect: surprises, upst
 measurements, and things to revisit. Newest first within each milestone. Each says whether it's
 **open**, **settled** (and where), or **upstream** (to report or follow).
 
+## M10: Release
+
+- **Only Linux's packaging has run** (open, commit 50). The tarball and the AppImage's AppDir
+  build here and run (`mic --version`, libvpx carried along); packing the AppImage runs
+  appimagetool, which this session wasn't allowed to run from a download. The dmg and the zip,
+  the Windows registration and the macOS bundle wait for the release workflow's first run: the
+  repository has no remote yet, so CI has never run (as since M1).
+- **mic links PipeWire on Linux** (settled, commit 50): Wayland's screen sharing came with
+  libpipewire-0.3 as a library mic is linked to, so it doesn't start without one. Desktops have
+  it; the README says what the packages want of the system: glibc 2.39 (Ubuntu 24.04's, where
+  CI builds), ALSA, fontconfig and freetype, PipeWire, and Vulkan for drawing on the GPU.
+- **On macOS a link isn't handed over** (open, commit 50). The bundle's Info.plist makes mic
+  what opens `mic://`, but macOS gives the link as an Apple Event, which winit doesn't pass on:
+  mic opens, and the invite is pasted. On Windows a link opened while mic runs opens a second
+  mic, as only Unix has the hand-over's socket; a named pipe would do it there.
+- **The packages aren't signed** (open, commit 50): macOS's is signed ad hoc, Windows's not at
+  all, so Gatekeeper and SmartScreen warn on first start. Signing wants certificates the
+  project doesn't have.
+
 ## M9: Recording
 
 - **A recording is the call as it went, not a file a participant** (settled, after commit 49).

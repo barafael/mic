@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=mic
+Comment=Video calls, end-to-end encrypted
+Exec=mic %u
+Icon=io.github.barafael.mic
+Terminal=false
+MimeType=x-scheme-handler/mic;
+Categories=Network;VideoConference;

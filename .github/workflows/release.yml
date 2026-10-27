@@ -1,0 +1,89 @@
+name: Release
+
+# A tag v<version> makes a draft release of that version: Linux's AppImage and tarball, macOS's
+# dmg, Windows's zip (packaging/), each built and uploaded by its platform's job, and the
+# changelog's section for its notes. A person publishes the draft.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions: {}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  draft:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      # The tag names the version the packages say they are, and the changelog has its section.
+      - env:
+          TAG: ${{ github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(cargo metadata --format-version 1 --no-deps \
+            | python3 -c 'import json,sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"] == "mic-slint"))')
+          test "$TAG" = "v$version" || { echo "tag $TAG, but mic is $version"; exit 1; }
+          awk -v section="## $version" '$0 == section { found = 1; next } /^## / && found { exit } found' \
+            CHANGELOG.md > notes.md
+          test -s notes.md || { echo "CHANGELOG.md has no section $version"; exit 1; }
+          gh release create "$TAG" --draft --verify-tag --title "mic $version" --notes-file notes.md
+
+  package:
+    needs: draft
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      # As CI's: Slint's, cpal's and PipeWire's headers on Linux, and libvpx everywhere, linked
+      # statically.
+      - if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfontconfig1-dev libxkbcommon-dev libasound2-dev libvpx-dev libpipewire-0.3-dev
+          echo "VPX_STATIC=1" >> "$GITHUB_ENV"
+      - if: runner.os == 'macOS'
+        run: |
+          brew install libvpx pkg-config librsvg
+          echo "VPX_STATIC=1" >> "$GITHUB_ENV"
+      - if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          vcpkg install libvpx:x64-windows-static-md
+          root="$VCPKG_INSTALLATION_ROOT/installed/x64-windows-static-md"
+          echo "VPX_LIB_DIR=$root/lib" >> "$GITHUB_ENV"
+          echo "VPX_INCLUDE_DIR=$root/include" >> "$GITHUB_ENV"
+          echo "VPX_VERSION=$(sed -n 's/.*"version": *"\([0-9.]*\)".*/\1/p' "$VCPKG_INSTALLATION_ROOT/ports/libvpx/vcpkg.json" | head -1)" >> "$GITHUB_ENV"
+          echo "VPX_STATIC=1" >> "$GITHUB_ENV"
+      - if: runner.os == 'Linux'
+        run: |
+          packaging/appimage-tools.sh "$RUNNER_TEMP/tools" >> "$GITHUB_ENV"
+      - if: runner.os == 'Linux'
+        run: packaging/linux.sh dist
+      - if: runner.os == 'macOS'
+        run: packaging/macos.sh dist
+      - if: runner.os == 'Windows'
+        shell: bash
+        run: packaging/windows.sh dist
+      - shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          rm -rf dist/AppDir
+          gh release upload "$TAG" dist/* --clobber

@@ -44,7 +44,7 @@ struct Cli {
     /// The relay, `https://…`.
     #[arg(long, env = "MIC_RELAY", required_unless_present = "register")]
     relay: Option<url::Url>,
-    /// Makes this binary what opens `mic://` links, for this user (Linux), and exits. The
+    /// Makes this binary what opens `mic://` links, for this user (Linux, Windows), and exits. The
     /// `--relay`, `--ca`, `--version-url` and `--no-websocket` given with it are what a link
     /// starts mic with.
     #[arg(long)]

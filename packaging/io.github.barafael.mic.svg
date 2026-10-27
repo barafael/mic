@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!-- mic's icon: a microphone on the window's accent, in a rounded square. -->
+  <rect x="8" y="8" width="240" height="240" rx="56" fill="#4c8dff"/>
+  <rect x="96" y="44" width="64" height="112" rx="32" fill="#ffffff"/>
+  <path d="M68 124 C68 158 95 184 128 184 C161 184 188 158 188 124" fill="none" stroke="#ffffff" stroke-width="16" stroke-linecap="round"/>
+  <path d="M128 184 L128 214 M96 214 L160 214" fill="none" stroke="#ffffff" stroke-width="16" stroke-linecap="round"/>
+</svg>

@@ -27,11 +27,12 @@ jobs:
       # rustup on the runners installs the toolchain rust-toolchain.toml pins, with its components.
       - run: rustup show active-toolchain
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      # What mic links against: on Linux, Slint's window and cpal's ALSA; everywhere, libvpx
+      # What mic links against: on Linux, Slint's window, cpal's ALSA and PipeWire (for Wayland's
+      # screen sharing, its bindings made by the runner's libclang); everywhere, libvpx
       # (pkg-config finds it; on Windows, vcpkg's, by VPX_LIB_DIR) (unverified on Windows and
       # macOS until CI runs).
       - if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev libxkbcommon-dev libasound2-dev libvpx-dev mesa-vulkan-drivers
+        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev libxkbcommon-dev libasound2-dev libvpx-dev libpipewire-0.3-dev mesa-vulkan-drivers
       - if: runner.os == 'macOS'
         run: brew install libvpx pkg-config
       - if: runner.os == 'Windows'
@@ -81,7 +82,7 @@ jobs:
           persist-credentials: false
       # As the check job: Slint's and cpal's headers on Linux, libvpx everywhere.
       - if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev libxkbcommon-dev libasound2-dev libvpx-dev
+        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev libxkbcommon-dev libasound2-dev libvpx-dev libpipewire-0.3-dev
       - if: runner.os == 'macOS'
         run: brew install libvpx pkg-config
       - if: runner.os == 'Windows'
