@@ -68,3 +68,17 @@ pub fn toggle_mute(the_box: &TestBox, client: &'static str) -> Result<()> {
 pub fn press(the_box: &TestBox, client: &'static str, key: &str) -> Result<()> {
     xdotool(the_box, client, &[&["key", key]])
 }
+
+/// Opens the chat with its shortcut, Ctrl+Alt+C, which gives its message field the keyboard,
+/// types `text` there, and sends it with Enter.
+pub fn type_message(the_box: &TestBox, client: &'static str, text: &str) -> Result<()> {
+    xdotool(
+        the_box,
+        client,
+        &[
+            &["key", "ctrl+alt+c"],
+            &["type", "--delay", "10", text],
+            &["key", "Return"],
+        ],
+    )
+}

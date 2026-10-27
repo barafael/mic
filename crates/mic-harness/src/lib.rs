@@ -166,7 +166,7 @@ pub struct Snapshot {
 
 /// What a frontend shows, as it fills it in: enough for a check to compare with the core's
 /// state, whatever the toolkit.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Ui {
     /// The screen showing: `join`, `room`, …
     pub screen: String,
@@ -191,6 +191,21 @@ pub struct Ui {
     /// The link the window asks whether to leave the call for, while it asks.
     #[serde(default)]
     pub asking: Option<String>,
+    /// The participants not given a tile, beyond those shown: the "+N" tile.
+    #[serde(default)]
+    pub overflow: usize,
+    /// The tiles ringed as speaking, by key.
+    #[serde(default)]
+    pub speaking: Vec<String>,
+    /// The tiles showing a raised hand, by key.
+    #[serde(default)]
+    pub hands: Vec<String>,
+    /// Each tile's latest reaction, as `<key> <reaction>`, the reaction as the core names it.
+    #[serde(default)]
+    pub reactions: Vec<String>,
+    /// The chat, as `<name>: <text>`, oldest first.
+    #[serde(default)]
+    pub chat: Vec<String>,
 }
 
 /// What drawing a frontend's video tiles costs, over the last second: the others' cameras, not

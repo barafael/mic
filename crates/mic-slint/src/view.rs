@@ -2,7 +2,13 @@
 //! state on the runtime, then set on the window on its own thread. Kept apart from Slint's types,
 //! so it's tested without a window.
 
-use mic_core::{Connection, RoomState};
+use std::collections::HashMap;
+
+use mic_core::{Connection, ParticipantKey, RoomState};
+
+/// How many tiles show at most, this participant's among them: the rest are a "+N" tile, and
+/// their cameras aren't subscribed to (§5.8).
+pub const MOST_TILES: usize = 9;
 
 /// The screen showing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -34,9 +40,20 @@ pub struct Tile {
     pub cant_decode: Option<String>,
     /// Whether its camera is off: the tile shows the name, not the last picture.
     pub camera_off: bool,
-    /// Whether it's speaking: its tile is ringed. Nothing says so yet: the active speaker comes
-    /// with selective subscriptions (PLAN.md, commit 43).
+    /// Whether it's speaking: its tile is ringed.
     pub speaking: bool,
+    /// Whether its hand is raised.
+    pub hand: bool,
+    /// Its latest reaction, and which of the room's it was, which the tile shows a moment.
+    pub reaction: Option<(mic_core::chat::Reaction, u64)>,
+}
+
+/// A chat message, as the panel shows it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Line {
+    pub name: String,
+    pub text: String,
+    pub me: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -57,9 +74,54 @@ pub struct View {
     /// Whether it has a camera that's sent: without one, the camera's button is disabled. The
     /// room knows, not its state (`Room::preview`), so the view's maker sets it.
     pub camera: bool,
-    /// The participants not shown beyond the tiles, as a last "+N" tile. None are left out yet:
-    /// which tiles show comes with selective subscriptions (PLAN.md, commit 43).
+    /// The participants not shown beyond the tiles, as a last "+N" tile.
     pub overflow: usize,
+    /// Whether this participant's hand is raised.
+    pub hand: bool,
+    /// The chat, oldest first.
+    pub chat: Vec<Line>,
+}
+
+/// Which of the others have a tile, when there are more than fit: the active speaker, and those
+/// who spoke most recently, then those who joined first. Kept from one view to the next, as it
+/// remembers who spoke when.
+#[derive(Default)]
+pub struct Shown {
+    spoke: HashMap<ParticipantKey, u64>,
+    views: u64,
+}
+
+impl Shown {
+    /// The others shown in `state`, in the order they joined.
+    pub fn choose(&mut self, state: &RoomState) -> Vec<ParticipantKey> {
+        self.views += 1;
+        // The speaker counts as speaking last, now.
+        for key in state.speaking.iter().chain(&state.speaker) {
+            self.spoke.insert(*key, self.views);
+        }
+        self.spoke
+            .retain(|key, _| state.participants.iter().any(|them| them.key == *key));
+        let room = MOST_TILES - 1;
+        let mut ranked: Vec<(usize, ParticipantKey)> = state
+            .participants
+            .iter()
+            .map(|them| them.key)
+            .enumerate()
+            .collect();
+        if ranked.len() > room {
+            ranked.sort_by_key(|(joined, key)| {
+                let last = if state.speaker == Some(*key) {
+                    u64::MAX
+                } else {
+                    self.spoke.get(key).copied().unwrap_or(0)
+                };
+                (std::cmp::Reverse(last), *joined)
+            });
+            ranked.truncate(room);
+            ranked.sort();
+        }
+        ranked.into_iter().map(|(_, key)| key).collect()
+    }
 }
 
 /// What shows of `room` (its state and its invite), or of none: the join screen.
@@ -75,15 +137,30 @@ pub fn view(room: Option<(&RoomState, String)>) -> View {
             camera_off: false,
             camera: false,
             overflow: 0,
+            hand: false,
+            chat: Vec::new(),
         };
     };
+    let first = Shown::default().choose(state);
+    view_of(state, invite, &first)
+}
+
+/// What shows of `state`, the room of `invite`, the others `shown` given tiles.
+pub fn view_of(state: &RoomState, invite: String, shown: &[ParticipantKey]) -> View {
     let tile = |participant: &mic_core::Participant, me| Tile {
         key: participant.key.to_string(),
         name: participant.profile.name.clone(),
         me,
         muted: participant.profile.muted,
         camera_off: participant.profile.camera_off,
-        speaking: false,
+        speaking: state.speaking.contains(&participant.key),
+        hand: participant.profile.hand,
+        reaction: state
+            .reactions
+            .iter()
+            .rev()
+            .find(|reacted| reacted.from == participant.key)
+            .map(|reacted| (reacted.reaction, reacted.seq)),
         cant_decode: participant
             .renditions
             .iter()
@@ -91,7 +168,22 @@ pub fn view(room: Option<(&RoomState, String)>) -> View {
             .map(|rendition| rendition.codec.clone()),
     };
     let tiles = std::iter::once(tile(&state.me, true))
-        .chain(state.participants.iter().map(|them| tile(them, false)))
+        .chain(
+            state
+                .participants
+                .iter()
+                .filter(|them| shown.contains(&them.key))
+                .map(|them| tile(them, false)),
+        )
+        .collect();
+    let chat = state
+        .chat
+        .iter()
+        .map(|message| Line {
+            name: message.name.clone(),
+            text: message.text.clone(),
+            me: message.from == state.me.key,
+        })
         .collect();
     let status = match state.connection {
         Connection::Connected => "",
@@ -114,7 +206,9 @@ pub fn view(room: Option<(&RoomState, String)>) -> View {
         muted: state.me.profile.muted,
         camera_off: state.me.profile.camera_off,
         camera: false,
-        overflow: 0,
+        overflow: state.participants.len().saturating_sub(shown.len()),
+        hand: state.me.profile.hand,
+        chat,
     }
 }
 
@@ -298,5 +392,55 @@ mod tests {
         let shown = view(Some((&state, String::new())));
         assert!(shown.status.contains("Reconnecting"));
         assert!(shown.warning.starts_with("2 broadcasts"));
+    }
+
+    #[test]
+    fn beyond_nine_tiles_those_who_spoke_last_show_and_the_rest_are_counted() {
+        let mut state = state();
+        state.participants = (2..=13)
+            .map(|byte| participant(byte, &format!("P{byte}")))
+            .collect();
+        let key = |byte: u8| ParticipantKey::from_bytes([byte; 32]);
+        let mut shown = Shown::default();
+        // Nobody spoke: the first to join.
+        let first = shown.choose(&state);
+        assert_eq!(first, (2..=9).map(key).collect::<Vec<_>>());
+        let view = view_of(&state, String::new(), &first);
+        assert_eq!((view.tiles.len(), view.overflow), (MOST_TILES, 4));
+        // The last to join speaks: in, in join order, and the one who joined last before it out.
+        state.speaking = vec![key(13)];
+        state.speaker = Some(key(13));
+        let spoken = shown.choose(&state);
+        assert!(spoken.contains(&key(13)) && !spoken.contains(&key(9)));
+        assert_eq!(spoken.last(), Some(&key(13)));
+        // They stop; someone else not shown speaks: both stay, the speaker first among them.
+        state.speaking = vec![key(12)];
+        state.speaker = Some(key(12));
+        let again = shown.choose(&state);
+        assert!(again.contains(&key(12)) && again.contains(&key(13)));
+        assert_eq!(again.len(), MOST_TILES - 1);
+    }
+
+    #[test]
+    fn hands_reactions_and_the_chat_show() {
+        let mut state = state();
+        let bob = ParticipantKey::from_bytes([2; 32]);
+        state.participants[0].profile.hand = true;
+        state.reactions = vec![mic_core::room::Reacted {
+            seq: 4,
+            from: bob,
+            reaction: mic_core::chat::Reaction::Heart,
+        }];
+        state.chat = vec![mic_core::room::Message {
+            from: state.me.key,
+            name: "Alice".to_owned(),
+            text: "hi".to_owned(),
+        }];
+        let shown = view(Some((&state, String::new())));
+        let bobs = &shown.tiles[1];
+        assert!(bobs.hand);
+        assert_eq!(bobs.reaction, Some((mic_core::chat::Reaction::Heart, 4)));
+        assert_eq!(shown.chat.len(), 1);
+        assert!(shown.chat[0].me);
     }
 }

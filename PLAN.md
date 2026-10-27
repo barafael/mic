@@ -508,9 +508,14 @@ from; the git pins move to releases as they land.
     and sends it in a loop. The crowd is a pod of its own (`up --crowd n`, 34 by default), and
     the box has six windows, `alice` to `frank`.
 43. `mic-core: selective subscriptions`. Subscribe only to visible tiles; the active speaker's
-    priority goes up (§1.6, §5.8). **`room`**: 6 windowed clients plus the crowd.
+    priority goes up (§1.6, §5.8). **`room`**: 6 windowed clients plus the crowd. *Done:* the
+    window shows at most nine tiles, the active speaker and those who spoke last first, and a
+    "+N"; it watches those cameras only (`Command::Watch`). A speaker is found from the voices
+    a client decodes (`mic_core::speaker`); their camera goes to priority 60.
 44. `mic-core, mic-slint: chat, reactions and raise hand` on JSON tracks, encrypted like every
-    other. **`room`**: each shows on every other client.
+    other. **`room`**: each shows on every other client. *Done:* a chat panel (Ctrl+Alt+C), six
+    reactions shown a moment on the sender's tile, a raised hand (Ctrl+Alt+H) in the signed
+    profile. The client image gained Noto Color Emoji, which the reactions are drawn in.
 45. `mic-media, mic-slint: screenshare`. Capture in `mic-media`, the picker in the frontend, VP9 in
     screen-content mode, and a synthetic screen source in the box. **`screenshare`**.
 46. `testbox: netem`, in a `NET_ADMIN` sidecar **⚠ unverified**. **`network`**: loss and delay

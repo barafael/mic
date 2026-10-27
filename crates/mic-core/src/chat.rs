@@ -43,6 +43,18 @@ impl Reaction {
         Reaction::Party,
     ];
 
+    /// Its name, as a frame says it.
+    pub fn name(self) -> &'static str {
+        match self {
+            Reaction::ThumbsUp => "thumbs_up",
+            Reaction::Clap => "clap",
+            Reaction::Laugh => "laugh",
+            Reaction::Surprised => "surprised",
+            Reaction::Heart => "heart",
+            Reaction::Party => "party",
+        }
+    }
+
     /// How it's shown.
     pub fn emoji(self) -> &'static str {
         match self {
@@ -218,6 +230,16 @@ mod tests {
             )
             .is_none()
         );
+    }
+
+    #[test]
+    fn a_reactions_name_is_how_a_frame_says_it() {
+        for reaction in Reaction::ALL {
+            assert_eq!(
+                serde_json::to_value(reaction).unwrap(),
+                serde_json::Value::from(reaction.name())
+            );
+        }
     }
 
     #[test]

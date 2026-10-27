@@ -8,6 +8,7 @@ mod impersonation;
 mod links;
 mod record;
 mod relay;
+mod room;
 mod roster;
 mod testbox;
 mod version;
@@ -42,10 +43,12 @@ pub enum Phase {
     Version,
     /// A mic:// link joins its room.
     Links,
+    /// Twelve in a room: the tiles shown, their cameras only, the speaker, chat, reactions, hands.
+    Room,
 }
 
 impl Phase {
-    pub const ALL: [Phase; 10] = [
+    pub const ALL: [Phase; 11] = [
         Phase::Box,
         Phase::Relay,
         Phase::Roster,
@@ -56,6 +59,7 @@ impl Phase {
         Phase::Video,
         Phase::Version,
         Phase::Links,
+        Phase::Room,
     ];
 
     pub fn name(self) -> String {
@@ -77,6 +81,7 @@ impl Phase {
                 | Phase::AudioDevices
                 | Phase::Video
                 | Phase::Links
+                | Phase::Room
         )
     }
 
@@ -103,6 +108,7 @@ impl Phase {
             Phase::Video => video::video(checks, the_box),
             Phase::Version => version::version(checks, the_box),
             Phase::Links => links::links(checks, the_box),
+            Phase::Room => room::room(checks, the_box),
         }
     }
 }
