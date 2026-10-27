@@ -219,7 +219,9 @@ fn libraries_found(the_box: &TestBox) -> Result<()> {
     }
     let script = binaries
         .iter()
-        .map(|binary| format!("echo '== {binary}'; ldd /opt/mic/{binary}"))
+        // Each ldd's status ignored: it fails on a static binary, which misses nothing. A missing
+        // library is in what it says.
+        .map(|binary| format!("echo '== {binary}'; ldd /opt/mic/{binary} 2>&1 || true"))
         .collect::<Vec<_>>()
         .join("; ");
     let mut run = podman(&["run", "--rm", "--network", "none", "--volume"]);

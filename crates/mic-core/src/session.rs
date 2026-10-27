@@ -145,7 +145,11 @@ impl Client {
             .runtime
             .spawn(async move { inner.join(invite, profile).await })
             .await
-            .map_err(|_| Error::Stopped)?
+            .unwrap_or_else(|error| match error.try_into_panic() {
+                // A panic in the join is the join's: it goes on as one, not as a stopped runtime.
+                Ok(panic) => std::panic::resume_unwind(panic),
+                Err(_) => Err(Error::Stopped),
+            })
     }
 }
 
