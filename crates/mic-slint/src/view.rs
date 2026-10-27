@@ -29,6 +29,9 @@ pub struct Tile {
     pub me: bool,
     /// Whether it says it sends no voice.
     pub muted: bool,
+    /// The codec of its camera, when this client can't decode it: the tile says so, rather
+    /// than stay black.
+    pub cant_decode: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -63,6 +66,11 @@ pub fn view(room: Option<(&RoomState, String)>) -> View {
         name: participant.profile.name.clone(),
         me,
         muted: participant.profile.muted,
+        cant_decode: participant
+            .renditions
+            .iter()
+            .find(|rendition| !state.me.decoders.contains(&rendition.codec))
+            .map(|rendition| rendition.codec.clone()),
     };
     let tiles = std::iter::once(tile(&state.me, true))
         .chain(state.participants.iter().map(|them| tile(them, false)))
@@ -144,6 +152,19 @@ mod tests {
         assert!(shown.muted);
         let muted: Vec<bool> = shown.tiles.iter().map(|tile| tile.muted).collect();
         assert_eq!(muted, [true, false, true]);
+    }
+
+    #[test]
+    fn a_camera_this_client_cant_decode_is_said_on_its_tile() {
+        let mut state = state();
+        state.me.decoders.clear();
+        state.participants[0].renditions = vec![mic_core::catalog::Rendition {
+            track: "camera".to_owned(),
+            codec: "vp9".to_owned(),
+        }];
+        let shown = view(Some((&state, String::new())));
+        assert_eq!(shown.tiles[1].cant_decode.as_deref(), Some("vp9"));
+        assert_eq!(shown.tiles[2].cant_decode, None, "Carol sends no camera");
     }
 
     #[test]

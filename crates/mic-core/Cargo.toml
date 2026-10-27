@@ -14,7 +14,7 @@ ed25519-dalek = "3.0.0"
 getrandom = "0.4.3"
 hkdf = "0.13.0"
 keyring-core = "1.0.1"
-mic-media = { version = "0.1.0", path = "../mic-media" }
+mic-media = { version = "0.1.0", path = "../mic-media", features = ["vp9"] }
 # Opus only: no AAC, and no devices (mic-media has those).
 moq-audio = { version = "=0.1.16", default-features = false }
 moq-e2ee = "=0.0.17"

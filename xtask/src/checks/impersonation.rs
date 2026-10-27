@@ -2,7 +2,8 @@
 //! in the tools pod with the room's invite, publishes what it can't sign. At Alice's path with a
 //! catalog it signed itself, it must stand for no one; at its own path with frames no checkpoint
 //! covers, it must be rejected within the grace. Bob sees Alice once, and lists both as rejected.
-//! The forger speaks, in a tone apart (`FORGED`): once it's rejected, bob hears only alice.
+//! The forger speaks, in a tone apart (`FORGED`), and shows a camera of its own (`FORGED_CAMERA`):
+//! bob may hear and see it until he rejects it, then hears only alice, and sees no more of it.
 
 use std::time::{Duration, Instant};
 
@@ -19,6 +20,8 @@ use super::Checks;
 const PATIENCE: Duration = Duration::from_secs(15);
 /// The forger's voice (testbox/forger, `FORGED_TONE`).
 const FORGED: f64 = 880.0;
+/// The forger's camera's pattern sender (testbox/forger, `FORGED_CAMERA`).
+const FORGED_CAMERA: u8 = 9;
 /// How long a forger publishes: longer than the checks wait for it.
 const FORGING_SECS: u64 = 20;
 
@@ -56,11 +59,13 @@ pub fn impersonation(checks: &mut Checks, the_box: &TestBox) -> Result<()> {
         || {
             let started = Instant::now();
             forge(the_box, &invite, &["unsigned"])?;
-            // Frames play as they come and are confirmed after (D18), so bob hears the forger
-            // until he rejects it: the voice took the path a signed one would.
+            // Frames play as they come and are confirmed after (D18), so bob hears and sees the
+            // forger until he rejects it: its media took the path a signed one would.
             let mut loudest: f64 = 0.0;
+            let mut forged_pictures: u64 = 0;
             loop {
                 loudest = loudest.max(bob.heard(&[FORGED])?.levels[0]);
+                forged_pictures = forged_pictures.max(forged_seen(&mut bob)?);
                 let state = bob.wait_for("in the room", Duration::ZERO, |_| true)?;
                 if state
                     .rejected
@@ -76,6 +81,13 @@ pub fn impersonation(checks: &mut Checks, the_box: &TestBox) -> Result<()> {
                     )));
                 }
                 std::thread::sleep(Duration::from_millis(50));
+            }
+            if forged_pictures == 0 {
+                return Err(Error::Failed(
+                    "bob never decoded the forger's camera before rejecting it: it wasn't played \
+                     at all"
+                        .to_owned(),
+                ));
             }
             if loudest < crate::harness::SILENT * 5.0 {
                 return Err(Error::Failed(format!(
@@ -97,6 +109,12 @@ pub fn impersonation(checks: &mut Checks, the_box: &TestBox) -> Result<()> {
             })?;
             // What it said before it was rejected plays out of the analyzer's second.
             bob.wait_to_hear(alices, &[FORGED], PATIENCE)?;
+            // And its camera is gone with it.
+            if forged_seen(&mut bob)? != 0 {
+                return Err(Error::Failed(
+                    "bob still shows the forger's camera after rejecting it".to_owned(),
+                ));
+            }
             Ok(())
         },
     );
@@ -124,4 +142,16 @@ fn forge(the_box: &TestBox, invite: &Invite, forgery: &[&str]) -> Result<()> {
             String::from_utf8_lossy(&started.stderr)
         )))
     }
+}
+
+/// How many pictures of a camera with the forger's pattern `viewer` shows of its participants:
+/// none once the forger's broadcast is rejected, which takes it out of the room.
+fn forged_seen(viewer: &mut Participant) -> Result<u64> {
+    Ok(viewer
+        .seen()?
+        .cameras
+        .iter()
+        .filter(|camera| camera.sender == Some(FORGED_CAMERA))
+        .map(|camera| camera.pictures)
+        .sum())
 }

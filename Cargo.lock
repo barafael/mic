@@ -2352,6 +2352,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "mic-core",
+ "mic-media",
  "moq-audio",
  "moq-e2ee",
  "moq-net",

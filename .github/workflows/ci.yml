@@ -77,8 +77,20 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
+      # As the check job: Slint's and cpal's headers on Linux, libvpx everywhere.
       - if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev libxkbcommon-dev libasound2-dev
+        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev libxkbcommon-dev libasound2-dev libvpx-dev
+      - if: runner.os == 'macOS'
+        run: brew install libvpx pkg-config
+      - if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          vcpkg install libvpx:x64-windows-static-md
+          root="$VCPKG_INSTALLATION_ROOT/installed/x64-windows-static-md"
+          echo "VPX_LIB_DIR=$root/lib" >> "$GITHUB_ENV"
+          echo "VPX_INCLUDE_DIR=$root/include" >> "$GITHUB_ENV"
+          echo "VPX_VERSION=$(sed -n 's/.*"version": *"\([0-9.]*\)".*/\1/p' "$VCPKG_INSTALLATION_ROOT/ports/libvpx/vcpkg.json" | head -1)" >> "$GITHUB_ENV"
+          echo "VPX_STATIC=1" >> "$GITHUB_ENV"
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - run: cargo build --release --locked -p mic-slint
       # Git Bash on Windows finds mic.exe by this name too.

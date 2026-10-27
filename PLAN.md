@@ -457,7 +457,10 @@ Each numbered item below is about one commit. Box phases are in **bold**.
 33. `mic-core: publish and subscribe the camera`. Tests through `mic-testrelay`, and after a
     relay restart. **`video`**: each client decodes every other's camera, the pattern names the
     right sender, and the frame rate holds; a client started with `--decoders none` shows that
-    it can't decode instead of a black tile. **`impersonation`** reruns with video.
+    it can't decode instead of a black tile. **`impersonation`** reruns with video. *Done:*
+    640x360 at 15 fps and 500 kbit/s for now, a group a second; one who decodes none of a
+    sender's codecs is left out of the choice rather than leave everyone without (D10), and
+    `room.video(key)` gives a tile its pictures.
 34. `mic-render: tiles on a caller's wgpu device`, and the CPU path. Tests render offscreen on
     lavapipe in Linux CI **⚠ unverified**, and compare pixels with the pattern.
 35. `mic-slint: tiles render video` through `mic-render` on Slint's device. **`video`**: pixels in

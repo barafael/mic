@@ -96,7 +96,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             tokio::runtime::Handle::current(),
         )
         .map_err(|error| format!("{name}: {error}"))?;
-        let synthetic = mic_harness::synthetic::Synthetic::new(tone)
+        let synthetic = mic_harness::synthetic::Synthetic::new(tone, None)
             .map_err(|error| format!("{name}'s audio: {error}"))?;
         let app = App::with_media(client, synthetic.media());
         let harness =

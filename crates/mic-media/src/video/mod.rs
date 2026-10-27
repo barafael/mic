@@ -41,18 +41,23 @@ impl Codec {
 }
 
 /// The codec to send a track in: the first of `preference` that every one of `others` can
-/// decode, by the names their catalogs list. None if there's none, and nobody else is no
-/// constraint at all: alone in a room, the first.
+/// decode, by the names their catalogs list. One who decodes none of `preference` is left out,
+/// and told it can't decode, rather than leave everyone else without; so is the choice's only
+/// way to be none, an empty `preference`. Alone in a room, the first.
 pub fn choose<'a>(
     preference: &[Codec],
     others: impl IntoIterator<Item = &'a [String]>,
 ) -> Option<Codec> {
-    let others: Vec<&[String]> = others.into_iter().collect();
-    preference.iter().copied().find(|codec| {
-        others
-            .iter()
-            .all(|decoders| decoders.iter().any(|name| name == codec.name()))
-    })
+    let decodes =
+        |decoders: &[String], codec: Codec| decoders.iter().any(|name| name == codec.name());
+    let others: Vec<&[String]> = others
+        .into_iter()
+        .filter(|decoders| preference.iter().any(|&codec| decodes(decoders, codec)))
+        .collect();
+    preference
+        .iter()
+        .copied()
+        .find(|&codec| others.iter().all(|decoders| decodes(decoders, codec)))
 }
 
 /// A picture in I420: a full-size Y plane, then quarter-size U and V, tightly packed, at even
@@ -142,10 +147,14 @@ mod tests {
     }
 
     #[test]
-    fn one_who_decodes_nothing_leaves_no_codec() {
+    fn one_who_decodes_none_of_ours_is_left_out() {
         let bob = names(&["vp9"]);
-        let dave = names(&[]);
-        assert_eq!(choose(&Codec::ALL, [bob.as_slice(), dave.as_slice()]), None);
+        let dave = names(&["av2"]);
+        assert_eq!(
+            choose(&Codec::ALL, [bob.as_slice(), dave.as_slice()]),
+            Some(Codec::Vp9)
+        );
+        assert_eq!(choose(&[], [bob.as_slice()]), None);
     }
 
     #[test]

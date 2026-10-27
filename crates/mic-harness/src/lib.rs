@@ -57,6 +57,8 @@ pub enum Call {
     /// How loud each of `frequencies` (Hz) is in what it played in the last second, for a client
     /// whose speaker is an analyzer (mic-media's `AnalyzingSink`). Answered with [`Heard`].
     Heard { frequencies: Vec<f64> },
+    /// What the client decoded of each other participant's camera. Answered with [`Seen`].
+    Seen,
 }
 
 /// The answer to request `id`: `{"id": …, "result": …}` or `{"id": …, "error": "…"}`.
@@ -135,6 +137,25 @@ pub struct Heard {
     pub rms: f64,
 }
 
+/// What a client decoded of each other participant's camera, in the room's order.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Seen {
+    pub cameras: Vec<Camera>,
+}
+
+/// One participant's camera, as decoded.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Camera {
+    /// Whose, by key.
+    pub key: String,
+    /// How many pictures were decoded.
+    pub pictures: u64,
+    /// What the last picture's pattern says, if it holds one (mic-media's `read_pattern`): whose
+    /// camera it is, and which frame.
+    pub sender: Option<u8>,
+    pub frame: Option<u16>,
+}
+
 /// What the client shows: the room it's in, if any, and its UI, if it has one.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Snapshot {
@@ -154,6 +175,9 @@ pub struct Ui {
     /// The tiles that show their participant muted, by key.
     #[serde(default)]
     pub muted: Vec<String>,
+    /// The tiles that say they can't show their participant's video, by key.
+    #[serde(default)]
+    pub cant_decode: Vec<String>,
 }
 
 /// Pushed to a subscriber on every change of what it shows.

@@ -10,6 +10,8 @@ export struct Tile {
     name: string,
     me: bool,
     muted: bool,
+    // The codec of its camera, when this client can't decode it; empty otherwise.
+    cant-decode: string,
 }
 
 component NameTile inherits Rectangle {
@@ -24,6 +26,15 @@ component NameTile inherits Rectangle {
         vertical-alignment: center;
         wrap: word-wrap;
         width: parent.width - 16px;
+    }
+    if tile.cant-decode != "": Text {
+        y: parent.height / 2 + 20px;
+        width: parent.width - 16px;
+        horizontal-alignment: center;
+        text: "Can't show their video (" + tile.cant-decode + ")";
+        color: #d0d0d8;
+        font-size: 14px;
+        wrap: word-wrap;
     }
     if tile.muted: Text {
         x: 8px;

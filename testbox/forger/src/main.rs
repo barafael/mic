@@ -6,8 +6,9 @@
 //! - `forger unsigned`: a broadcast at the forger's own path, its catalog standing, but its frames
 //!   covered by no checkpoint.
 //!
-//! Either way it speaks: a voice track with an 880 Hz tone (`FORGED_TONE`), which a listener may
-//! hear only until the broadcast is rejected.
+//! Either way it speaks and shows: a voice track with an 880 Hz tone (`FORGED_TONE`), and a
+//! camera with the pattern of sender 9 (`FORGED_CAMERA`), which a participant may hear and see
+//! only until the broadcast is rejected.
 //!
 //! A participant must show neither as anyone, and list both as rejected, the second within the
 //! grace (D18).
@@ -27,6 +28,7 @@ use mic_core::catalog::{CATALOG, Catalog};
 use mic_core::roster::PROFILE;
 use mic_core::sig::SIG;
 use mic_core::tracks::RoomCrypto;
+use mic_core::video::CAMERA;
 use mic_core::{DeviceSecret, Invite, ParticipantKey};
 
 #[derive(Parser)]
@@ -116,9 +118,13 @@ async fn forge(cli: Cli) -> Result<(), String> {
             SIG.to_owned(),
             PROFILE.to_owned(),
             AUDIO.to_owned(),
+            CAMERA.to_owned(),
         ],
         decoders: Vec::new(),
-        renditions: Vec::new(),
+        renditions: vec![mic_core::catalog::Rendition {
+            track: CAMERA.to_owned(),
+            codec: "vp9".to_owned(),
+        }],
         app: env!("CARGO_PKG_VERSION").to_owned(),
     };
     let origin = moq_tokio::origin::spawn();
@@ -135,6 +141,7 @@ async fn forge(cli: Cli) -> Result<(), String> {
         (PROFILE, Some(profile.into_bytes())),
         // Written once the session is up.
         (AUDIO, None),
+        (CAMERA, None),
     ] {
         let name = generation
             .name(semantic)
@@ -160,8 +167,52 @@ async fn forge(cli: Cli) -> Result<(), String> {
     // Kept: dropping it ends the session.
     let _connection = connect(&cli, &crypto, origin).await?;
     println!("forger: publishing at {path}");
+    let camera = tracks.pop().ok_or("no camera track")?;
     let voice = tracks.pop().ok_or("no voice track")?;
-    speak(voice).await
+    tokio::try_join!(speak(voice), show(camera)).map(|_| ())
+}
+
+/// The pattern sender a forger's camera shows, apart from the clients' (xtask's `podman::camera`).
+const FORGED_CAMERA: u8 = 9;
+
+/// [`FORGED_CAMERA`]'s pattern in VP9 onto `track`, as mic sends a camera (mic-core's `video`),
+/// a group a second starting with a keyframe, but unsigned, until it's stopped.
+async fn show(mut track: moq_e2ee::track::Producer) -> Result<(), String> {
+    use mic_media::video::Encoder as _;
+    let settings = mic_core::video::CAMERA_SETTINGS;
+    let mut encoder =
+        mic_media::video::vp9::Vp9Encoder::new(settings).map_err(|error| error.to_string())?;
+    let fps = u64::from(settings.fps);
+    let mut ticks = tokio::time::interval(std::time::Duration::from_secs(1) / settings.fps);
+    let mut group = None;
+    for frame in 0_u64.. {
+        ticks.tick().await;
+        let picture = mic_media::video::Pattern {
+            sender: FORGED_CAMERA,
+            frame: frame as u16,
+        }
+        .draw(settings.width, settings.height);
+        let keyframe = frame.is_multiple_of(fps);
+        let packets = encoder
+            .encode(&picture, keyframe)
+            .map_err(|error| error.to_string())?;
+        if keyframe {
+            if let Some(full) = group.take() {
+                moq_e2ee::group::Producer::finish(full).map_err(|error| error.to_string())?;
+            }
+            group = Some(track.append_group().map_err(|error| error.to_string())?);
+        }
+        let timestamp = moq_net::Timestamp::from_micros(frame * 1_000_000 / fps)
+            .map_err(|error| error.to_string())?;
+        for packet in packets {
+            group
+                .as_mut()
+                .ok_or("no group")?
+                .write_frame(timestamp, &packet.data)
+                .map_err(|error| error.to_string())?;
+        }
+    }
+    Ok(())
 }
 
 /// The tone a forger's voice is, apart from the clients' (xtask's `podman::tone`).

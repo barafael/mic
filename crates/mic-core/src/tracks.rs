@@ -132,13 +132,15 @@ impl RoomCrypto {
 
 /// How a track is served (§1.6, §5.7): its priority, higher first (moq-lite), and how old a
 /// group may get before it's skipped, at the publisher and in each subscription alike. The voice
-/// comes before everything; the checkpoints next, since a frame waits on them to be confirmed.
+/// comes before everything; the checkpoints next, since a frame waits on them to be confirmed;
+/// the camera after them.
 /// The rest take moq-net's defaults.
 fn policy(semantic: &str) -> Option<(u8, std::time::Duration)> {
     use std::time::Duration;
     match semantic {
         crate::audio::AUDIO => Some((100, Duration::from_millis(500))),
         SIG => Some((90, Duration::from_secs(1))),
+        crate::video::CAMERA => Some((50, Duration::from_secs(2))),
         _ => None,
     }
 }
@@ -249,6 +251,20 @@ impl Publication {
         self.catalog.seq += 1;
         self.write_catalog()?;
         Ok(SignedTrack::new(semantic, track, self.ledger.clone()))
+    }
+
+    /// A video track `semantic` of this broadcast, sent in `codec`, as [`Self::track`] is, its
+    /// codec named in the catalog's renditions.
+    pub fn video_track(
+        &mut self,
+        semantic: &str,
+        codec: mic_media::video::Codec,
+    ) -> Result<SignedTrack, TrackError> {
+        self.catalog.renditions.push(crate::catalog::Rendition {
+            track: semantic.to_owned(),
+            codec: codec.name().to_owned(),
+        });
+        self.track(semantic)
     }
 
     /// The catalog, signed, as the track's latest group.

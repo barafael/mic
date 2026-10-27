@@ -93,6 +93,8 @@ struct Shared {
     path: String,
     origin: moq_net::origin::Consumer,
     runtime: tokio::runtime::Handle,
+    /// What the others' cameras show.
+    board: crate::video::Board,
 }
 
 /// What a handle asks of the room's task.
@@ -121,6 +123,8 @@ pub(crate) struct Joined {
     pub runtime: tokio::runtime::Handle,
     /// Sends this participant's voice, if it has one.
     pub voice: Option<tokio::task::JoinHandle<()>>,
+    /// Sends its camera, if it has one.
+    pub camera: Option<tokio::task::JoinHandle<()>>,
     /// Whether the voice is muted, which it follows.
     pub muted: watch::Sender<bool>,
     /// What suppresses the voice's noise, which it follows.
@@ -157,15 +161,21 @@ impl Room {
             path: joined.path.clone(),
             origin: joined.origin.consume(),
             runtime: joined.runtime.clone(),
+            board: crate::video::Board::default(),
         });
         let (roster, followed) = watch::channel(Roster::default());
         let peers = Peers::new(joined.crypto.clone(), joined.path, joined.origin.consume());
+        let board = shared.board.clone();
         let following = joined.runtime.spawn(roster::follow(
             peers,
             joined.crypto,
             shared.invite.room,
             roster,
-            joined.mixer,
+            roster::Playing {
+                mixer: joined.mixer,
+                board: board.clone(),
+                decoders: joined.decoders.clone(),
+            },
         ));
         let task = Task {
             publication: joined.publication,
@@ -177,6 +187,7 @@ impl Room {
             origin: joined.origin,
             following,
             voice: joined.voice,
+            camera: joined.camera,
             muted: joined.muted,
             noise: joined.noise,
             roster: followed,
@@ -243,6 +254,17 @@ impl Room {
         answer.await.map_err(|_| Error::Left)?
     }
 
+    /// `whose` camera's pictures, as they're decoded: none until the first, nor ever for a
+    /// camera this client can't decode or a participant with none.
+    pub fn video(&self, whose: ParticipantKey) -> crate::video::Pictures {
+        self.shared.board.pictures(whose)
+    }
+
+    /// How many of `whose` camera's pictures were decoded.
+    pub fn video_count(&self, whose: ParticipantKey) -> u64 {
+        self.shared.board.count(whose)
+    }
+
     /// The other participants' broadcasts as they arrive and go, those there already first.
     pub fn peers(&self) -> Peers {
         let _entered = self.shared.runtime.enter();
@@ -288,6 +310,8 @@ struct Task {
     following: tokio::task::JoinHandle<()>,
     /// Sends the voice, until the room is left.
     voice: Option<tokio::task::JoinHandle<()>>,
+    /// Sends the camera, until the room is left.
+    camera: Option<tokio::task::JoinHandle<()>>,
     muted: watch::Sender<bool>,
     noise: watch::Sender<mic_media::audio::noise::NoiseSuppression>,
     roster: watch::Receiver<Roster>,
@@ -433,8 +457,11 @@ impl Task {
     /// that doesn't drain in time is closed all the same.
     async fn leave(&mut self) {
         self.following.abort();
-        if let Some(voice) = self.voice.take() {
-            voice.abort();
+        for sending in [self.voice.take(), self.camera.take()]
+            .into_iter()
+            .flatten()
+        {
+            sending.abort();
         }
         let Some(connection) = self.connection.take() else {
             return;
@@ -458,8 +485,8 @@ impl Task {
 impl Drop for Task {
     fn drop(&mut self) {
         self.following.abort();
-        if let Some(voice) = &self.voice {
-            voice.abort();
+        for sending in [&self.voice, &self.camera].into_iter().flatten() {
+            sending.abort();
         }
     }
 }

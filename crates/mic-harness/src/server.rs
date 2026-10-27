@@ -20,8 +20,8 @@ use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::{mpsc, watch};
 
 use crate::{
-    Acted, Call, Done, Heard, Joined, LISTENING, Outcome, Pong, Pushed, Reply, Request, Snapshot,
-    Subscribed, Ui, Unsubscribed,
+    Acted, Call, Camera, Done, Heard, Joined, LISTENING, Outcome, Pong, Pushed, Reply, Request,
+    Seen, Snapshot, Subscribed, Ui, Unsubscribed,
 };
 
 /// What fills a snapshot's [`Ui`] section: the frontend's, asked on every snapshot.
@@ -153,6 +153,7 @@ impl Harness {
                 Call::Act { command } => answer(&out, id, self.act(command).await),
                 Call::Reset => answer(&out, id, Ok(self.reset().await)),
                 Call::Heard { frequencies } => answer(&out, id, self.heard(&frequencies)),
+                Call::Seen => answer(&out, id, self.seen()),
             };
             if !sent {
                 break;
@@ -268,6 +269,28 @@ impl Harness {
                 .collect(),
             rms: analyzer.rms(),
         })
+    }
+
+    fn seen(&self) -> Result<Seen, String> {
+        let room = self.inner.app.current().ok_or("in no room: `join` first")?;
+        let participants = room.state().borrow().participants.clone();
+        let cameras = participants
+            .into_iter()
+            .map(|participant| {
+                let pattern = room
+                    .video(participant.key)
+                    .borrow()
+                    .as_deref()
+                    .and_then(mic_media::video::read_pattern);
+                Camera {
+                    key: participant.key.to_string(),
+                    pictures: room.video_count(participant.key),
+                    sender: pattern.map(|pattern| pattern.sender),
+                    frame: pattern.map(|pattern| pattern.frame),
+                }
+            })
+            .collect();
+        Ok(Seen { cameras })
     }
 
     /// Leaves the room it's in, if any.

@@ -52,6 +52,10 @@ struct Cli {
     #[cfg(all(unix, feature = "harness"))]
     #[arg(long)]
     tone: Option<f64>,
+    /// Sends a pattern naming this id for a camera (mic-media's `PatternCamera`), with `--tone`.
+    #[cfg(all(unix, feature = "harness"))]
+    #[arg(long, requires = "tone")]
+    camera_pattern: Option<u8>,
     /// Claims to decode only these video codecs, comma-separated, or `none`: the box's way to
     /// see a codec go unsupported.
     #[cfg(all(unix, feature = "harness"))]
@@ -122,7 +126,7 @@ fn run(cli: Cli) -> Result<(), String> {
     #[cfg(all(unix, feature = "harness"))]
     let synthetic = cli
         .tone
-        .map(|tone| mic_harness::synthetic::Synthetic::new(Some(tone)))
+        .map(|tone| mic_harness::synthetic::Synthetic::new(Some(tone), cli.camera_pattern))
         .transpose()
         .map_err(|error| format!("the synthetic audio: {error}"))?;
     #[cfg(all(unix, feature = "harness"))]
@@ -333,6 +337,12 @@ fn apply(
             name: tile.name.as_str().into(),
             me: tile.me,
             muted: tile.muted,
+            cant_decode: tile
+                .cant_decode
+                .as_deref()
+                .unwrap_or_default()
+                .to_uppercase()
+                .into(),
         })
         .collect();
     if tiles.iter().ne(rows.iter().cloned()) {
@@ -436,6 +446,7 @@ mod harness {
             screen: "join".to_owned(),
             tiles: Vec::new(),
             muted: Vec::new(),
+            cant_decode: Vec::new(),
         }));
         let source = ui.clone();
         let harness = Harness::new(
@@ -469,6 +480,12 @@ mod harness {
                     .tiles
                     .iter()
                     .filter(|tile| tile.muted)
+                    .map(|tile| tile.key.clone())
+                    .collect(),
+                cant_decode: view
+                    .tiles
+                    .iter()
+                    .filter(|tile| tile.cant_decode.is_some())
                     .map(|tile| tile.key.clone())
                     .collect(),
             };

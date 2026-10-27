@@ -6,6 +6,20 @@ measurements, and things to revisit. Newest first within each milestone. Each sa
 
 ## M6: Video (VP9)
 
+- **One who decodes nothing would leave everyone without video** (settled). With a single codec,
+  "the first codec every participant decodes" is none as soon as one client decodes nothing, and
+  then nobody sends. Such a participant is now left out of the choice, and told it can't decode,
+  as design §5.4 asks of the tile. With two codecs the same rule keeps Jitsi's fallback for those
+  who decode some. (commit 33)
+- **The box's library check looked only at the client image** (settled). The forger runs in the
+  tools pod, of the moq image, and failed to start once it linked libvpx, which showed only as
+  forgeries never rejected. `box` now checks the forger in its own image. (commit 33)
+- **The camera's codec is chosen at the join, not as the roster changes** (open). With one codec
+  it's the same answer; a second codec needs the choice to follow the roster, and the catalog's
+  rendition re-signed at a group boundary.
+- **No camera device yet** (open). The window sends a camera only with the box's
+  `--camera-pattern`; capture (moq-video's, or v4l2/PipeWire) isn't in the plan's M6 list.
+
 - **VP9 decodes through libvpx directly, not moq-video's `vpx` feature** (settled, revisit). The
   feature is only on moq-video's git `main`, and a git dependency on moq-video brings moq-net,
   hang and moq-mux from git too, beside the crates.io ones mic is pinned to (moq-relay 0.17.8 and

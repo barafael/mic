@@ -70,8 +70,8 @@ impl Vp9Encoder {
         config.g_h = settings.height;
         config.g_timebase = vpx::vpx_rational { num: 1, den: 1000 };
         config.g_lag_in_frames = 0;
-        config.g_threads = std::thread::available_parallelism()
-            .map_or(1, |cores| cores.get().min(4) as u32);
+        config.g_threads =
+            std::thread::available_parallelism().map_or(1, |cores| cores.get().min(4) as u32);
         config.rc_end_usage = vpx::vpx_rc_mode::VPX_CBR;
         config.rc_target_bitrate = settings.kbps;
         config.rc_min_quantizer = 4;

@@ -178,6 +178,8 @@ pub struct Media {
     /// What takes the noise out of the capture: a microphone wants it; a synthetic tone, which
     /// a suppressor would take for noise, doesn't.
     pub noise: mic_media::audio::noise::NoiseSuppression,
+    /// Pictures to send as this participant's camera, if it has one.
+    pub camera: Option<crate::video::Pictures>,
 }
 
 impl Inner {
@@ -232,6 +234,19 @@ impl Inner {
             ))),
             None => None,
         };
+        // The camera in the first codec everyone decodes. In v1 that's VP9 whatever the roster,
+        // since one who decodes none of ours is left out; with a second codec, the choice follows
+        // the roster as it changes.
+        let camera = match (
+            media.camera,
+            mic_media::video::choose(&mic_media::video::Codec::ALL, std::iter::empty()),
+        ) {
+            (Some(pictures), Some(codec)) => Some(tokio::spawn(crate::video::publish(
+                pictures,
+                publication.video_track(crate::video::CAMERA, codec)?,
+            ))),
+            _ => None,
+        };
         Ok(Room::start(Joined {
             invite,
             participant,
@@ -246,6 +261,7 @@ impl Inner {
             origin,
             runtime: self.runtime.clone(),
             voice,
+            camera,
             muted,
             noise,
             mixer: media.mixer,
