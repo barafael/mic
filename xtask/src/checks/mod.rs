@@ -10,6 +10,7 @@ mod network;
 mod record;
 mod relay;
 mod room;
+mod room_40;
 mod roster;
 mod screenshare;
 mod testbox;
@@ -51,10 +52,14 @@ pub enum Phase {
     Screenshare,
     /// Loss, delay, and UDP blocked: what's heard and seen holds, and the WebSocket fallback.
     Network,
+    /// Forty in a room, measured each minute against the budget: not in a default round.
+    #[value(name = "room-40")]
+    Room40,
 }
 
 impl Phase {
-    pub const ALL: [Phase; 13] = [
+    /// What `run` runs when it isn't told which: every phase but `room-40`, which takes minutes.
+    pub const ROUNDS: [Phase; 13] = [
         Phase::Box,
         Phase::Relay,
         Phase::Roster,
@@ -92,6 +97,7 @@ impl Phase {
                 | Phase::Room
                 | Phase::Screenshare
                 | Phase::Network
+                | Phase::Room40
         )
     }
 
@@ -102,7 +108,12 @@ impl Phase {
     pub fn runs_alone(self) -> bool {
         matches!(
             self,
-            Phase::Roster | Phase::Audio | Phase::AudioDevices | Phase::Video | Phase::Network
+            Phase::Roster
+                | Phase::Audio
+                | Phase::AudioDevices
+                | Phase::Video
+                | Phase::Network
+                | Phase::Room40
         )
     }
 
@@ -121,6 +132,7 @@ impl Phase {
             Phase::Room => room::room(checks, the_box),
             Phase::Screenshare => screenshare::screenshare(checks, the_box),
             Phase::Network => network::network(checks, the_box),
+            Phase::Room40 => room_40::room_40(checks, the_box),
         }
     }
 }

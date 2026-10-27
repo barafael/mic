@@ -6,6 +6,28 @@ measurements, and things to revisit. Newest first within each milestone. Each sa
 
 ## M8: Rooms
 
+- **Forty in a room fit the budget** (settled, commit 48). Over three minutes with the six
+  windows and 34 of the crowd: alice's mic at 58-65 % of a core and 285 MiB (one alone, 33 %
+  and 137 MiB), the six windows 3-3.4 cores together, the crowd of 34 about a core in one
+  process, the GPU 18-20 % busy (the host's, its desktop included), and the relay sending 29
+  Mbit/s, against §5.8's 130 for 40: each window watches eight cameras at 500 kbit/s and one
+  voice. (`target/testbox-record/room-40/room-40.txt`) It measures the host as it is: with a
+  game running on the desktop, the same room took twice the CPU (alice 132 %, the baseline
+  66 %) and the GPU was 98 % busy, past the budget. Its baseline says when the host is loaded.
+- **Over the WebSocket fallback, a client sees about ten others** (upstream, commit 48). The
+  relay's WebSocket sessions take qmux's default of 100 bidirectional streams (raw TCP gets
+  1000), not the QUIC side's `--quic-max-streams`, and a moq-lite subscription is a stream: mic
+  subscribes to some seven tracks of each other participant (catalog, checkpoints, profile,
+  voice, chat, reactions, screen, and a camera if shown). In room-40, alice on the fallback saw
+  10 of 39 within a minute. To report: the relay's qmux limit, configurable as QUIC's is.
+  Fewer tracks a participant (chat and reactions on one, the screen only while shared) would
+  raise mic's ceiling, not remove it.
+- **A WebSocket win sticks for the process's life** (upstream, commit 48). moq-tokio remembers
+  each relay where the WebSocket won the race, in a process-wide set that never empties, and
+  gives QUIC no head start there again: TCP then tends to win every dial, though UDP works
+  again. The box restarts alice after the `network` phase. To report: forget the win when QUIC
+  later succeeds, or after a while.
+
 - **Under loss, a voice clicks** (open, commit 46). With 10 % of alice's packets lost and 80 ms
   added, her tone at bob stays over a hundred times louder than any other frequency, but only
   30-70 % of what he hears by power: the rest is clicks. A packet lost within a voice group

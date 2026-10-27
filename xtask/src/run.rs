@@ -53,7 +53,7 @@ pub fn run(
     fresh: bool,
 ) -> Result<()> {
     let phases = if phases.is_empty() {
-        &Phase::ALL[..]
+        &Phase::ROUNDS[..]
     } else {
         phases
     };

@@ -189,7 +189,13 @@ pub fn network(checks: &mut Checks, the_box: &TestBox) -> Result<()> {
     for participant in [&mut alice, &mut bob] {
         participant.reset()?;
     }
-    Ok(())
+    // A fresh alice: once a WebSocket won the race for a relay, moq-tokio gives QUIC no head
+    // start there again for as long as the process lives, and she'd stay on TCP
+    // (docs/observations.md).
+    drop(alice);
+    the_box.play(Pod::Client("alice"))?;
+    crate::ready::display_up(the_box, "alice")?;
+    crate::ready::client_up(the_box, "alice")
 }
 
 /// alice's pod's network, as its `shaper` sidecar sets it.

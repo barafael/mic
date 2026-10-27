@@ -537,7 +537,9 @@ from; the git pins move to releases as they land.
     fallback says it's off.
 48. **`room-40`**: 40 participants, mostly the crowd. Records CPU, GPU, memory and the relay's
     egress per minute against the budget in §5.8 and this host's baseline. It runs alone, and not
-    in every round.
+    in every round. *Done:* `cargo testbox run room-40`; alice at about 60 % of a core, the
+    relay at 29 Mbit/s (docs/observations.md). Over the WebSocket fallback only about ten others
+    fit, an upstream limit to report.
 
 ### M9: Recording
 
@@ -593,7 +595,7 @@ Each is checked by the commit named, which settles it in its body and in the des
 | `moq-vaapi` can take a VP9 decoder | 37 | VP9 decodes in software everywhere; the box's GPU is used for rendering |
 | A `NET_ADMIN` sidecar can shape traffic for one pod in rootless Podman (*holds*, commit 46) | 46 | Shaping on the relay's side, per client address |
 | The pinned `moq-relay` serves WebSocket, and `moq-tokio`'s fallback can be turned off (*holds*, commit 47) | 47 | The fallback waits for upstream; D9's opt-out is reported as missing |
-| 40 participants in one `mic-crowd` process stay within the §5.8 budget | 48 | The crowd is split over several pods |
+| 40 participants in one `mic-crowd` process stay within the §5.8 budget (*holds*, commit 48) | 48 | The crowd is split over several pods |
 
 ## Open points for this plan
 
