@@ -18,6 +18,8 @@ pub struct Client {
     next_id: u64,
     /// Pushes that came while a reply was awaited, oldest first.
     pushed: VecDeque<Pushed>,
+    /// What came of a line before a read timed out: the rest comes on the next read.
+    partial: Vec<u8>,
 }
 
 impl Client {
@@ -30,6 +32,7 @@ impl Client {
             writer,
             next_id: 1,
             pushed: VecDeque::new(),
+            partial: Vec::new(),
         })
     }
 
@@ -67,12 +70,43 @@ impl Client {
         serde_json::from_str(&line).map_err(|error| format!("not a push: {error}: {line}"))
     }
 
+    /// The next whole line. A read that times out keeps what it got of the line, which the next
+    /// call goes on from (`read_until` leaves read bytes in the buffer on an error).
     fn line(&mut self) -> Result<String, String> {
-        let mut line = String::new();
-        match self.reader.read_line(&mut line) {
-            Ok(0) => Err("the harness closed the connection".to_owned()),
-            Ok(_) => Ok(line),
+        match self.reader.read_until(b'\n', &mut self.partial) {
+            Ok(_) if self.partial.ends_with(b"\n") => {
+                let line = std::mem::take(&mut self.partial);
+                String::from_utf8(line).map_err(|error| format!("a line that isn't UTF-8: {error}"))
+            }
+            Ok(_) => Err("the harness closed the connection".to_owned()),
             Err(error) => Err(format!("reading from the harness: {error}")),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Write;
+    use std::os::unix::net::UnixListener;
+    use std::time::Duration;
+
+    use super::*;
+
+    #[test]
+    fn a_line_cut_by_a_timeout_is_finished_by_the_next_read() {
+        let directory =
+            std::env::temp_dir().join(format!("mic-harness-partial-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let socket = directory.join("socket");
+        let _removed = std::fs::remove_file(&socket);
+        let listener = UnixListener::bind(&socket).unwrap();
+        let mut client = Client::connect(&socket, Duration::from_millis(100)).unwrap();
+        let (mut server, _) = listener.accept().unwrap();
+        server.write_all(br#"{"seq": 1, "snapshot": "#).unwrap();
+        assert!(client.next_pushed().is_err(), "half a line isn't one");
+        server
+            .write_all(b"{\"room\": null, \"ui\": null}}\n")
+            .unwrap();
+        assert_eq!(client.next_pushed().unwrap().seq, 1);
     }
 }
