@@ -427,7 +427,10 @@ Each numbered item below is about one commit. Box phases are in **bold**.
     and a microphone fed by a sink of its own; the loopback between them comes with commit 29,
     which needs it.
 29. `mic-media: echo cancellation with sonora` (D14). **`audio-devices`**: with the loopback on,
-    alice doesn't hear her own tone back.
+    alice doesn't hear her own tone back. *Done:* the loopback is a `pw-link` the check makes
+    and undoes, and it carries the echo (alice hears herself at full level without the
+    canceller, silence with it). AEC3 keeps a voice at speech level over the echo, but takes a
+    near-end tone at -6 dBFS for echo: double talk is measured with speech in commit 30.
 30. `mic-media: noise suppression`. `nnnoiseless` and `sonora-ns` measured in the box against
     injected noise; the choice and the numbers go in the commit body and the design doc.
     **`audio-devices`** checks a minimum gain in tone-to-noise ratio, set from that measurement.
@@ -545,7 +548,6 @@ Each is checked by the commit named, which settles it in its body and in the des
 | Assumption | Checked in | If it's wrong |
 |---|---|---|
 | The keyring works on GitHub's Windows and macOS runners, and GNOME Keyring on its Linux one (it does in a container here) | 11 (CI) | The keyring test is skipped in CI where it can't run, and the box's clients cover Linux |
-| A speaker-to-mic loopback in the clients' PipeWire (PipeWire itself runs rootless: commit 28) | 29 | A virtual sink and source in the `cpal` test path only, without PipeWire |
 | libvpx builds and links on the Windows and macOS CI runners | 32 | A vendored static build through the binding's build script |
 | lavapipe renders offscreen in GitHub's Linux runners | 34 | `mic-render`'s pixel tests run in the box only |
 | `moq-vaapi` can take a VP9 decoder | 37 | VP9 decodes in software everywhere; the box's GPU is used for rendering |

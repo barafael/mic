@@ -27,6 +27,9 @@ struct Inner {
     next_id: AtomicU64,
     /// Fills that found the lock taken (a stream coming or going), and so played silence.
     contended: AtomicU64,
+    /// Where what's played goes too, for an echo canceller, if there is one.
+    #[cfg(feature = "devices")]
+    reference: Mutex<Option<HeapProd<f32>>>,
 }
 
 struct Stream {
@@ -90,6 +93,29 @@ impl Mixer {
         for sample in out.iter_mut() {
             *sample = sample.clamp(-1.0, 1.0);
         }
+        drop(streams);
+        // What's played, for the echo canceller; what doesn't fit, while no microphone takes it
+        // in, is dropped.
+        #[cfg(feature = "devices")]
+        if let Ok(mut reference) = self.inner.reference.try_lock()
+            && let Some(reference) = reference.as_mut()
+        {
+            reference.push_slice(out);
+        }
+    }
+
+    /// An echo canceller for a microphone, against what this mixer plays: it taps what's played
+    /// from now on. One at a time: a second replaces the first's tap.
+    #[cfg(feature = "devices")]
+    pub fn echo_canceller(&self) -> super::EchoCanceller {
+        // 200 ms: more than any output device buffers ahead of its echo.
+        let (producer, consumer) = HeapRb::<f32>::new(SAMPLE_RATE as usize / 5).split();
+        *self
+            .inner
+            .reference
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(producer);
+        super::EchoCanceller::new(consumer)
     }
 
     /// How many streams it mixes.

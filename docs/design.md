@@ -783,6 +783,15 @@ capture or its PCM `encode::Input` path.
 - **`moq-tokio`'s optional `webrtc` feature** (WebRTC data-channel transport)
   and the `moq-rtc` gateway must stay disabled or unused.
 
+**Echo cancellation as built (commit 29).** sonora's AEC3, in mic-media, against the mixer's
+output: the mixer taps what it plays into a reference ring, and the microphone's callback feeds
+the canceller everything played since, then its own 10 ms frames, so both halves run in order on
+one thread (adding up to 10 ms to capture). In the box, carol's speaker looped into her
+microphone sends alice's tone back at full level without it, and not at all with it. Measured in
+a unit test: a near-end voice at speech level (-20 dBFS) over the echo is kept (about 87 %), but
+a near-end *tone* at -6 dBFS is taken for echo and suppressed; double talk is measured with
+speech when noise suppression is chosen (commit 30) **(unverified for speech)**.
+
 **Noise-suppression options:**
 
 | Crate | Approach | Notes |

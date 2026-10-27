@@ -1,15 +1,19 @@
 //! The system's microphone and speaker for the app: the speaker plays from when the app starts,
-//! and each join opens the microphone afresh. A device that isn't there or won't open costs only
+//! and each join opens the microphone afresh, its echo of the speaker cancelled (D14). A device that isn't there or won't open costs only
 //! its direction: without a microphone the app listens, without a speaker it speaks.
 
 use std::sync::{Arc, Mutex, PoisonError};
 
 use mic_core::Media;
-use mic_media::audio::{Microphone, Mixer, Running, Sink as _, Source as _, Speaker, capture};
+use mic_media::audio::{
+    EchoCanceller, Microphone, Mixer, Running, Sink as _, Source as _, Speaker, capture,
+};
 
 pub struct Devices {
     /// The speaker's mixer, if it opened.
     mixer: Option<Mixer>,
+    /// What cancels the speaker out of the microphone, if there's a speaker.
+    echo: Option<EchoCanceller>,
     /// The microphone of the room it's in: a join opens a new one, which closes the last.
     microphone: Arc<Mutex<Option<Running>>>,
     _speaker: Option<Running>,
@@ -26,6 +30,7 @@ impl Devices {
             }
         };
         Self {
+            echo: speaker.is_some().then(|| mixer.echo_canceller()),
             mixer: speaker.is_some().then_some(mixer),
             microphone: Arc::new(Mutex::new(None)),
             _speaker: speaker,
@@ -34,13 +39,21 @@ impl Devices {
 
     /// What each join sends and plays (`mic_core::App::with_media`).
     pub fn media(&self) -> impl Fn() -> Media + Send + Sync + 'static {
-        let (mixer, microphone) = (self.mixer.clone(), self.microphone.clone());
+        let (mixer, microphone, echo) = (
+            self.mixer.clone(),
+            self.microphone.clone(),
+            self.echo.clone(),
+        );
         move || {
             let (writer, captured) = capture();
             // The last room's first, so a device that opens once at a time can.
             let mut slot = microphone.lock().unwrap_or_else(PoisonError::into_inner);
             *slot = None;
-            let capture = match Box::new(Microphone).start(writer) {
+            let device = match &echo {
+                Some(echo) => Microphone::cancelling(echo.clone()),
+                None => Microphone::new(),
+            };
+            let capture = match Box::new(device).start(writer) {
                 Ok(running) => {
                     *slot = Some(running);
                     Some(captured)

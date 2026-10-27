@@ -13,6 +13,8 @@
 mod analyze;
 #[cfg(feature = "devices")]
 mod device;
+#[cfg(feature = "devices")]
+mod echo;
 mod mixer;
 mod ring;
 mod tone;
@@ -24,6 +26,8 @@ use derive_more::{Display, Error};
 pub use analyze::{Analyzer, AnalyzingSink, level};
 #[cfg(feature = "devices")]
 pub use device::{Microphone, Speaker};
+#[cfg(feature = "devices")]
+pub use echo::EchoCanceller;
 pub use mixer::{Mixer, Playout};
 pub use ring::{Capture, Writer, capture};
 pub use tone::ToneSource;

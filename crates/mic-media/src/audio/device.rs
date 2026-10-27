@@ -13,8 +13,23 @@ use cpal::traits::{DeviceTrait as _, HostTrait as _};
 
 use super::{Error, Mixer, Running, SAMPLE_RATE, Sink, Source, Writer};
 
-/// The default microphone.
-pub struct Microphone;
+/// The default microphone, with its echo cancelled against what a mixer plays, if it's given
+/// one ([`Mixer::echo_canceller`](super::Mixer::echo_canceller)).
+#[derive(Default)]
+pub struct Microphone {
+    echo: Option<super::EchoCanceller>,
+}
+
+impl Microphone {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// The microphone, with `echo` cancelling what the speaker plays out of it.
+    pub fn cancelling(echo: super::EchoCanceller) -> Self {
+        Self { echo: Some(echo) }
+    }
+}
 
 /// The default speaker.
 pub struct Speaker;
@@ -24,6 +39,11 @@ const CHUNK: usize = 480;
 
 impl Source for Microphone {
     fn start(self: Box<Self>, mut samples: Writer) -> Result<Running, Error> {
+        let echo = self.echo;
+        if let Some(echo) = &echo {
+            // What played while no microphone ran is of no use to the model now.
+            echo.idle();
+        }
         stream("mic-microphone", move || {
             let device = cpal::default_host()
                 .default_input_device()
@@ -39,6 +59,9 @@ impl Source for Microphone {
                             let count = frames.len() / channels;
                             for (sample, frame) in mono.iter_mut().zip(frames.chunks(channels)) {
                                 *sample = frame.iter().sum::<f32>() / channels as f32;
+                            }
+                            if let Some(echo) = &echo {
+                                echo.process(&mut mono[..count]);
                             }
                             samples.write(&mono[..count]);
                         }
