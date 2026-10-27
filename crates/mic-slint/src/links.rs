@@ -108,9 +108,11 @@ pub fn register(arguments: &[String]) -> Result<String, String> {
         .unwrap_or_else(|| home.join(".config"));
     let applications = data.join("applications");
     std::fs::create_dir_all(&applications).map_err(|error| error.to_string())?;
-    let desktop = applications.join("mic.desktop");
+    let desktop = applications.join(format!("{}.desktop", crate::APP_ID));
     std::fs::write(&desktop, desktop_file(&exe.to_string_lossy(), arguments))
         .map_err(|error| format!("{}: {error}", desktop.display()))?;
+    // The desktop file an earlier mic installed, before mic had an app id: one handler, not two.
+    let _gone = std::fs::remove_file(applications.join("mic.desktop"));
     // As xdg-mime would set it, without needing xdg-utils.
     std::fs::create_dir_all(&config).map_err(|error| error.to_string())?;
     let list = config.join("mimeapps.list");
@@ -181,20 +183,20 @@ fn desktop_file(exe: &str, arguments: &[String]) -> String {
 /// `mimeapps.list` as `list` was, with mic the default for `mic://`: its other lines as they were.
 fn with_default(list: &str) -> String {
     const SECTION: &str = "[Default Applications]";
-    const ENTRY: &str = "x-scheme-handler/mic=mic.desktop";
+    let entry = format!("x-scheme-handler/mic={}.desktop", crate::APP_ID);
     let mut lines: Vec<String> = list
         .lines()
         .filter(|line| !line.starts_with("x-scheme-handler/mic="))
         .map(str::to_owned)
         .collect();
     match lines.iter().position(|line| line.trim() == SECTION) {
-        Some(at) => lines.insert(at + 1, ENTRY.to_owned()),
+        Some(at) => lines.insert(at + 1, entry),
         None => {
             if lines.last().is_some_and(|line| !line.is_empty()) {
                 lines.push(String::new());
             }
             lines.push(SECTION.to_owned());
-            lines.push(ENTRY.to_owned());
+            lines.push(entry);
         }
     }
     lines.join("\n") + "\n"
@@ -208,13 +210,15 @@ mod tests {
     fn mic_becomes_the_default_and_the_rest_stays() {
         let before = "[Default Applications]\ntext/html=firefox.desktop\nx-scheme-handler/mic=old.desktop\n\n[Added Associations]\nimage/png=gimp.desktop\n";
         let after = with_default(before);
-        assert!(after.contains("[Default Applications]\nx-scheme-handler/mic=mic.desktop\n"));
+        assert!(after.contains(
+            "[Default Applications]\nx-scheme-handler/mic=io.github.barafael.mic.desktop\n"
+        ));
         assert!(after.contains("text/html=firefox.desktop"));
         assert!(after.contains("image/png=gimp.desktop"));
         assert!(!after.contains("old.desktop"));
         assert_eq!(
             with_default(""),
-            "[Default Applications]\nx-scheme-handler/mic=mic.desktop\n"
+            "[Default Applications]\nx-scheme-handler/mic=io.github.barafael.mic.desktop\n"
         );
     }
 

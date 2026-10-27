@@ -90,6 +90,8 @@ pub struct View {
     pub recording_notice: String,
     /// Whether this participant records.
     pub recording_self: bool,
+    /// Whether a share of its screen is opening: the desktop may be asking which.
+    pub share_opening: bool,
 }
 
 /// Which of the others have a tile, when there are more than fit: the active speaker, and those
@@ -154,6 +156,7 @@ pub fn view(room: Option<(&RoomState, String)>) -> View {
             recording: Vec::new(),
             recording_notice: String::new(),
             recording_self: false,
+            share_opening: false,
         };
     };
     let first = Shown::default().choose(state);
@@ -244,6 +247,7 @@ pub fn view_of(state: &RoomState, invite: String, shown: &[ParticipantKey]) -> V
             .collect(),
         recording_notice: recording_notice(state),
         recording_self: state.me.profile.recording,
+        share_opening: state.screen_opening,
     }
 }
 
@@ -352,6 +356,7 @@ mod tests {
             speaking: Vec::new(),
             chat: Vec::new(),
             reactions: Vec::new(),
+            screen_opening: false,
         }
     }
 

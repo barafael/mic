@@ -137,6 +137,9 @@ const VERSION_RETRY: Duration = Duration::from_secs(3);
 /// How long leaving may take when the window closes.
 const LEAVING: Duration = Duration::from_secs(5);
 
+/// mic's application id, reverse-DNS as desktops want it, until mic has a domain of its own.
+pub const APP_ID: &str = "io.github.barafael.mic";
+
 fn main() -> ExitCode {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -236,6 +239,10 @@ fn run(cli: Cli) -> Result<(), String> {
     };
 
     let gpu = select_backend()?;
+    // What the desktop knows mic by: its desktop file (links.rs) and the screen-share portal's
+    // asking (mic-media) are named for it too.
+    slint::set_xdg_app_id(APP_ID).map_err(|error| format!("the app id: {error}"))?;
+    mic_media::video::screen::set_app_id(APP_ID);
     let window = AppWindow::new().map_err(|error| format!("the window: {error}"))?;
     window.set_version(env!("CARGO_PKG_VERSION").into());
     let tiles = Rc::new(VecModel::<Tile>::default());
@@ -466,17 +473,22 @@ fn run(cli: Cli) -> Result<(), String> {
             }
         }
     });
-    // Sharing: the picker asks what, the core shares it until asked to stop.
+    // Sharing: the picker asks what, the core shares it until asked to stop. A share that stops
+    // without being asked to (its capture ended) is told of.
     let offered = Rc::new(std::cell::RefCell::new(Vec::<screens::Choice>::new()));
+    let stop_asked = Rc::new(std::cell::Cell::new(false));
     window.on_toggle_share({
         let command = command.clone();
         let window = window.as_weak();
         let offered = offered.clone();
+        let stop_asked = stop_asked.clone();
         move || {
             let Some(window) = window.upgrade() else {
                 return;
             };
-            if window.get_sharing() {
+            // Stopping a share, or one still opening while the desktop asks which screen.
+            if window.get_sharing() || window.get_share_opening() {
+                stop_asked.set(true);
                 command(Command::ShareScreen { on: false });
                 return;
             }
@@ -485,17 +497,25 @@ fn run(cli: Cli) -> Result<(), String> {
                 tracing::warn!("nothing to share: no display or window found");
                 return;
             }
-            window.set_share_choices(ModelRc::new(VecModel::from(
-                choices
-                    .iter()
-                    .map(|choice| slint::SharedString::from(choice.label.as_str()))
-                    .collect::<Vec<_>>(),
-            )));
+            // One choice, as Wayland's (the desktop asks which screen), needs no picker.
+            let only = choices.len() == 1;
+            if !only {
+                window.set_share_choices(ModelRc::new(VecModel::from(
+                    choices
+                        .iter()
+                        .map(|choice| slint::SharedString::from(choice.label.as_str()))
+                        .collect::<Vec<_>>(),
+                )));
+            }
             *offered.borrow_mut() = choices;
+            if only {
+                window.invoke_share(0);
+            }
         }
     });
     window.on_share({
-        let command = command.clone();
+        let app = app.clone();
+        let runtime = runtime.handle().clone();
         let window = window.as_weak();
         let screens = screens.clone();
         move |index| {
@@ -505,10 +525,19 @@ fn run(cli: Cli) -> Result<(), String> {
             let chosen = usize::try_from(index)
                 .ok()
                 .and_then(|index| offered.borrow().get(index).cloned());
-            if let Some(chosen) = chosen {
-                screens.choose(chosen.source);
-                command(Command::ShareScreen { on: true });
-            }
+            let (Some(chosen), Some(room)) = (chosen, app.current()) else {
+                return;
+            };
+            screens.choose(chosen.source);
+            let window = window.clone();
+            runtime.spawn(async move {
+                if let Err(error) = room.command(Command::ShareScreen { on: true }).await {
+                    tracing::warn!(%error, "sharing the screen");
+                    let _told = window.upgrade_in_event_loop(|window| {
+                        notify(&window, "Your screen couldn't be shared.");
+                    });
+                }
+            });
         }
     });
     window.on_toggle_recording({
@@ -552,6 +581,12 @@ fn run(cli: Cli) -> Result<(), String> {
                 let Some(window) = window.upgrade() else {
                     return;
                 };
+                if !view.sharing {
+                    if window.get_sharing() && view.screen == Screen::Room && !stop_asked.get() {
+                        notify(&window, "Your screen share stopped.");
+                    }
+                    stop_asked.set(false);
+                }
                 let models = Models {
                     tiles: &tiles,
                     chat: &chat,
@@ -748,6 +783,12 @@ const FADING: Duration = Duration::from_millis(240);
 
 /// Sets `view` on the window, unless it's what shows already, and tells `shown`.
 /// The window's models, which `apply` brings to each view.
+/// Says `text` over the room a moment.
+fn notify(window: &AppWindow, text: &str) {
+    window.set_room_notice(text.into());
+    window.set_room_notice_seq(window.get_room_notice_seq().wrapping_add(1));
+}
+
 struct Models<'a> {
     tiles: &'a Rc<VecModel<Tile>>,
     chat: &'a VecModel<ChatLine>,
@@ -777,6 +818,7 @@ fn apply(
     window.set_sharing(view.sharing);
     window.set_recording(view.recording_notice.as_str().into());
     window.set_recording_self(view.recording_self);
+    window.set_share_opening(view.share_opening);
     let Models {
         tiles,
         chat,

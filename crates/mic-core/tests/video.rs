@@ -319,6 +319,130 @@ async fn a_shared_screen_is_seen_until_it_stops() {
     );
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn a_share_whose_capture_ends_stops_for_everyone() {
+    use mic_core::Command;
+    use mic_core::video::{SCREEN_SETTINGS, ScreenSource};
+    let relay = TestRelay::start().await.unwrap();
+    let invite = Invite::new_room();
+    // A capture that sends a few pictures and ends, as a screen that goes away does.
+    let screen: ScreenSource = std::sync::Arc::new(|pictures| {
+        std::thread::spawn(move || {
+            for frame in 0..10 {
+                let picture = Pattern { sender: 78, frame }
+                    .draw(SCREEN_SETTINGS.width, SCREEN_SETTINGS.height);
+                pictures.send_replace(Some(std::sync::Arc::new(picture)));
+                std::thread::sleep(Duration::from_millis(100));
+            }
+        });
+        Ok(Running::new(|| {}))
+    });
+    let alice = Client::new(
+        config(&relay),
+        &InMemory::default(),
+        tokio::runtime::Handle::current(),
+    )
+    .unwrap()
+    .join_with(
+        invite.clone(),
+        Profile::new("Alice"),
+        Media {
+            screen: Some(screen),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    let bob = join(&invite, "Bob", None, config(&relay)).await;
+    alice
+        .command(Command::ShareScreen { on: true })
+        .await
+        .unwrap();
+    assert!(alice.state().borrow().me.profile.sharing);
+    // It stops by itself, for Alice and for Bob.
+    let mut mine = alice.state();
+    tokio::time::timeout(PATIENCE, mine.wait_for(|state| !state.me.profile.sharing))
+        .await
+        .unwrap()
+        .unwrap();
+    let mut theirs = bob.room.state();
+    tokio::time::timeout(
+        PATIENCE,
+        theirs.wait_for(|state| {
+            !state.participants.is_empty()
+                && state.participants.iter().all(|them| !them.profile.sharing)
+        }),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    // And starts again when asked.
+    alice
+        .command(Command::ShareScreen { on: true })
+        .await
+        .unwrap();
+    assert!(alice.state().borrow().me.profile.sharing);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_share_waiting_on_the_desktop_leaves_the_room_free_and_can_be_stopped() {
+    use mic_core::Command;
+    use mic_core::video::ScreenSource;
+    let relay = TestRelay::start().await.unwrap();
+    let invite = Invite::new_room();
+    // A capture that opens only after a while, as one whose desktop asks which screen.
+    let screen: ScreenSource = std::sync::Arc::new(|_pictures| {
+        std::thread::sleep(Duration::from_secs(3));
+        Ok(Running::new(|| {}))
+    });
+    let alice = Client::new(
+        config(&relay),
+        &InMemory::default(),
+        tokio::runtime::Handle::current(),
+    )
+    .unwrap()
+    .join_with(
+        invite.clone(),
+        Profile::new("Alice"),
+        Media {
+            screen: Some(screen),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    let sharing = tokio::spawn({
+        let alice = alice.clone();
+        async move { alice.command(Command::ShareScreen { on: true }).await }
+    });
+    let mut state = alice.state();
+    tokio::time::timeout(PATIENCE, state.wait_for(|state| state.screen_opening))
+        .await
+        .unwrap()
+        .unwrap();
+    // The room still answers while the capture opens.
+    tokio::time::timeout(
+        Duration::from_secs(1),
+        alice.command(Command::SetHand { raised: true }),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    // Stopped while it opens: nothing is shared, and the share's asker hears so at once.
+    alice
+        .command(Command::ShareScreen { on: false })
+        .await
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(1), sharing)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    let state = alice.state().borrow().clone();
+    assert!(!state.screen_opening);
+    assert!(!state.me.profile.sharing);
+}
+
 #[test]
 fn under_a_second_isnt_a_recording() {
     let pictures = (0..CAMERA_SETTINGS.fps - 1)

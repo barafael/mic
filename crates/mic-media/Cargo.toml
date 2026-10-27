@@ -13,9 +13,10 @@ devices = ["dep:cpal"]
 # VP9 through libvpx, which it links: the system's, found by pkg-config (VPX_STATIC=1 links it
 # statically).
 vp9 = ["dep:vpx-sys"]
-# Screens and windows captured, for screenshare, through moq-video's capture: X11 on Linux,
-# ScreenCaptureKit on macOS, Windows.Graphics.Capture on Windows.
-screen = ["dep:moq-video", "tokio/rt"]
+# Screens and windows captured, for screenshare, through moq-video's capture: X11 on Linux, or on
+# Wayland the desktop's portal and PipeWire (which it links: the system's libpipewire, its bindings
+# made by libclang); ScreenCaptureKit on macOS, Windows.Graphics.Capture on Windows.
+screen = ["dep:moq-video", "moq-video/pipewire", "dep:ashpd", "tokio/rt-multi-thread"]
 
 [dependencies]
 cpal = { version = "0.18.2", optional = true }
@@ -28,6 +29,11 @@ sonora = "0.2.0"
 tokio = { version = "1.54.1", features = ["time", "sync"] }
 tracing = "0.1.44"
 vpx-sys = { package = "libvpx-native-sys", version = "5.0.17", optional = true }
+
+# The portal's registry, so that a share's asking names mic (the same ashpd, and so the same
+# D-Bus connection, as moq-video's).
+[target.'cfg(target_os = "linux")'.dependencies]
+ashpd = { version = "0.13.13", default-features = false, features = ["tokio"], optional = true }
 
 [dev-dependencies]
 tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "time"] }
