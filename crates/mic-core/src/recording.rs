@@ -625,6 +625,7 @@ mod tests {
             speaking: Vec::new(),
             chat: Vec::new(),
             reactions: Vec::new(),
+            screen_opening: false,
         }
     }
 

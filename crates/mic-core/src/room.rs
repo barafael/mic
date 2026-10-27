@@ -49,6 +49,9 @@ pub struct RoomState {
     /// The newest reactions, this participant's among them: the newest [`REACTIONS_KEPT`].
     #[serde(default)]
     pub reactions: Vec<Reacted>,
+    /// A share of this participant's screen is opening: the desktop may be asking which screen.
+    #[serde(default)]
+    pub screen_opening: bool,
 }
 
 /// A chat message.
@@ -230,6 +233,7 @@ impl Room {
             speaking: Vec::new(),
             chat: Vec::new(),
             reactions: Vec::new(),
+            screen_opening: false,
         });
         let (events, _) = broadcast::channel(EVENTS);
         let weak_events = events.downgrade();
@@ -477,6 +481,10 @@ impl Task {
         loop {
             tokio::select! {
                 request = requests.recv() => match request {
+                    // Answered once the capture opens, which may wait on the desktop's asking.
+                    Some(Request::Command(Command::ShareScreen { on: true }, reply)) => {
+                        self.share(reply);
+                    }
                     Some(Request::Command(command, reply)) => {
                         let left = command == Command::Leave;
                         // The asker may have gone; then nobody needs the answer.
@@ -508,6 +516,10 @@ impl Task {
                 status = status(&mut self.connection) => self.status(status),
                 _ = looking.tick() => self.look_at_speakers(),
                 Some(heard) = self.hearing.recv() => self.heard(heard),
+                captured = captured(&mut self.screen) => match captured {
+                    Captured::Opened(opened) => self.capture_opened(opened),
+                    Captured::Ended(count) => self.capture_ended(count),
+                },
             }
         }
     }
@@ -612,15 +624,20 @@ impl Task {
                 hand: raised,
                 ..self.profile.clone()
             }),
-            Command::ShareScreen { on } => {
+            // A share to start is `share`'s, answered once it opens: this stops one, or one
+            // still opening.
+            Command::ShareScreen { .. } => {
                 let screen = self.screen.as_mut().ok_or(Error::NoScreen)?;
-                if on {
-                    screen.start(&mut self.publication)?;
-                } else {
+                if let Some(opening) = screen.opening.take() {
+                    // Nothing was shared, as asked; whoever asked to share hears so.
+                    let _unasked = opening.reply.send(Ok(()));
+                    self.set_screen_opening(false);
+                }
+                if let Some(screen) = self.screen.as_mut() {
                     screen.stop();
                 }
                 self.set_profile(Profile {
-                    sharing: on,
+                    sharing: false,
                     ..self.profile.clone()
                 })
             }
@@ -682,6 +699,67 @@ impl Task {
         let me = self.state.borrow().me.key;
         self.said(me, said);
         Ok(())
+    }
+
+    /// Starts opening the screen's capture, answering `reply` once it's open, or at once if
+    /// there's nothing to share or it's shared or opening already.
+    fn share(&mut self, reply: oneshot::Sender<Result<(), Error>>) {
+        let Some(screen) = self.screen.as_mut() else {
+            let _unasked = reply.send(Err(Error::NoScreen));
+            return;
+        };
+        if screen.open(reply) {
+            self.set_screen_opening(true);
+        }
+    }
+
+    /// A capture opened, or not: the share starts, for everyone, and its asker hears.
+    fn capture_opened(&mut self, opened: Result<mic_media::audio::Running, String>) {
+        let Some(screen) = self.screen.as_mut() else {
+            return;
+        };
+        let Some(opening) = screen.opening.take() else {
+            return;
+        };
+        let started = opened
+            .map_err(Error::Screen)
+            .and_then(|running| screen.begin(running, opening.capture, &mut self.publication));
+        let shared = started.and_then(|()| {
+            self.set_profile(Profile {
+                sharing: true,
+                ..self.profile.clone()
+            })
+        });
+        self.set_screen_opening(false);
+        // The asker may have gone; then nobody needs the answer.
+        let _unasked = opening.reply.send(shared);
+    }
+
+    fn set_screen_opening(&self, opening: bool) {
+        self.state.send_if_modified(|state| {
+            let changed = state.screen_opening != opening;
+            state.screen_opening = opening;
+            changed
+        });
+    }
+
+    /// A capture that ended: if it was the share, the share stops, as if asked to.
+    fn capture_ended(&mut self, count: u64) {
+        let Some(screen) = self.screen.as_mut() else {
+            return;
+        };
+        if !screen.ended_by_itself(count) {
+            return;
+        }
+        tracing::warn!("the screen's capture ended: the share stops");
+        screen.stop();
+        let profile = Profile {
+            sharing: false,
+            ..self.profile.clone()
+        };
+        if let Err(error) = self.set_profile(profile) {
+            tracing::warn!(%error, "telling the room the share stopped");
+        }
     }
 
     /// `profile`, for everyone in the room, and in the state.
@@ -803,32 +881,89 @@ impl Drop for Task {
 /// it while it's shared.
 struct Screen {
     source: crate::video::ScreenSource,
-    /// What the capture sends into, and the track's sender reads.
+    /// What the capture's pictures are copied into, and the track's sender reads.
     pictures: watch::Sender<Option<Arc<mic_media::video::Picture>>>,
     on: watch::Sender<bool>,
     /// Sends the track, from the first share until the room is left.
     sending: Option<tokio::task::JoinHandle<()>>,
     /// The capture, while it's shared.
     capturing: Option<mic_media::audio::Running>,
+    /// Counts the shares started and stopped: a capture that ends is named by the count it
+    /// started at, and is the share's end only if nothing started or stopped since.
+    count: u64,
+    /// The count a capture started at, once it has ended: its sender dropped, as when the screen
+    /// went away or the desktop's own "stop sharing" was pressed.
+    ended: mpsc::UnboundedSender<u64>,
+    ends: mpsc::UnboundedReceiver<u64>,
+    /// A capture being opened, and who asked for it.
+    opening: Option<Opening>,
+}
+
+/// A screen's capture being opened, on a blocking thread: the desktop may ask which screen, and
+/// waits for an answer as long as it takes.
+struct Opening {
+    opened: tokio::task::JoinHandle<Result<mic_media::audio::Running, String>>,
+    /// What the capture sends into, once it's open.
+    capture: watch::Receiver<Option<Arc<mic_media::video::Picture>>>,
+    reply: oneshot::Sender<Result<(), Error>>,
 }
 
 impl Screen {
     fn new(source: crate::video::ScreenSource) -> Self {
+        let (ended, ends) = mpsc::unbounded_channel();
         Self {
             source,
             pictures: watch::channel(None).0,
             on: watch::channel(false).0,
             sending: None,
             capturing: None,
+            count: 0,
+            ended,
+            ends,
+            opening: None,
         }
     }
 
-    /// Starts capturing and sending, the track made and named in the catalog the first time.
-    fn start(&mut self, publication: &mut Publication) -> Result<(), Error> {
-        if self.capturing.is_some() {
-            return Ok(());
+    /// Starts opening a capture, `reply` answered once it's open (`Task::capture_opened`). If
+    /// it's shared or opening already, `reply` is answered now; false then.
+    fn open(&mut self, reply: oneshot::Sender<Result<(), Error>>) -> bool {
+        if self.capturing.is_some() || self.opening.is_some() {
+            let _unasked = reply.send(Ok(()));
+            return false;
         }
-        self.capturing = Some((self.source)(self.pictures.clone()).map_err(Error::Screen)?);
+        // Each capture sends into a channel of its own, copied into `pictures` until it ends.
+        let (captured, capture) = watch::channel(None);
+        let source = self.source.clone();
+        // Dropped unawaited, as when the share is stopped while it opens, what it opened is
+        // dropped with it once it's open: the capture stops.
+        let opened = tokio::task::spawn_blocking(move || source(captured));
+        self.opening = Some(Opening {
+            opened,
+            capture,
+            reply,
+        });
+        true
+    }
+
+    /// Starts sending what an opened capture sends, the track made and named in the catalog the
+    /// first time.
+    fn begin(
+        &mut self,
+        running: mic_media::audio::Running,
+        mut capture: watch::Receiver<Option<Arc<mic_media::video::Picture>>>,
+        publication: &mut Publication,
+    ) -> Result<(), Error> {
+        self.capturing = Some(running);
+        self.count += 1;
+        let (count, pictures, ended) = (self.count, self.pictures.clone(), self.ended.clone());
+        tokio::spawn(async move {
+            while capture.changed().await.is_ok() {
+                let picture = capture.borrow_and_update().clone();
+                pictures.send_replace(picture);
+            }
+            // The room may be gone; then nobody asks.
+            let _unasked = ended.send(count);
+        });
         if self.sending.is_none() {
             let codec = mic_media::video::Codec::Vp9;
             let track = publication.video_track(crate::video::SCREEN, codec)?;
@@ -846,6 +981,39 @@ impl Screen {
     fn stop(&mut self) {
         self.on.send_replace(false);
         self.capturing = None;
+        self.count += 1;
+    }
+
+    /// Whether a capture that ended, at `count`, is the share now: it ended by itself.
+    fn ended_by_itself(&self, count: u64) -> bool {
+        self.capturing.is_some() && count == self.count
+    }
+}
+
+/// What became of a screen's capture.
+enum Captured {
+    /// The capture being opened is open, or not.
+    Opened(Result<mic_media::audio::Running, String>),
+    /// The capture that started at this count ended.
+    Ended(u64),
+}
+
+/// The next thing to become of the screen's capture; never, without a screen.
+async fn captured(screen: &mut Option<Screen>) -> Captured {
+    let Some(Screen { ends, opening, .. }) = screen else {
+        return std::future::pending().await;
+    };
+    tokio::select! {
+        // `Screen` keeps a sender, so the channel never closes.
+        Some(count) = ends.recv() => Captured::Ended(count),
+        opened = async {
+            match opening {
+                Some(opening) => (&mut opening.opened)
+                    .await
+                    .map_err(|error| format!("opening the capture: {error}"))?,
+                None => std::future::pending().await,
+            }
+        } => Captured::Opened(opened),
     }
 }
 
