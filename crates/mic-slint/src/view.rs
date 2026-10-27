@@ -34,6 +34,9 @@ pub struct Tile {
     pub cant_decode: Option<String>,
     /// Whether its camera is off: the tile shows the name, not the last picture.
     pub camera_off: bool,
+    /// Whether it's speaking: its tile is ringed. Nothing says so yet: the active speaker comes
+    /// with selective subscriptions (PLAN.md, commit 43).
+    pub speaking: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -51,6 +54,12 @@ pub struct View {
     pub muted: bool,
     /// Whether its camera is off.
     pub camera_off: bool,
+    /// Whether it has a camera that's sent: without one, the camera's button is disabled. The
+    /// room knows, not its state (`Room::preview`), so the view's maker sets it.
+    pub camera: bool,
+    /// The participants not shown beyond the tiles, as a last "+N" tile. None are left out yet:
+    /// which tiles show comes with selective subscriptions (PLAN.md, commit 43).
+    pub overflow: usize,
 }
 
 /// What shows of `room` (its state and its invite), or of none: the join screen.
@@ -64,6 +73,8 @@ pub fn view(room: Option<(&RoomState, String)>) -> View {
             warning: String::new(),
             muted: false,
             camera_off: false,
+            camera: false,
+            overflow: 0,
         };
     };
     let tile = |participant: &mic_core::Participant, me| Tile {
@@ -72,6 +83,7 @@ pub fn view(room: Option<(&RoomState, String)>) -> View {
         me,
         muted: participant.profile.muted,
         camera_off: participant.profile.camera_off,
+        speaking: false,
         cant_decode: participant
             .renditions
             .iter()
@@ -101,7 +113,63 @@ pub fn view(room: Option<(&RoomState, String)>) -> View {
         warning,
         muted: state.me.profile.muted,
         camera_off: state.me.profile.camera_off,
+        camera: false,
+        overflow: 0,
     }
+}
+
+/// How many columns show `count` tiles largest in a `width` by `height` grid, `gap` apart, each
+/// tile at `aspect` (width over height) as the cameras send. Of layouts within a few percent of
+/// the largest, the one shaped like the grid: side by side in a wide window, stacked in a tall
+/// one.
+pub fn columns(count: usize, width: f32, height: f32, gap: f32, aspect: f32) -> usize {
+    let count = count.max(1);
+    let size = |columns: usize| {
+        let rows = count.div_ceil(columns);
+        let cell_width = (width - gap * (columns - 1) as f32) / columns as f32;
+        let cell_height = (height - gap * (rows - 1) as f32) / rows as f32;
+        cell_width.min(cell_height * aspect)
+    };
+    let largest = (1..=count).map(size).fold(0.0, f32::max);
+    let near = (1..=count).filter(|&columns| size(columns) >= largest * 0.95);
+    let chosen = if width >= height {
+        near.max()
+    } else {
+        near.min()
+    };
+    chosen.unwrap_or(1)
+}
+
+/// What stands for `name` on a tile without video: the first letters of its first two words.
+pub fn initials(name: &str) -> String {
+    let letters: String = name
+        .split_whitespace()
+        .filter_map(|word| word.chars().find(|c| c.is_alphanumeric()))
+        .take(2)
+        .flat_map(char::to_uppercase)
+        .collect();
+    if letters.is_empty() {
+        "?".to_owned()
+    } else {
+        letters
+    }
+}
+
+/// A participant's colour, the same on every client: one of a few that white letters read on,
+/// chosen by its key (hex).
+pub fn tint(key: &str) -> (u8, u8, u8) {
+    const TINTS: [(u8, u8, u8); 8] = [
+        (0x3b, 0x6e, 0xd8),
+        (0x7c, 0x4d, 0xc4),
+        (0xb8, 0x45, 0x8a),
+        (0xc2, 0x5b, 0x34),
+        (0x2f, 0x8f, 0x6a),
+        (0x2b, 0x84, 0x9e),
+        (0x8a, 0x6d, 0x2a),
+        (0x5a, 0x63, 0x78),
+    ];
+    let byte = u8::from_str_radix(key.get(..2).unwrap_or("00"), 16).unwrap_or(0);
+    TINTS[usize::from(byte) % TINTS.len()]
 }
 
 #[cfg(test)]
@@ -180,6 +248,36 @@ mod tests {
         state.participants[0].profile.camera_off = true;
         let shown = view(Some((&state, String::new())));
         assert!(shown.tiles[1].camera_off && !shown.tiles[2].camera_off);
+    }
+
+    #[test]
+    fn tiles_fill_the_grid_as_large_as_they_can() {
+        let columns = |count, width, height| columns(count, width, height, 8.0, 16.0 / 9.0);
+        // Side by side in a wide window, one above the other in a tall one.
+        assert_eq!(columns(2, 1000.0, 400.0), 2);
+        assert_eq!(columns(2, 400.0, 1000.0), 1);
+        assert_eq!(columns(1, 1000.0, 600.0), 1);
+        // Two in a landscape window that would fit them as large stacked: side by side.
+        assert_eq!(columns(2, 1076.0, 612.0), 2);
+        // Five in a 16:10 window: three and two, not five in a row.
+        assert_eq!(columns(5, 1100.0, 600.0), 3);
+        assert_eq!(columns(9, 1280.0, 720.0), 3);
+        assert_eq!(columns(0, 0.0, 0.0), 1);
+    }
+
+    #[test]
+    fn initials_are_of_the_first_two_words() {
+        assert_eq!(initials("Ada"), "A");
+        assert_eq!(initials("ada lovelace byron"), "AL");
+        assert_eq!(initials("  "), "?");
+        assert_eq!(initials("(Bob) Smith"), "BS");
+    }
+
+    #[test]
+    fn a_tint_is_the_same_for_a_key() {
+        assert_eq!(tint(&"02".repeat(32)), tint(&"02".repeat(32)));
+        assert_ne!(tint(&"02".repeat(32)), tint(&"03".repeat(32)));
+        assert_eq!(tint(""), tint("00"));
     }
 
     #[test]

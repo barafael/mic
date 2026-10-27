@@ -181,7 +181,8 @@ pub struct Ui {
     /// What drawing the tiles' video costs, over the last second, if the frontend says.
     #[serde(default)]
     pub render: Option<Render>,
-    /// The tiles showing their participant's video, by key, as of the last second.
+    /// The tiles showing their participant's video, by key, as of the last second: the others',
+    /// not its own camera's preview.
     #[serde(default)]
     pub video: Vec<String>,
     /// What the window says of the version, if anything: a newer one is out.
@@ -192,7 +193,8 @@ pub struct Ui {
     pub asking: Option<String>,
 }
 
-/// What drawing a frontend's video tiles costs, over the last second.
+/// What drawing a frontend's video tiles costs, over the last second: the others' cameras, not
+/// its own camera's preview.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Render {
     /// Tiles showing video.

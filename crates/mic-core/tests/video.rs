@@ -213,3 +213,28 @@ async fn a_camera_turned_off_sends_nothing_and_says_so() {
     }
     assert!(!bob.room.state().borrow().participants[0].profile.camera_off);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn ones_own_camera_is_previewed_and_none_without_one() {
+    let relay = TestRelay::start().await.unwrap();
+    let invite = Invite::new_room();
+    let alice = join(&invite, "Alice", Some(1), config(&relay)).await;
+    let dave = join(&invite, "Dave", None, config(&relay)).await;
+    assert!(dave.room.preview().is_none());
+    let mut preview = alice.room.preview().unwrap();
+    let picture = tokio::time::timeout(PATIENCE, async {
+        loop {
+            preview.changed().await.unwrap();
+            if let Some(picture) = preview.borrow_and_update().clone() {
+                return picture;
+            }
+        }
+    })
+    .await
+    .unwrap();
+    // Her own pattern, before any codec: it names her.
+    assert_eq!(
+        read_pattern(&picture).map(|pattern| pattern.sender),
+        Some(1)
+    );
+}
