@@ -1,0 +1,17 @@
+[package]
+name = "mic-render"
+description = "mic's video tiles: drawn on a wgpu device the caller provides, or as CPU pixels"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+derive_more = { version = "2.1.1", features = ["display", "error"] }
+mic-media = { version = "0.1.0", path = "../mic-media" }
+# Its renderer only: wgpu 30, Slint's, and the moq crates mic is pinned to.
+moq-net = "=0.3.16"
+moq-video = { version = "=0.1.16", default-features = false, features = ["render"] }
+
+[dev-dependencies]
+pollster = "0.4"

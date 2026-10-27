@@ -6,6 +6,14 @@ measurements, and things to revisit. Newest first within each milestone. Each sa
 
 ## M6: Video (VP9)
 
+- **moq-video's renderer needs view formats, which wgpu's GL backend lacks** (upstream, to
+  report). On OpenGL (llvmpipe here) its output texture fails validation (`VIEW_FORMATS`). mic
+  renders on Vulkan, Metal or DX12, so `mic-render`'s test asks for those; a GL-only machine would
+  need the CPU path. (commit 34)
+- **The offscreen tile test passes on lavapipe** (settled here, open for CI): run in the client
+  image, with no GPU, it draws the pattern as the CPU path has it. CI installs lavapipe and
+  requires the test there (`MIC_TEST_GPU=1`), not yet run. (commit 34)
+
 - **One who decodes nothing would leave everyone without video** (settled). With a single codec,
   "the first codec every participant decodes" is none as soon as one client decodes nothing, and
   then nobody sends. Such a participant is now left out of the choice, and told it can't decode,

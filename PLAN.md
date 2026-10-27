@@ -462,7 +462,9 @@ Each numbered item below is about one commit. Box phases are in **bold**.
     sender's codecs is left out of the choice rather than leave everyone without (D10), and
     `room.video(key)` gives a tile its pictures.
 34. `mic-render: tiles on a caller's wgpu device`, and the CPU path. Tests render offscreen on
-    lavapipe in Linux CI **⚠ unverified**, and compare pixels with the pattern.
+    lavapipe in Linux CI **⚠ unverified**, and compare pixels with the pattern. *Done* on
+    moq-video 0.1.16's renderer; the test passes on RADV and, in the client image, on lavapipe.
+    Not on OpenGL, which lacks the view formats the renderer wants.
 35. `mic-slint: tiles render video` through `mic-render` on Slint's device. **`video`**: pixels in
     each tile of the display's `shot` match the sender's pattern, and render cost per frame with
     9 tiles is recorded, as the spike measured it.

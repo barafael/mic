@@ -31,7 +31,7 @@ jobs:
       # (pkg-config finds it; on Windows, vcpkg's, by VPX_LIB_DIR) (unverified on Windows and
       # macOS until CI runs).
       - if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev libxkbcommon-dev libasound2-dev libvpx-dev
+        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev libxkbcommon-dev libasound2-dev libvpx-dev mesa-vulkan-drivers
       - if: runner.os == 'macOS'
         run: brew install libvpx pkg-config
       - if: runner.os == 'Windows'
@@ -51,9 +51,11 @@ jobs:
       # with a password, which makes its default collection.
       - if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y gnome-keyring dbus
+      # On Linux, mic-render's offscreen test must find an adapter: lavapipe (mesa-vulkan-drivers).
       - if: runner.os == 'Linux'
         env:
           MIC_TEST_KEYRING: "1"
+          MIC_TEST_GPU: "1"
         run: |
           dbus-run-session -- bash -c \
             'echo ci | gnome-keyring-daemon --unlock --components=secrets >/dev/null && cargo test --workspace --all-features --locked'
