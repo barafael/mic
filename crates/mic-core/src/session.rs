@@ -30,6 +30,9 @@ pub struct Config {
     pub trust: Trust,
     /// How long a join may take to reach the relay.
     pub connect_timeout: Duration,
+    /// The video codecs it says it decodes: every one it has, unless told fewer (the box's
+    /// `--decoders`, to see a codec go unsupported).
+    pub decoders: Vec<mic_media::video::Codec>,
 }
 
 impl Config {
@@ -39,6 +42,7 @@ impl Config {
             relay,
             trust: Trust::System,
             connect_timeout: CONNECT_TIMEOUT,
+            decoders: mic_media::video::Codec::ALL.to_vec(),
         }
     }
 }
@@ -174,6 +178,8 @@ pub struct Media {
     /// What takes the noise out of the capture: a microphone wants it; a synthetic tone, which
     /// a suppressor would take for noise, doesn't.
     pub noise: mic_media::audio::noise::NoiseSuppression,
+    /// Pictures to send as this participant's camera, if it has one.
+    pub camera: Option<crate::video::Pictures>,
 }
 
 impl Inner {
@@ -206,7 +212,13 @@ impl Inner {
                 why: error.to_string(),
             })?;
         let participant = ParticipantKey::from_bytes(key.public().to_bytes());
-        let mut publication = Publication::new(generation, broadcast, key, invite.room)?;
+        let mut publication = Publication::new(
+            generation,
+            broadcast,
+            key,
+            invite.room,
+            &self.config.decoders,
+        )?;
         // The profile first: the broadcast is announced with it, so whoever finds the
         // participant finds its name.
         let mut profile_track = publication.track(roster::PROFILE)?;
@@ -222,6 +234,21 @@ impl Inner {
             ))),
             None => None,
         };
+        // The camera in the first codec everyone decodes. In v1 that's VP9 whatever the roster,
+        // since one who decodes none of ours is left out; with a second codec, the choice follows
+        // the roster as it changes.
+        let (camera_on, camera_follows) = tokio::sync::watch::channel(true);
+        let camera = match (
+            media.camera,
+            mic_media::video::choose(&mic_media::video::Codec::ALL, std::iter::empty()),
+        ) {
+            (Some(pictures), Some(codec)) => Some(tokio::spawn(crate::video::publish(
+                pictures,
+                publication.video_track(crate::video::CAMERA, codec)?,
+                camera_follows,
+            ))),
+            _ => None,
+        };
         Ok(Room::start(Joined {
             invite,
             participant,
@@ -236,9 +263,17 @@ impl Inner {
             origin,
             runtime: self.runtime.clone(),
             voice,
+            camera,
             muted,
+            camera_on,
             noise,
             mixer: media.mixer,
+            decoders: self
+                .config
+                .decoders
+                .iter()
+                .map(|codec| codec.name().to_owned())
+                .collect(),
         }))
     }
 }

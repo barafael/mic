@@ -27,9 +27,22 @@ jobs:
       # rustup on the runners installs the toolchain rust-toolchain.toml pins, with its components.
       - run: rustup show active-toolchain
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      # What mic links against on Linux: Slint's window, and cpal's ALSA.
+      # What mic links against: on Linux, Slint's window and cpal's ALSA; everywhere, libvpx
+      # (pkg-config finds it; on Windows, vcpkg's, by VPX_LIB_DIR) (unverified on Windows and
+      # macOS until CI runs).
       - if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev libxkbcommon-dev libasound2-dev
+        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev libxkbcommon-dev libasound2-dev libvpx-dev mesa-vulkan-drivers
+      - if: runner.os == 'macOS'
+        run: brew install libvpx pkg-config
+      - if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          vcpkg install libvpx:x64-windows-static-md
+          root="$VCPKG_INSTALLATION_ROOT/installed/x64-windows-static-md"
+          echo "VPX_LIB_DIR=$root/lib" >> "$GITHUB_ENV"
+          echo "VPX_INCLUDE_DIR=$root/include" >> "$GITHUB_ENV"
+          echo "VPX_VERSION=$(sed -n 's/.*"version": *"\([0-9.]*\)".*/\1/p' "$VCPKG_INSTALLATION_ROOT/ports/libvpx/vcpkg.json" | head -1)" >> "$GITHUB_ENV"
+          echo "VPX_STATIC=1" >> "$GITHUB_ENV"
       - run: cargo fmt --all -- --check
       # Every feature: the window's harness too.
       - run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
@@ -38,9 +51,11 @@ jobs:
       # with a password, which makes its default collection.
       - if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y gnome-keyring dbus
+      # On Linux, mic-render's offscreen test must find an adapter: lavapipe (mesa-vulkan-drivers).
       - if: runner.os == 'Linux'
         env:
           MIC_TEST_KEYRING: "1"
+          MIC_TEST_GPU: "1"
         run: |
           dbus-run-session -- bash -c \
             'echo ci | gnome-keyring-daemon --unlock --components=secrets >/dev/null && cargo test --workspace --all-features --locked'
@@ -64,8 +79,20 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
+      # As the check job: Slint's and cpal's headers on Linux, libvpx everywhere.
       - if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev libxkbcommon-dev libasound2-dev
+        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev libxkbcommon-dev libasound2-dev libvpx-dev
+      - if: runner.os == 'macOS'
+        run: brew install libvpx pkg-config
+      - if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          vcpkg install libvpx:x64-windows-static-md
+          root="$VCPKG_INSTALLATION_ROOT/installed/x64-windows-static-md"
+          echo "VPX_LIB_DIR=$root/lib" >> "$GITHUB_ENV"
+          echo "VPX_INCLUDE_DIR=$root/include" >> "$GITHUB_ENV"
+          echo "VPX_VERSION=$(sed -n 's/.*"version": *"\([0-9.]*\)".*/\1/p' "$VCPKG_INSTALLATION_ROOT/ports/libvpx/vcpkg.json" | head -1)" >> "$GITHUB_ENV"
+          echo "VPX_STATIC=1" >> "$GITHUB_ENV"
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - run: cargo build --release --locked -p mic-slint
       # Git Bash on Windows finds mic.exe by this name too.
@@ -93,28 +120,6 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
-
-  # The video-tile spike (PLAN.md, commit 22), outside the workspace: it builds until it's
-  # deleted.
-  spikes:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    permissions:
-      contents: read
-    defaults:
-      run:
-        working-directory: spikes/video-tiles
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
-        with:
-          persist-credentials: false
-      # Slint's window, and the VA-API bindings' headers and bindgen.
-      - run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev libxkbcommon-dev libva-dev libclang-dev
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          workspaces: spikes/video-tiles
-      - run: cargo fmt -- --check
-      - run: cargo check --all-features --locked
 
   deny:
     runs-on: ubuntu-24.04

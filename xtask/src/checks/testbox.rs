@@ -48,7 +48,12 @@ pub fn testbox(checks: &mut Checks, the_box: &TestBox) -> Result<()> {
     });
     checks.record(
         "every binary from the builder finds its libraries in the client image",
-        || libraries_found(the_box),
+        || libraries_found(the_box, "client", None),
+    );
+    // The forger and the crowd a check starts run in the tools pod, of the moq image.
+    checks.record(
+        "the forger and crowd find their libraries in the tools image",
+        || libraries_found(the_box, "moq", Some(&["forger", "mic-crowd"])),
     );
     let client = "probe";
     let gpu = has_gpu(the_box, client)?;
@@ -194,12 +199,12 @@ fn probe_runs(the_box: &TestBox) -> Result<()> {
     }
 }
 
-/// `ldd` of every binary in `target/testbox-bin`, in the client image: none names a library it
-/// can't find. The builder and the client image install their packages apart, and their lists
-/// drift as libraries arrive (libvpx, PipeWire, D-Bus).
-fn libraries_found(the_box: &TestBox) -> Result<()> {
-    let client = images::find("client").ok_or("no client image")?;
-    let tag = client.tag(the_box.repo())?;
+/// `ldd` of every binary in `target/testbox-bin`, or those `only` names, in `image`: none names a
+/// library it can't find. The builder and the images install their packages apart, and their
+/// lists drift as libraries arrive (libvpx, PipeWire, D-Bus).
+fn libraries_found(the_box: &TestBox, image: &str, only: Option<&[&str]>) -> Result<()> {
+    let image = images::find(image).ok_or("no such image")?;
+    let tag = image.tag(the_box.repo())?;
     let bin = the_box.repo().join(builder::BIN);
     let mut binaries: Vec<String> = std::fs::read_dir(&bin)
         .map_err(|source| Error::Io {
@@ -210,6 +215,7 @@ fn libraries_found(the_box: &TestBox) -> Result<()> {
         .map(|entry| entry.file_name().to_string_lossy().into_owned())
         // The builder's half-written files start with a dot.
         .filter(|name| !name.starts_with('.'))
+        .filter(|name| only.is_none_or(|only| only.contains(&name.as_str())))
         .collect();
     binaries.sort();
     if binaries.is_empty() {

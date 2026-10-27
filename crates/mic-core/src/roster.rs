@@ -88,6 +88,9 @@ pub struct Profile {
     /// Whether it sends no voice, by its own word: a tile shows it.
     #[serde(default)]
     pub muted: bool,
+    /// Whether its camera is off, by its own word: its tile shows its name, not its last picture.
+    #[serde(default)]
+    pub camera_off: bool,
 }
 
 impl Profile {
@@ -96,6 +99,7 @@ impl Profile {
         Self {
             name: name.trim().chars().take(NAME_LIMIT).collect(),
             muted: false,
+            camera_off: false,
         }
     }
 }
@@ -107,6 +111,9 @@ struct ProfileFrame {
     /// Left out by a client from before it existed: not muted.
     #[serde(default)]
     muted: bool,
+    /// Likewise: the camera on.
+    #[serde(default)]
+    camera_off: bool,
 }
 
 impl ProfileFrame {
@@ -114,6 +121,7 @@ impl ProfileFrame {
         let frame = Self {
             name: profile.name.clone(),
             muted: profile.muted,
+            camera_off: profile.camera_off,
         };
         serde_json::to_vec(&frame).expect("a profile serializes")
     }
@@ -123,6 +131,7 @@ impl ProfileFrame {
         let frame: Self = serde_json::from_slice(bytes).ok()?;
         Some(Profile {
             muted: frame.muted,
+            camera_off: frame.camera_off,
             ..Profile::new(&frame.name)
         })
     }
@@ -141,6 +150,12 @@ pub(crate) fn write_profile(track: &mut SignedTrack, profile: &Profile) -> Resul
 pub struct Participant {
     pub key: ParticipantKey,
     pub profile: Profile,
+    /// The video codecs it decodes, by name, as its catalog says.
+    #[serde(default)]
+    pub decoders: Vec<String>,
+    /// Which codec each of its video tracks is sent in.
+    #[serde(default)]
+    pub renditions: Vec<crate::catalog::Rendition>,
 }
 
 /// Who is in the room, as `follow` keeps it.
@@ -163,8 +178,8 @@ pub struct Rejected {
 
 /// What a peer's readers find.
 enum Found {
-    /// Its catalog stands: whose the broadcast is.
-    Verified(ParticipantKey),
+    /// Its catalog stands: whose the broadcast is, and what it decodes and sends.
+    Verified(Box<Catalog>),
     Profile(Profile),
     Rejected(String),
 }
@@ -174,6 +189,18 @@ enum Found {
 struct Known {
     key: Option<ParticipantKey>,
     profile: Option<Profile>,
+    decoders: Vec<String>,
+    renditions: Vec<crate::catalog::Rendition>,
+}
+
+/// Where the others' media plays, if anywhere: voices into a mixer, cameras onto a board, those
+/// whose codec this participant decodes.
+#[derive(Clone)]
+pub(crate) struct Playing {
+    pub mixer: Option<mic_media::audio::Mixer>,
+    pub board: crate::video::Board,
+    /// The video codecs this participant decodes, by name.
+    pub decoders: Vec<String>,
 }
 
 /// Follows the room's peers, their catalogs and their profiles into `roster` until the peers end
@@ -183,7 +210,7 @@ pub(crate) async fn follow(
     crypto: RoomCrypto,
     room: RoomId,
     roster: watch::Sender<Roster>,
-    mixer: Option<mic_media::audio::Mixer>,
+    playing: Playing,
 ) {
     // What each peer's readers find, from tasks of their own, by its broadcast's path.
     let (found, mut finds) = mpsc::unbounded_channel::<(String, Found)>();
@@ -202,7 +229,7 @@ pub(crate) async fn follow(
                         crypto.clone(),
                         room,
                         found.clone(),
-                        mixer.clone(),
+                        playing.clone(),
                     ));
                     if let Some(former) = readers.insert(path, reader) {
                         former.abort();
@@ -228,7 +255,11 @@ pub(crate) async fn follow(
                     continue;
                 };
                 match find {
-                    Found::Verified(key) => entry.key = Some(key),
+                    Found::Verified(catalog) => {
+                        entry.key = Some(catalog.participant);
+                        entry.decoders = catalog.decoders;
+                        entry.renditions = catalog.renditions;
+                    }
                     Found::Profile(profile) => entry.profile = Some(profile),
                     Found::Rejected(reason) => {
                         tracing::warn!(%path, %reason, "a broadcast in the room doesn't stand");
@@ -269,6 +300,8 @@ fn participants(known: &HashMap<String, Known>) -> Vec<Participant> {
                 Participant {
                     key: known.key?,
                     profile: known.profile.clone()?,
+                    decoders: known.decoders.clone(),
+                    renditions: known.renditions.clone(),
                 },
             ))
         })
@@ -310,7 +343,7 @@ async fn read_peer(
     crypto: RoomCrypto,
     room: RoomId,
     found: mpsc::UnboundedSender<(String, Found)>,
-    mixer: Option<mic_media::audio::Mixer>,
+    playing: Playing,
 ) {
     let path = peer.path().to_owned();
     let send = |find: Found| found.send((path.clone(), find)).is_ok();
@@ -324,8 +357,10 @@ async fn read_peer(
     let segment_of = |key: &ParticipantKey| crypto.participant_segment(key.as_bytes()).ok();
     let mut last: Option<u64> = None;
     let mut _profiles: Option<Task> = None;
-    // Its voice, played once a catalog names it, until the broadcast goes or is rejected.
+    // Its voice and camera, played once a catalog names them, until the broadcast goes or is
+    // rejected.
     let mut _voice: Option<Task> = None;
+    let mut _camera: Option<Task> = None;
     let mut verification: Option<Verification> = None;
     let mut verifying: Option<tokio::task::JoinHandle<sig::Forgery>> = None;
     loop {
@@ -372,49 +407,78 @@ async fn read_peer(
             }
         };
         last = Some(catalog.seq);
-        if !send(Found::Verified(catalog.participant)) {
+        if !send(Found::Verified(Box::new(catalog.clone()))) {
             return;
         }
-        if let (None, Some(mixer), Some(verification)) = (&_voice, &mixer, &verification)
-            && catalog
-                .tracks
-                .iter()
-                .any(|track| track == crate::audio::AUDIO)
-        {
-            _voice = play_voice(&peer, verification, mixer.clone()).await;
+        if verifying.is_none() {
+            let checkpoints = match peer.track(SIG).await {
+                Ok(track) => track,
+                Err(error) => {
+                    send(Found::Rejected(format!("no checkpoints: {error}")));
+                    return;
+                }
+            };
+            let checked = Verification::default();
+            verification = Some(checked.clone());
+            verifying = Some(tokio::spawn(sig::verify(
+                checkpoints,
+                checked.clone(),
+                catalog.participant,
+                room,
+                crypto.kid(),
+                peer.epoch().to_owned(),
+            )));
+            _profiles = Some(Task(tokio::spawn(read_profiles(
+                peer.clone(),
+                checked,
+                found.clone(),
+            ))));
         }
-        if verifying.is_some() {
+        let Some(checked) = &verification else {
             continue;
-        }
-        let checkpoints = match peer.track(SIG).await {
-            Ok(track) => track,
-            Err(error) => {
-                send(Found::Rejected(format!("no checkpoints: {error}")));
-                return;
-            }
         };
-        let checked = Verification::default();
-        verification = Some(checked.clone());
-        verifying = Some(tokio::spawn(sig::verify(
-            checkpoints,
-            checked.clone(),
-            catalog.participant,
-            room,
-            crypto.kid(),
-            peer.epoch().to_owned(),
-        )));
-        _profiles = Some(Task(tokio::spawn(read_profiles(
-            peer.clone(),
-            checked.clone(),
-            found.clone(),
-        ))));
-        if let Some(mixer) = &mixer
+        // What the catalog names now, started once: a track added later starts with the
+        // catalog that names it.
+        if _voice.is_none()
+            && let Some(mixer) = &playing.mixer
             && catalog
                 .tracks
                 .iter()
                 .any(|track| track == crate::audio::AUDIO)
         {
-            _voice = play_voice(&peer, &checked, mixer.clone()).await;
+            _voice = play_voice(&peer, checked, mixer.clone()).await;
+        }
+        if _camera.is_none()
+            && let Some(rendition) = catalog
+                .renditions
+                .iter()
+                .find(|rendition| rendition.track == crate::video::CAMERA)
+            && playing.decoders.contains(&rendition.codec)
+        {
+            _camera = play_camera(&peer, checked, catalog.participant, &playing.board).await;
+        }
+    }
+}
+
+/// `peer`'s camera onto `board`, its frames confirmed as any others are.
+async fn play_camera(
+    peer: &Peer,
+    verification: &Verification,
+    whose: ParticipantKey,
+    board: &crate::video::Board,
+) -> Option<Task> {
+    match peer
+        .verified_track(crate::video::CAMERA, verification)
+        .await
+    {
+        Ok(track) => Some(Task(tokio::spawn(crate::video::play(
+            track,
+            whose,
+            board.clone(),
+        )))),
+        Err(error) => {
+            tracing::debug!(%error, path = peer.path(), "no camera");
+            None
         }
     }
 }
@@ -488,6 +552,8 @@ mod tests {
         let known = |key: u8, name: &str| Known {
             key: Some(ParticipantKey([key; 32])),
             profile: Some(Profile::new(name)),
+            decoders: Vec::new(),
+            renditions: Vec::new(),
         };
         let known: HashMap<String, Known> = [
             (

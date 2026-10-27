@@ -451,22 +451,36 @@ Each numbered item below is about one commit. Box phases are in **bold**.
 32. `mic-media: VP9 with libvpx`, both ways: real-time encoding for camera, its screen-content
     mode for screenshare, and decoding through `moq-video`'s `vpx` feature (a git pin on
     upstream `main`). Tests: encode the pattern, decode it, read it back. The CI smoke job now
-    builds libvpx on Windows and macOS **⚠ unverified**.
+    builds libvpx on Windows and macOS **⚠ unverified**. *Done,* decoding through
+    `libvpx-native-sys` directly: a git pin on moq-video would bring a second, git copy of the
+    moq crates beside mic's (docs/observations.md).
 33. `mic-core: publish and subscribe the camera`. Tests through `mic-testrelay`, and after a
     relay restart. **`video`**: each client decodes every other's camera, the pattern names the
     right sender, and the frame rate holds; a client started with `--decoders none` shows that
-    it can't decode instead of a black tile. **`impersonation`** reruns with video.
+    it can't decode instead of a black tile. **`impersonation`** reruns with video. *Done:*
+    640x360 at 15 fps and 500 kbit/s for now, a group a second; one who decodes none of a
+    sender's codecs is left out of the choice rather than leave everyone without (D10), and
+    `room.video(key)` gives a tile its pictures.
 34. `mic-render: tiles on a caller's wgpu device`, and the CPU path. Tests render offscreen on
-    lavapipe in Linux CI **⚠ unverified**, and compare pixels with the pattern.
+    lavapipe in Linux CI **⚠ unverified**, and compare pixels with the pattern. *Done* on
+    moq-video 0.1.16's renderer; the test passes on RADV and, in the client image, on lavapipe.
+    Not on OpenGL, which lacks the view formats the renderer wants.
 35. `mic-slint: tiles render video` through `mic-render` on Slint's device. **`video`**: pixels in
     each tile of the display's `shot` match the sender's pattern, and render cost per frame with
-    9 tiles is recorded, as the spike measured it.
+    9 tiles is recorded, as the spike measured it. *Done:* the window makes its own Vulkan
+    device and hands it to Slint; a crowd of six in the tools pod fills nine tiles; alice uses
+    29% of a core for it all (docs/observations.md).
 36. `spikes: remove video-tiles`. The box now measures what it measured; its numbers move to the
-    design doc.
+    design doc. *Done* (§5.10).
 37. `mic-media: VP9 decode on VA-API` where the GPU has it, through a VP9 decoder for
     `moq-video`'s `moq-vaapi`, offered upstream **⚠ unverified**. **`video`** runs on VA-API
-    and, with `--no-gpu`, in software.
-38. `mic-core, mic-slint: camera off`. **`video`**: the tile falls back to the name.
+    and, with `--no-gpu`, in software. *Deferred:* no VA-API VP9 decoder to use (moq-vaapi has
+    none; `cros-codecs` doesn't build against current libva), and writing one is upstream work;
+    software decoding holds at these sizes. Revisit before M8's large rooms
+    (docs/observations.md).
+38. `mic-core, mic-slint: camera off`. **`video`**: the tile falls back to the name. *Done:*
+    `camera_off` in the signed profile, as `muted` is; back on, the camera starts with a
+    keyframe.
 
 Upstreaming codec work to `moq-video` happens alongside, from the branches these commits come
 from; the git pins move to releases as they land.

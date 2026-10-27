@@ -15,8 +15,13 @@
 //!
 //! ```text
 //! "mic/v1/catalog\0" format:u32 room:16 participant:32 kid:u64 epoch:str seq:u64
-//!                    tracks:u16 (track:str)* app:str signature:64
+//!                    tracks:u16 (track:str)* decoders:u16 (codec:str)*
+//!                    renditions:u16 (track:str codec:str)* app:str signature:64
 //! ```
+//!
+//! `decoders` are the video codecs the participant can decode, `renditions` the codec each of its
+//! video tracks is sent in, both by name (mic-media's `Codec::name`): a newer client may name a
+//! codec an older one doesn't know, which the older one only can't decode (D10, §5.4).
 //!
 //! Integers big-endian; `str` a u16 length and UTF-8.
 
@@ -50,8 +55,19 @@ pub struct Catalog {
     pub seq: u64,
     /// The broadcast's tracks, by semantic name.
     pub tracks: Vec<String>,
+    /// The video codecs the participant decodes, by name.
+    pub decoders: Vec<String>,
+    /// Which codec each of its video tracks is sent in.
+    pub renditions: Vec<Rendition>,
     /// The app's version, for "a participant is on a newer version" (§5.12).
     pub app: String,
+}
+
+/// A video track, and the codec it's sent in, by name.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Rendition {
+    pub track: String,
+    pub codec: String,
 }
 
 /// Why a broadcast's catalog doesn't stand.
@@ -119,6 +135,15 @@ impl Catalog {
         for track in &self.tracks {
             put_str(&mut bytes, track);
         }
+        put_count(&mut bytes, self.decoders.len());
+        for codec in &self.decoders {
+            put_str(&mut bytes, codec);
+        }
+        put_count(&mut bytes, self.renditions.len());
+        for rendition in &self.renditions {
+            put_str(&mut bytes, &rendition.track);
+            put_str(&mut bytes, &rendition.codec);
+        }
         put_str(&mut bytes, &self.app);
         bytes
     }
@@ -149,6 +174,21 @@ impl Catalog {
             tracks: {
                 let count = u16::from_be_bytes(reader.array()?);
                 (0..count).map(|_| reader.str()).collect::<Result<_, _>>()?
+            },
+            decoders: {
+                let count = u16::from_be_bytes(reader.array()?);
+                (0..count).map(|_| reader.str()).collect::<Result<_, _>>()?
+            },
+            renditions: {
+                let count = u16::from_be_bytes(reader.array()?);
+                (0..count)
+                    .map(|_| {
+                        Ok(Rendition {
+                            track: reader.str()?,
+                            codec: reader.str()?,
+                        })
+                    })
+                    .collect::<Result<_, Rejection>>()?
             },
             app: reader.str()?,
         };
@@ -184,6 +224,11 @@ impl Catalog {
         }
         Ok(catalog)
     }
+}
+
+fn put_count(bytes: &mut Vec<u8>, count: usize) {
+    let count = u16::try_from(count).expect("fewer than 65536 of a catalog's entries");
+    bytes.extend_from_slice(&count.to_be_bytes());
 }
 
 fn put_str(bytes: &mut Vec<u8>, text: &str) {
@@ -234,6 +279,11 @@ mod tests {
             epoch: "01a17a43-1786-730f-a3b3-15083bc6f37b".to_owned(),
             seq: 3,
             tracks: vec!["catalog".to_owned(), "profile".to_owned()],
+            decoders: vec!["vp9".to_owned(), "av2".to_owned()],
+            renditions: vec![Rendition {
+                track: "camera".to_owned(),
+                codec: "vp9".to_owned(),
+            }],
             app: "0.1.0".to_owned(),
         }
     }

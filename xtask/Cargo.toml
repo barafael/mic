@@ -12,6 +12,7 @@ derive_more = { version = "2.1.1", features = ["display", "error"] }
 mic-core = { version = "0.1.0", path = "../crates/mic-core" }
 mic-harness = { version = "0.1.0", path = "../crates/mic-harness" }
 mic-media = { version = "0.1.0", path = "../crates/mic-media" }
+mic-render = { version = "0.1.0", path = "../crates/mic-render" }
 png = "0.18"
 serde = "1.0.229"
 serde_json = "1.0.154"

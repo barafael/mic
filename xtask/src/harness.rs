@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use mic_core::{Command, Invite, RoomState};
 use mic_harness::client::Client;
-use mic_harness::{Acted, Call, Done, Heard, Joined, Pong, Snapshot};
+use mic_harness::{Acted, Call, Done, Heard, Joined, Pong, Seen, Snapshot};
 
 use crate::error::{Error, Result};
 use crate::podman::TestBox;
@@ -78,6 +78,11 @@ impl Participant {
 
     pub fn snapshot(&mut self) -> Result<Snapshot> {
         self.call(Call::Snapshot)
+    }
+
+    /// What it decoded of each other participant's camera.
+    pub fn seen(&mut self) -> Result<Seen> {
+        self.call(Call::Seen)
     }
 
     /// How loud each of `frequencies` is in what it heard in the last second.

@@ -108,6 +108,8 @@ async fn a_member_posing_as_another_is_rejected() {
         epoch: epoch.to_owned(),
         seq: 1,
         tracks: vec![CATALOG.to_owned(), PROFILE.to_owned()],
+        decoders: Vec::new(),
+        renditions: Vec::new(),
         app: "0.1.0".to_owned(),
     };
 

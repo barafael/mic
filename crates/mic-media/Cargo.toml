@@ -10,6 +10,9 @@ publish.workspace = true
 # The system's microphone and speaker, through cpal, and echo cancellation between them. Off for what only uses synthetic ones (the box's crowd, tests), so they don't need the
 # platform's audio libraries.
 devices = ["dep:cpal"]
+# VP9 through libvpx, which it links: the system's, found by pkg-config (VPX_STATIC=1 links it
+# statically).
+vp9 = ["dep:vpx-sys"]
 
 [dependencies]
 cpal = { version = "0.18.2", optional = true }
@@ -18,8 +21,9 @@ ringbuf = "0.5.1"
 nnnoiseless = { version = "0.5.2", default-features = false }
 serde = { version = "1.0.229", features = ["derive"] }
 sonora = "0.2.0"
-tokio = { version = "1.54.1", features = ["time"] }
+tokio = { version = "1.54.1", features = ["time", "sync"] }
 tracing = "0.1.44"
+vpx-sys = { package = "libvpx-native-sys", version = "5.0.17", optional = true }
 
 [dev-dependencies]
 tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "time"] }

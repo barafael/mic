@@ -28,8 +28,15 @@ struct Cli {
     /// The directory the harnesses' sockets go in, one a participant, by its name.
     #[arg(long)]
     harness: PathBuf,
-    /// The participants, by name, each with the tone it sends for a voice, if any:
-    /// `carol=880`.
+    /// Joins every participant to the room this invite names, at once, rather than wait for a
+    /// harness to say so.
+    #[arg(long)]
+    join: Option<String>,
+    /// Claims to decode no video: a crowd that fills a room without decoding every camera in it.
+    #[arg(long)]
+    no_decoders: bool,
+    /// The participants, by name, each with the tone it sends for a voice and the pattern its
+    /// camera shows, if any: `carol=880@3`.
     #[arg(required = true)]
     names: Vec<String>,
 }
@@ -74,13 +81,32 @@ async fn run(cli: Cli) -> Result<(), String> {
     if let Some(ca) = cli.ca {
         config.trust = Trust::Roots(vec![ca]);
     }
+    if cli.no_decoders {
+        config.decoders = Vec::new();
+    }
+    let invite = cli
+        .join
+        .map(|invite| invite.parse::<mic_core::Invite>())
+        .transpose()
+        .map_err(|error| format!("--join: {error}"))?;
     std::fs::create_dir_all(&cli.harness)
         .map_err(|error| format!("{}: {error}", cli.harness.display()))?;
     let mut served = tokio::task::JoinSet::new();
     // Each participant's speaker: playing for as long as the crowd runs.
     let mut speakers = Vec::new();
     for participant in cli.names {
-        let (name, tone) = match participant.split_once('=') {
+        let (rest, camera) = match participant.split_once('@') {
+            Some((rest, camera)) => (
+                rest,
+                Some(
+                    camera
+                        .parse::<u8>()
+                        .map_err(|error| format!("{participant}'s camera: {error}"))?,
+                ),
+            ),
+            None => (participant.as_str(), None),
+        };
+        let (name, tone) = match rest.split_once('=') {
             Some((name, tone)) => (
                 name.to_owned(),
                 Some(
@@ -88,7 +114,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                         .map_err(|error| format!("{participant}'s tone: {error}"))?,
                 ),
             ),
-            None => (participant, None),
+            None => (rest.to_owned(), None),
         };
         let client = Client::new(
             config.clone(),
@@ -96,9 +122,21 @@ async fn run(cli: Cli) -> Result<(), String> {
             tokio::runtime::Handle::current(),
         )
         .map_err(|error| format!("{name}: {error}"))?;
-        let synthetic = mic_harness::synthetic::Synthetic::new(tone)
+        let synthetic = mic_harness::synthetic::Synthetic::new(tone, camera)
             .map_err(|error| format!("{name}'s audio: {error}"))?;
         let app = App::with_media(client, synthetic.media());
+        if let Some(invite) = &invite {
+            let (app, invite) = (app.clone(), invite.clone());
+            let profile = mic_core::Profile::new(&name);
+            served.spawn(async move {
+                app.join(invite, profile)
+                    .await
+                    .map(drop)
+                    .map_err(|error| format!("joining: {error}"))?;
+                // In the room until the crowd stops.
+                std::future::pending::<Result<(), String>>().await
+            });
+        }
         let harness =
             mic_harness::server::Harness::new(app, &name, None).hearing(synthetic.analyzer.clone());
         speakers.push(synthetic);

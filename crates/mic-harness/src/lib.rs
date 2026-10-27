@@ -57,6 +57,8 @@ pub enum Call {
     /// How loud each of `frequencies` (Hz) is in what it played in the last second, for a client
     /// whose speaker is an analyzer (mic-media's `AnalyzingSink`). Answered with [`Heard`].
     Heard { frequencies: Vec<f64> },
+    /// What the client decoded of each other participant's camera. Answered with [`Seen`].
+    Seen,
 }
 
 /// The answer to request `id`: `{"id": …, "result": …}` or `{"id": …, "error": "…"}`.
@@ -135,6 +137,25 @@ pub struct Heard {
     pub rms: f64,
 }
 
+/// What a client decoded of each other participant's camera, in the room's order.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Seen {
+    pub cameras: Vec<Camera>,
+}
+
+/// One participant's camera, as decoded.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Camera {
+    /// Whose, by key.
+    pub key: String,
+    /// How many pictures were decoded.
+    pub pictures: u64,
+    /// What the last picture's pattern says, if it holds one (mic-media's `read_pattern`): whose
+    /// camera it is, and which frame.
+    pub sender: Option<u8>,
+    pub frame: Option<u16>,
+}
+
 /// What the client shows: the room it's in, if any, and its UI, if it has one.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Snapshot {
@@ -145,7 +166,7 @@ pub struct Snapshot {
 
 /// What a frontend shows, as it fills it in: enough for a check to compare with the core's
 /// state, whatever the toolkit.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Ui {
     /// The screen showing: `join`, `room`, …
     pub screen: String,
@@ -154,6 +175,28 @@ pub struct Ui {
     /// The tiles that show their participant muted, by key.
     #[serde(default)]
     pub muted: Vec<String>,
+    /// The tiles that say they can't show their participant's video, by key.
+    #[serde(default)]
+    pub cant_decode: Vec<String>,
+    /// What drawing the tiles' video costs, over the last second, if the frontend says.
+    #[serde(default)]
+    pub render: Option<Render>,
+    /// The tiles showing their participant's video, by key, as of the last second.
+    #[serde(default)]
+    pub video: Vec<String>,
+}
+
+/// What drawing a frontend's video tiles costs, over the last second.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Render {
+    /// Tiles showing video.
+    pub video_tiles: u32,
+    /// Pictures drawn a second, all tiles together.
+    pub pictures: f64,
+    /// Drawing one into its tile, on average, in ms.
+    pub draw_ms: f64,
+    /// The window's frame, on average, in ms, if the renderer says.
+    pub frame_ms: Option<f64>,
 }
 
 /// Pushed to a subscriber on every change of what it shows.

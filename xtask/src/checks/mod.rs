@@ -9,6 +9,7 @@ mod record;
 mod relay;
 mod roster;
 mod testbox;
+mod video;
 mod window;
 
 use crate::error::{Error, Result};
@@ -33,10 +34,12 @@ pub enum Phase {
     Audio,
     /// Voices through real devices: cpal, ALSA, PipeWire.
     AudioDevices,
+    /// Each decodes every other's camera; one that can't says so.
+    Video,
 }
 
 impl Phase {
-    pub const ALL: [Phase; 7] = [
+    pub const ALL: [Phase; 8] = [
         Phase::Box,
         Phase::Relay,
         Phase::Roster,
@@ -44,6 +47,7 @@ impl Phase {
         Phase::Impersonation,
         Phase::Audio,
         Phase::AudioDevices,
+        Phase::Video,
     ];
 
     pub fn name(self) -> String {
@@ -67,7 +71,10 @@ impl Phase {
     /// skew what it measures (`audio`). This is the box-wide measurement lock (PLAN.md, "The test
     /// box").
     pub fn runs_alone(self) -> bool {
-        matches!(self, Phase::Roster | Phase::Audio | Phase::AudioDevices)
+        matches!(
+            self,
+            Phase::Roster | Phase::Audio | Phase::AudioDevices | Phase::Video
+        )
     }
 
     pub fn run(self, checks: &mut Checks, the_box: &TestBox) -> Result<()> {
@@ -79,6 +86,7 @@ impl Phase {
             Phase::Impersonation => impersonation::impersonation(checks, the_box),
             Phase::Audio => audio::audio(checks, the_box),
             Phase::AudioDevices => audio_devices::audio_devices(checks, the_box),
+            Phase::Video => video::video(checks, the_box),
         }
     }
 }

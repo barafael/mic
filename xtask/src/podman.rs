@@ -40,11 +40,25 @@ pub fn tone(client: &str) -> Option<u32> {
     }
 }
 
-/// What a client pod's `@VOICE@` line says: its tone, or that its devices are the box's.
+/// The camera pattern a client sends, by id (mic-media's `PatternCamera`), if it sends one: the
+/// ones that send a tone do.
+pub fn camera(client: &str) -> Option<u8> {
+    match client {
+        "alice" => Some(1),
+        "bob" => Some(2),
+        _ => None,
+    }
+}
+
+/// What a client pod's `@VOICE@` line says: its tone and camera, or that it uses the box's
+/// PipeWire devices, and decodes no video, to see what a client that can't decode shows.
 fn voice(client: &str) -> String {
-    match tone(client) {
-        Some(tone) => format!("\"--tone\", \"{tone}\","),
-        None => "# No tone: the box's PipeWire speaker and microphone.".to_owned(),
+    match (tone(client), camera(client)) {
+        (Some(tone), Some(camera)) => {
+            format!("\"--tone\", \"{tone}\", \"--camera-pattern\", \"{camera}\",")
+        }
+        (Some(tone), None) => format!("\"--tone\", \"{tone}\","),
+        _ => "\"--decoders\", \"none\", # The box's PipeWire devices.".to_owned(),
     }
 }
 

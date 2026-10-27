@@ -56,6 +56,8 @@ pub enum Command {
     SetName { name: String },
     /// Send no voice, or send it again; everyone's tile of this participant says which.
     SetMuted { muted: bool },
+    /// Turn the camera off, or on again; everyone's tile of this participant says which.
+    SetCamera { on: bool },
     /// Take the noise out of the voice with this suppressor, or none.
     SetNoiseSuppression {
         mode: mic_media::audio::noise::NoiseSuppression,
@@ -93,6 +95,8 @@ struct Shared {
     path: String,
     origin: moq_net::origin::Consumer,
     runtime: tokio::runtime::Handle,
+    /// What the others' cameras show.
+    board: crate::video::Board,
 }
 
 /// What a handle asks of the room's task.
@@ -121,12 +125,18 @@ pub(crate) struct Joined {
     pub runtime: tokio::runtime::Handle,
     /// Sends this participant's voice, if it has one.
     pub voice: Option<tokio::task::JoinHandle<()>>,
+    /// Sends its camera, if it has one.
+    pub camera: Option<tokio::task::JoinHandle<()>>,
     /// Whether the voice is muted, which it follows.
     pub muted: watch::Sender<bool>,
+    /// Whether the camera is on, which it follows.
+    pub camera_on: watch::Sender<bool>,
     /// What suppresses the voice's noise, which it follows.
     pub noise: watch::Sender<mic_media::audio::noise::NoiseSuppression>,
     /// Where the others' voices play, if anywhere.
     pub mixer: Option<mic_media::audio::Mixer>,
+    /// The video codecs this participant decodes, by name.
+    pub decoders: Vec<String>,
 }
 
 impl Room {
@@ -135,6 +145,8 @@ impl Room {
         let me = Participant {
             key: joined.participant,
             profile: joined.profile.clone(),
+            decoders: joined.decoders.clone(),
+            renditions: Vec::new(),
         };
         let (state, watched) = watch::channel(RoomState {
             room: joined.invite.room.to_string(),
@@ -153,15 +165,21 @@ impl Room {
             path: joined.path.clone(),
             origin: joined.origin.consume(),
             runtime: joined.runtime.clone(),
+            board: crate::video::Board::default(),
         });
         let (roster, followed) = watch::channel(Roster::default());
         let peers = Peers::new(joined.crypto.clone(), joined.path, joined.origin.consume());
+        let board = shared.board.clone();
         let following = joined.runtime.spawn(roster::follow(
             peers,
             joined.crypto,
             shared.invite.room,
             roster,
-            joined.mixer,
+            roster::Playing {
+                mixer: joined.mixer,
+                board: board.clone(),
+                decoders: joined.decoders.clone(),
+            },
         ));
         let task = Task {
             publication: joined.publication,
@@ -173,7 +191,9 @@ impl Room {
             origin: joined.origin,
             following,
             voice: joined.voice,
+            camera: joined.camera,
             muted: joined.muted,
+            camera_on: joined.camera_on,
             noise: joined.noise,
             roster: followed,
             state,
@@ -239,6 +259,17 @@ impl Room {
         answer.await.map_err(|_| Error::Left)?
     }
 
+    /// `whose` camera's pictures, as they're decoded: none until the first, nor ever for a
+    /// camera this client can't decode or a participant with none.
+    pub fn video(&self, whose: ParticipantKey) -> crate::video::Pictures {
+        self.shared.board.pictures(whose)
+    }
+
+    /// How many of `whose` camera's pictures were decoded.
+    pub fn video_count(&self, whose: ParticipantKey) -> u64 {
+        self.shared.board.count(whose)
+    }
+
     /// The other participants' broadcasts as they arrive and go, those there already first.
     pub fn peers(&self) -> Peers {
         let _entered = self.shared.runtime.enter();
@@ -284,7 +315,10 @@ struct Task {
     following: tokio::task::JoinHandle<()>,
     /// Sends the voice, until the room is left.
     voice: Option<tokio::task::JoinHandle<()>>,
+    /// Sends the camera, until the room is left.
+    camera: Option<tokio::task::JoinHandle<()>>,
     muted: watch::Sender<bool>,
+    camera_on: watch::Sender<bool>,
     noise: watch::Sender<mic_media::audio::noise::NoiseSuppression>,
     roster: watch::Receiver<Roster>,
     state: watch::Sender<RoomState>,
@@ -346,6 +380,14 @@ impl Task {
                     ..self.profile.clone()
                 })?;
                 self.muted.send_replace(muted);
+                Ok(())
+            }
+            Command::SetCamera { on } => {
+                self.set_profile(Profile {
+                    camera_off: !on,
+                    ..self.profile.clone()
+                })?;
+                self.camera_on.send_replace(on);
                 Ok(())
             }
             Command::SetNoiseSuppression { mode } => {
@@ -429,8 +471,11 @@ impl Task {
     /// that doesn't drain in time is closed all the same.
     async fn leave(&mut self) {
         self.following.abort();
-        if let Some(voice) = self.voice.take() {
-            voice.abort();
+        for sending in [self.voice.take(), self.camera.take()]
+            .into_iter()
+            .flatten()
+        {
+            sending.abort();
         }
         let Some(connection) = self.connection.take() else {
             return;
@@ -454,8 +499,8 @@ impl Task {
 impl Drop for Task {
     fn drop(&mut self) {
         self.following.abort();
-        if let Some(voice) = &self.voice {
-            voice.abort();
+        for sending in [&self.voice, &self.camera].into_iter().flatten() {
+            sending.abort();
         }
     }
 }

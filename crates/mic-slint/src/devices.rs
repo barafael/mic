@@ -72,6 +72,8 @@ impl Devices {
                 capture,
                 mixer: mixer.clone(),
                 noise: NOISE_SUPPRESSION,
+                // No camera device yet: the box's pattern camera is the synthetic one.
+                camera: None,
             }
         }
     }

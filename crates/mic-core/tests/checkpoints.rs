@@ -92,6 +92,8 @@ async fn frames_no_checkpoint_covers_reject_the_broadcast() {
         epoch: epoch.as_str().to_owned(),
         seq: 0,
         tracks: vec![CATALOG.to_owned(), SIG.to_owned(), PROFILE.to_owned()],
+        decoders: Vec::new(),
+        renditions: Vec::new(),
         app: "0.1.0".to_owned(),
     };
     let origin = moq_tokio::origin::spawn();
