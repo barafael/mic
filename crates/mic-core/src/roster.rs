@@ -94,6 +94,9 @@ pub struct Profile {
     /// Whether its hand is raised (§5.6).
     #[serde(default)]
     pub hand: bool,
+    /// Whether it shares its screen: its `screen` track has pictures.
+    #[serde(default)]
+    pub sharing: bool,
 }
 
 impl Profile {
@@ -104,6 +107,7 @@ impl Profile {
             muted: false,
             camera_off: false,
             hand: false,
+            sharing: false,
         }
     }
 }
@@ -121,6 +125,9 @@ struct ProfileFrame {
     /// Likewise: no hand raised.
     #[serde(default)]
     hand: bool,
+    /// Likewise: no screen shared.
+    #[serde(default)]
+    sharing: bool,
 }
 
 impl ProfileFrame {
@@ -130,6 +137,7 @@ impl ProfileFrame {
             muted: profile.muted,
             camera_off: profile.camera_off,
             hand: profile.hand,
+            sharing: profile.sharing,
         };
         serde_json::to_vec(&frame).expect("a profile serializes")
     }
@@ -141,6 +149,7 @@ impl ProfileFrame {
             muted: frame.muted,
             camera_off: frame.camera_off,
             hand: frame.hand,
+            sharing: frame.sharing,
             ..Profile::new(&frame.name)
         })
     }
@@ -208,6 +217,8 @@ struct Known {
 pub(crate) struct Playing {
     pub mixer: Option<mic_media::audio::Mixer>,
     pub board: crate::video::Board,
+    /// Where the others' screens show.
+    pub screens: crate::video::Board,
     /// The video codecs this participant decodes, by name.
     pub decoders: Vec<String>,
     /// When each voice was last loud, as its player hears it.
@@ -389,6 +400,9 @@ async fn read_peer(
     let mut _voice: Option<Task> = None;
     let mut _chat: Vec<Task> = Vec::new();
     let mut camera: Option<Camera> = None;
+    // Its screen: subscribed to once its catalog names one, whether it's shared now or not, as
+    // a track without pictures costs nothing.
+    let mut _screen: Option<Task> = None;
     // Whose camera the catalog names, in a codec this participant decodes.
     let mut decodable: Option<ParticipantKey> = None;
     let mut verification: Option<Verification> = None;
@@ -509,6 +523,24 @@ async fn read_peer(
                             playing.heard.clone(),
                         ))));
                     }
+                }
+            }
+            if _screen.is_none()
+                && let Some(checked) = &verification
+                && catalog.renditions.iter().any(|rendition| {
+                    rendition.track == crate::video::SCREEN
+                        && playing.decoders.contains(&rendition.codec)
+                })
+            {
+                match peer.verified_track(crate::video::SCREEN, checked).await {
+                    Ok(track) => {
+                        _screen = Some(Task(tokio::spawn(crate::video::play(
+                            track,
+                            catalog.participant,
+                            playing.screens.clone(),
+                        ))));
+                    }
+                    Err(error) => tracing::debug!(%error, path = peer.path(), "no screen"),
                 }
             }
             if catalog.renditions.iter().any(|rendition| {

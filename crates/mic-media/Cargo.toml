@@ -13,10 +13,14 @@ devices = ["dep:cpal"]
 # VP9 through libvpx, which it links: the system's, found by pkg-config (VPX_STATIC=1 links it
 # statically).
 vp9 = ["dep:vpx-sys"]
+# Screens and windows captured, for screenshare, through moq-video's capture: X11 on Linux,
+# ScreenCaptureKit on macOS, Windows.Graphics.Capture on Windows.
+screen = ["dep:moq-video", "tokio/rt"]
 
 [dependencies]
 cpal = { version = "0.18.2", optional = true }
 derive_more = { version = "2.1.1", features = ["display", "error"] }
+moq-video = { version = "=0.1.16", default-features = false, features = ["capture"], optional = true }
 ringbuf = "0.5.1"
 nnnoiseless = { version = "0.5.2", default-features = false }
 serde = { version = "1.0.229", features = ["derive"] }

@@ -85,64 +85,60 @@ pub fn room(checks: &mut Checks, the_box: &TestBox) -> Result<()> {
         || {
             let dave_key = key("dave");
             let dave = &mut windows[1];
-            let snapshot = dave.snapshot()?;
-            let shown = snapshot
-                .ui
-                .map(|ui| ui.tiles)
-                .ok_or("dave's window says nothing")?;
-            // Those who send a camera, by their catalogs: carol sends none.
-            let cameras: Vec<String> = snapshot
-                .room
-                .ok_or("dave is in no room")?
-                .participants
-                .iter()
-                .filter(|them| !them.renditions.is_empty())
-                .map(|them| them.key.to_string())
-                .collect();
-            // What was on its way when the tiles were chosen.
-            std::thread::sleep(Duration::from_secs(2));
-            let before = dave.seen()?;
-            std::thread::sleep(Duration::from_secs(3));
-            let after = dave.seen()?;
-            let grew = |key: &str| {
-                let pictures = |seen: &mic_harness::Seen| {
-                    seen.cameras
-                        .iter()
-                        .find(|camera| camera.key == key)
-                        .map_or(0, |camera| camera.pictures)
-                };
-                pictures(&after) > pictures(&before)
-            };
-            let mut wrong = Vec::new();
-            for camera in after
-                .cameras
-                .iter()
-                .filter(|camera| camera.key != dave_key && cameras.contains(&camera.key))
-            {
-                if grew(&camera.key) != shown.contains(&camera.key) {
-                    wrong.push(format!(
-                        "{} ({}): shown {}, decoded {}",
-                        camera.key,
-                        camera
-                            .sender
-                            .map_or("?".to_owned(), |sender| sender.to_string()),
-                        shown.contains(&camera.key),
-                        grew(&camera.key)
-                    ));
+            // Measured again if the tiles change while it's measured: a voice heard a moment
+            // before its mute took hold makes a speaker, who comes into view.
+            let mut tries = 0;
+            loop {
+                tries += 1;
+                let (shown, cameras) = shown_and_cameras(dave)?;
+                // What was on its way when the tiles were chosen.
+                std::thread::sleep(Duration::from_secs(2));
+                let before = dave.seen()?;
+                std::thread::sleep(Duration::from_secs(3));
+                let after = dave.seen()?;
+                if shown_and_cameras(dave)?.0 != shown && tries < 3 {
+                    continue;
                 }
+                let grew = |key: &str| {
+                    let pictures = |seen: &mic_harness::Seen| {
+                        seen.cameras
+                            .iter()
+                            .find(|camera| camera.key == key)
+                            .map_or(0, |camera| camera.pictures)
+                    };
+                    pictures(&after) > pictures(&before)
+                };
+                let mut wrong = Vec::new();
+                for camera in after
+                    .cameras
+                    .iter()
+                    .filter(|camera| camera.key != dave_key && cameras.contains(&camera.key))
+                {
+                    if grew(&camera.key) != shown.contains(&camera.key) {
+                        wrong.push(format!(
+                            "{} ({}): shown {}, decoded {}",
+                            camera.key,
+                            camera
+                                .sender
+                                .map_or("?".to_owned(), |sender| sender.to_string()),
+                            shown.contains(&camera.key),
+                            grew(&camera.key)
+                        ));
+                    }
+                }
+                let decoding = after
+                    .cameras
+                    .iter()
+                    .filter(|camera| grew(&camera.key))
+                    .count();
+                if !wrong.is_empty() || decoding == 0 {
+                    return Err(Error::Failed(format!(
+                        "{decoding} cameras decoded: {}",
+                        wrong.join("; ")
+                    )));
+                }
+                return Ok(());
             }
-            let decoding = after
-                .cameras
-                .iter()
-                .filter(|camera| grew(&camera.key))
-                .count();
-            if !wrong.is_empty() || decoding == 0 {
-                return Err(Error::Failed(format!(
-                    "{decoding} cameras decoded: {}",
-                    wrong.join("; ")
-                )));
-            }
-            Ok(())
         },
     );
     checks.record(
@@ -248,6 +244,24 @@ pub fn room(checks: &mut Checks, the_box: &TestBox) -> Result<()> {
         participant.reset()?;
     }
     Ok(())
+}
+
+/// The tiles `window` shows, by key, and who in its room sends a camera, by their catalogs.
+fn shown_and_cameras(window: &mut Participant) -> Result<(Vec<String>, Vec<String>)> {
+    let snapshot = window.snapshot()?;
+    let shown = snapshot
+        .ui
+        .map(|ui| ui.tiles)
+        .ok_or_else(|| Error::Failed(format!("{}'s window says nothing", window.name)))?;
+    let cameras = snapshot
+        .room
+        .ok_or_else(|| Error::Failed(format!("{} is in no room", window.name)))?
+        .participants
+        .iter()
+        .filter(|them| !them.renditions.is_empty())
+        .map(|them| them.key.to_string())
+        .collect();
+    Ok((shown, cameras))
 }
 
 /// What `snapshot`'s window shows: how many tiles, and how many beyond them.

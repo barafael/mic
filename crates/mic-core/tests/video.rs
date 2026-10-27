@@ -218,6 +218,107 @@ async fn only_the_cameras_watched_are_decoded() {
     }
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn a_shared_screen_is_seen_until_it_stops() {
+    use mic_core::Command;
+    use mic_core::video::{SCREEN_SETTINGS, ScreenSource};
+    let relay = TestRelay::start().await.unwrap();
+    let invite = Invite::new_room();
+    let screen: ScreenSource = std::sync::Arc::new(|pictures| {
+        PatternCamera {
+            sender: 77,
+            width: SCREEN_SETTINGS.width,
+            height: SCREEN_SETTINGS.height,
+            fps: SCREEN_SETTINGS.fps,
+        }
+        .start(pictures)
+        .map_err(|error| error.to_string())
+    });
+    let alice = Client::new(
+        config(&relay),
+        &InMemory::default(),
+        tokio::runtime::Handle::current(),
+    )
+    .unwrap()
+    .join_with(
+        invite.clone(),
+        Profile::new("Alice"),
+        Media {
+            screen: Some(screen),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    let bob = join(&invite, "Bob", None, config(&relay)).await;
+    let whose = alice.participant();
+    alice
+        .command(Command::ShareScreen { on: true })
+        .await
+        .unwrap();
+    let deadline = tokio::time::Instant::now() + PATIENCE;
+    loop {
+        let read = bob
+            .room
+            .screen(whose)
+            .borrow()
+            .as_deref()
+            .and_then(read_pattern);
+        if read.is_some_and(|pattern| pattern.sender == 77) {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "no screen: {read:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let mut state = bob.room.state();
+    tokio::time::timeout(
+        PATIENCE,
+        state.wait_for(|state| state.participants.iter().any(|them| them.profile.sharing)),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    alice
+        .command(Command::ShareScreen { on: false })
+        .await
+        .unwrap();
+    tokio::time::timeout(
+        PATIENCE,
+        state.wait_for(|state| state.participants.iter().all(|them| !them.profile.sharing)),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let before = bob.room.screen_count(whose);
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert_eq!(
+        bob.room.screen_count(whose),
+        before,
+        "pictures after it stopped"
+    );
+    // And again.
+    alice
+        .command(Command::ShareScreen { on: true })
+        .await
+        .unwrap();
+    let deadline = tokio::time::Instant::now() + PATIENCE;
+    while bob.room.screen_count(whose) < before + 5 {
+        assert!(tokio::time::Instant::now() < deadline, "no screen again");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    // One with nothing to share says so.
+    assert!(
+        bob.room
+            .command(Command::ShareScreen { on: true })
+            .await
+            .is_err()
+    );
+}
+
 #[test]
 fn under_a_second_isnt_a_recording() {
     let pictures = (0..CAMERA_SETTINGS.fps - 1)

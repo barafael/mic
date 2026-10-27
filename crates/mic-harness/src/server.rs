@@ -274,23 +274,29 @@ impl Harness {
     fn seen(&self) -> Result<Seen, String> {
         let room = self.inner.app.current().ok_or("in no room: `join` first")?;
         let participants = room.state().borrow().participants.clone();
-        let cameras = participants
-            .into_iter()
-            .map(|participant| {
-                let pattern = room
-                    .video(participant.key)
-                    .borrow()
-                    .as_deref()
-                    .and_then(mic_media::video::read_pattern);
-                Camera {
-                    key: participant.key.to_string(),
-                    pictures: room.video_count(participant.key),
-                    sender: pattern.map(|pattern| pattern.sender),
-                    frame: pattern.map(|pattern| pattern.frame),
-                }
-            })
-            .collect();
-        Ok(Seen { cameras })
+        let seen =
+            |pictures: &dyn Fn(mic_core::ParticipantKey) -> (mic_core::video::Pictures, u64)| {
+                participants
+                    .iter()
+                    .map(|participant| {
+                        let (shown, count) = pictures(participant.key);
+                        let pattern = shown
+                            .borrow()
+                            .as_deref()
+                            .and_then(mic_media::video::read_pattern);
+                        Camera {
+                            key: participant.key.to_string(),
+                            pictures: count,
+                            sender: pattern.map(|pattern| pattern.sender),
+                            frame: pattern.map(|pattern| pattern.frame),
+                        }
+                    })
+                    .collect()
+            };
+        Ok(Seen {
+            cameras: seen(&|key| (room.video(key), room.video_count(key))),
+            screens: seen(&|key| (room.screen(key), room.screen_count(key))),
+        })
     }
 
     /// Leaves the room it's in, if any.

@@ -29,6 +29,29 @@ pub const CAMERA: &str = "camera";
 /// `PatternCamera`, or a device).
 pub type Pictures = watch::Receiver<Option<Arc<Picture>>>;
 
+/// The screenshare's track's semantic name: a track of the participant's broadcast, named in
+/// its catalog's renditions from the first share on, sent while its profile says it's sharing.
+pub const SCREEN: &str = "screen";
+
+/// How a screen is sent: larger than a camera, few pictures a second, libvpx tuned for text and
+/// sharp edges (§5.4).
+pub const SCREEN_SETTINGS: Settings = Settings {
+    width: 1280,
+    height: 720,
+    fps: 5,
+    kbps: 1200,
+    content: Content::Screen,
+};
+
+/// What starts a screen's capture, sending pictures at [`SCREEN_SETTINGS`]' size into the
+/// sender it's given, until the handle it returns is dropped: what the frontend's picker chose,
+/// or the box's synthetic screen.
+pub type ScreenSource = Arc<
+    dyn Fn(watch::Sender<Option<Arc<Picture>>>) -> Result<mic_media::audio::Running, String>
+        + Send
+        + Sync,
+>;
+
 /// How the camera is sent: small and light, as a call's tiles are, for now.
 pub const CAMERA_SETTINGS: Settings = Settings {
     width: 640,
@@ -84,13 +107,27 @@ impl Recorded {
 /// after it's on again starts a group.
 pub(crate) async fn publish(camera: Camera, track: SignedTrack, on: watch::Receiver<bool>) {
     match camera {
-        Camera::Live(pictures) => publish_live(pictures, track, on).await,
+        Camera::Live(pictures) => publish_live(pictures, track, on, CAMERA_SETTINGS).await,
         Camera::Recorded(recorded) => publish_recorded(recorded, track, on).await,
     }
 }
 
-async fn publish_live(mut pictures: Pictures, track: SignedTrack, on: watch::Receiver<bool>) {
-    let settings = CAMERA_SETTINGS;
+/// Sends a screen's `pictures` onto `track`, as [`publish`] sends a camera's, at
+/// [`SCREEN_SETTINGS`], while `on` says it's shared.
+pub(crate) async fn publish_screen(
+    pictures: Pictures,
+    track: SignedTrack,
+    on: watch::Receiver<bool>,
+) {
+    publish_live(pictures, track, on, SCREEN_SETTINGS).await;
+}
+
+async fn publish_live(
+    mut pictures: Pictures,
+    track: SignedTrack,
+    on: watch::Receiver<bool>,
+    settings: Settings,
+) {
     let mut encoder = match Vp9Encoder::new(settings) {
         Ok(encoder) => Some(encoder),
         Err(error) => {
@@ -98,7 +135,7 @@ async fn publish_live(mut pictures: Pictures, track: SignedTrack, on: watch::Rec
             return;
         }
     };
-    let mut sending = Sending::new(track);
+    let mut sending = Sending::new(track, settings.fps);
     while pictures.changed().await.is_ok() {
         let Some(picture) = pictures.borrow_and_update().clone() else {
             continue;
@@ -151,7 +188,7 @@ async fn publish_live(mut pictures: Pictures, track: SignedTrack, on: watch::Rec
 async fn publish_recorded(recorded: Recorded, track: SignedTrack, on: watch::Receiver<bool>) {
     let mut ticks = tokio::time::interval(Duration::from_secs(1) / CAMERA_SETTINGS.fps);
     ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    let mut sending = Sending::new(track);
+    let mut sending = Sending::new(track, CAMERA_SETTINGS.fps);
     let mut next = 0;
     loop {
         ticks.tick().await;
@@ -167,36 +204,38 @@ async fn publish_recorded(recorded: Recorded, track: SignedTrack, on: watch::Rec
     }
 }
 
-/// A camera's pictures onto its track: a group a second, each starting with a keyframe, on the
-/// camera's timeline.
+/// A camera's or a screen's pictures onto its track: a group a second, each starting with a
+/// keyframe, on its timeline.
 struct Sending {
     track: SignedTrack,
     group: Option<crate::sig::SignedGroup>,
     /// Pictures sent, and skipped while paused: where the timeline is.
     sent: u64,
+    fps: u64,
 }
 
 impl Sending {
-    fn new(track: SignedTrack) -> Self {
+    fn new(track: SignedTrack, fps: u32) -> Self {
         Self {
             track,
             group: None,
             sent: 0,
+            fps: u64::from(fps.max(1)),
         }
     }
 
-    fn fps() -> u64 {
-        u64::from(CAMERA_SETTINGS.fps)
+    fn fps(&self) -> u64 {
+        self.fps
     }
 
     /// Whether the next picture starts a group, and so must be a keyframe.
     fn keyframe_next(&self) -> bool {
-        self.sent.is_multiple_of(Self::fps())
+        self.sent.is_multiple_of(self.fps())
     }
 
     /// Nothing sent for now: the next picture starts a group.
     fn pause(&mut self) {
-        self.sent = self.sent.next_multiple_of(Self::fps());
+        self.sent = self.sent.next_multiple_of(self.fps());
     }
 
     /// The next picture's packets, encoded as [`Self::keyframe_next`] said; false once the track
@@ -216,7 +255,7 @@ impl Sending {
                 }
             }
         }
-        let timestamp = match moq_net::Timestamp::from_micros(self.sent * 1_000_000 / Self::fps()) {
+        let timestamp = match moq_net::Timestamp::from_micros(self.sent * 1_000_000 / self.fps()) {
             Ok(timestamp) => timestamp,
             Err(error) => {
                 tracing::warn!(%error, "the camera's timeline ran out");

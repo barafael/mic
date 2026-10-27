@@ -42,8 +42,12 @@ impl Devices {
         }
     }
 
-    /// What each join sends and plays (`mic_core::App::with_media`).
-    pub fn media(&self) -> impl Fn() -> Media + Send + Sync + 'static {
+    /// What each join sends and plays (`mic_core::App::with_media`), sharing what `screen`
+    /// captures.
+    pub fn media(
+        &self,
+        screen: mic_core::video::ScreenSource,
+    ) -> impl Fn() -> Media + Send + Sync + 'static {
         let (mixer, microphone, echo) = (
             self.mixer.clone(),
             self.microphone.clone(),
@@ -74,6 +78,7 @@ impl Devices {
                 noise: NOISE_SUPPRESSION,
                 // No camera device yet: the box's pattern camera is the synthetic one.
                 camera: None,
+                screen: Some(screen.clone()),
             }
         }
     }

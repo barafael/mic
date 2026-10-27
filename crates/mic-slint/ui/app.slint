@@ -30,6 +30,8 @@ export struct Tile {
     // shows on the tile a moment.
     reaction: string,
     reaction-seq: int,
+    // A shared screen, not a camera: shown whole, never cropped.
+    screen: bool,
 }
 
 // A chat message, as the panel shows it.
@@ -84,6 +86,7 @@ component Icon inherits Path {
         : root.kind == "smile" ? "M12 3 C17 3 21 7 21 12 C21 17 17 21 12 21 C7 21 3 17 3 12 C3 7 7 3 12 3 Z M8.5 14 C9.3 15.4 10.6 16.2 12 16.2 C13.4 16.2 14.7 15.4 15.5 14 M9 9.5 L9 10 M15 9.5 L15 10"
         : root.kind == "chat" ? "M4 5 L20 5 C20.6 5 21 5.4 21 6 L21 16 C21 16.6 20.6 17 20 17 L9.5 17 L5.5 20.5 L5.5 17 L4 17 C3.4 17 3 16.6 3 16 L3 6 C3 5.4 3.4 5 4 5 Z"
         : root.kind == "send" ? "M4 12 L20 4 L14 20 L11.5 13 Z M11.5 13 L20 4"
+        : root.kind == "screen" ? "M4 4.5 L20 4.5 C20.8 4.5 21.5 5.2 21.5 6 L21.5 15 C21.5 15.8 20.8 16.5 20 16.5 L4 16.5 C3.2 16.5 2.5 15.8 2.5 15 L2.5 6 C2.5 5.2 3.2 4.5 4 4.5 Z M8 20 L16 20 M12 16.5 L12 20 M9 10.5 L12 7.5 L15 10.5 M12 7.5 L12 13.5"
         : "";
 }
 
@@ -299,7 +302,7 @@ component TileView inherits Rectangle {
         width: root.width;
         height: root.height;
         source: root.tile.video;
-        image-fit: cover;
+        image-fit: root.tile.screen ? contain : cover;
         opacity: root.showing-video ? 1 : 0;
         visible: self.opacity > 0;
         animate opacity { duration: Theme.moving; }
@@ -577,6 +580,10 @@ component RoomScreen inherits FocusScope {
     in property <[ChatLine]> chat;
     // The reactions offered, as emoji, in the order `react` numbers them.
     in property <[string]> reactions;
+    // The others' shared screens: the first is on the stage.
+    in property <[Tile]> screens;
+    in property <bool> sharing;
+    callback toggle-share();
     callback leave();
     callback toggle-mute();
     callback toggle-camera();
@@ -664,8 +671,17 @@ component RoomScreen inherits FocusScope {
             HorizontalLayout {
             vertical-stretch: 1;
             spacing: 10px;
+            // A shared screen, as large as there's room for beside the tiles.
+            if root.screens.length > 0: TileView {
+                horizontal-stretch: 3;
+                min-width: 0;
+                preferred-width: 0;
+                tile: root.screens[0];
+            }
             grid := Rectangle {
                 horizontal-stretch: 1;
+                min-width: root.screens.length > 0 ? 160px : 0;
+                preferred-width: 0;
                 // The tiles at 16:9, as the cameras send, as large as the grid lets them be, the
                 // last row centred.
                 property <int> count: root.tiles.length + (root.overflow > 0 ? 1 : 0);
@@ -868,6 +884,14 @@ component RoomScreen inherits FocusScope {
                             root.toggle-hand();
                         }
                     }
+                    RoundButton {
+                        icon: "screen";
+                        lit: root.sharing;
+                        label: root.sharing ? "Stop sharing your screen" : "Share your screen";
+                        clicked => {
+                            root.toggle-share();
+                        }
+                    }
                     react-button := RoundButton {
                         icon: "smile";
                         label: root.picking ? "" : "React";
@@ -968,6 +992,14 @@ export component AppWindow inherits Window {
     in property <bool> hand;
     in property <[ChatLine]> chat;
     in property <[string]> reactions;
+    in property <[Tile]> screens;
+    in property <bool> sharing;
+    // What there is to share, while the picker asks; empty otherwise.
+    in property <[string]> share-choices;
+    // Share, or stop: the picker opens with the choices to share.
+    callback toggle-share();
+    // The choice of `share-choices` at this index; none (-1) cancels.
+    callback share(int);
     callback join(string, string);
     callback new-room();
     callback leave();
@@ -1058,6 +1090,11 @@ export component AppWindow inherits Window {
             hand: root.hand;
             chat: root.chat;
             reactions: root.reactions;
+            screens: root.screens;
+            sharing: root.sharing;
+            toggle-share => {
+                root.toggle-share();
+            }
             toggle-hand => {
                 root.toggle-hand();
             }
@@ -1078,6 +1115,70 @@ export component AppWindow inherits Window {
             }
             leave => {
                 root.leave();
+            }
+        }
+    }
+    // What to share, while it's asked: Escape cancels.
+    if root.share-choices.length > 0: Rectangle {
+        width: root.width;
+        height: root.height;
+        background: #000000a8;
+        TouchArea {
+            clicked => {
+                root.share(-1);
+            }
+        }
+        picker := FocusScope {
+            init => {
+                picker.focus();
+            }
+            key-pressed(event) => {
+                if (event.text == Key.Escape) {
+                    root.share(-1);
+                    return accept;
+                }
+                reject
+            }
+            Rectangle {
+                width: Math.min(460px, root.width - 32px);
+                height: Math.min(choices.preferred-height, root.height - 32px);
+                background: Theme.surface;
+                border-radius: 14px;
+                TouchArea { }
+                choices := VerticalLayout {
+                    padding: 16px;
+                    spacing: 6px;
+                    Text {
+                        text: "Share your screen";
+                        color: Theme.text;
+                        font-size: 16px;
+                        font-weight: 600;
+                    }
+                    for choice[i] in root.share-choices: Rectangle {
+                        height: 36px;
+                        border-radius: 8px;
+                        background: pick.has-hover ? Theme.raised-hover : Theme.raised;
+                        accessible-role: button;
+                        accessible-label: choice;
+                        accessible-action-default => {
+                            root.share(i);
+                        }
+                        Text {
+                            x: 12px;
+                            width: parent.width - 24px;
+                            text: choice;
+                            color: Theme.text;
+                            font-size: 13px;
+                            overflow: elide;
+                        }
+                        pick := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => {
+                                root.share(i);
+                            }
+                        }
+                    }
+                }
             }
         }
     }

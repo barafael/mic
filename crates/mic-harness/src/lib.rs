@@ -141,6 +141,9 @@ pub struct Heard {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Seen {
     pub cameras: Vec<Camera>,
+    /// Their screens, as decoded, likewise.
+    #[serde(default)]
+    pub screens: Vec<Camera>,
 }
 
 /// One participant's camera, as decoded.
@@ -206,6 +209,12 @@ pub struct Ui {
     /// The chat, as `<name>: <text>`, oldest first.
     #[serde(default)]
     pub chat: Vec<String>,
+    /// The others' shared screens it shows, by key, the one on the stage first.
+    #[serde(default)]
+    pub screens: Vec<String>,
+    /// Whether it shares its own screen.
+    #[serde(default)]
+    pub sharing: bool,
 }
 
 /// What drawing a frontend's video tiles costs, over the last second: the others' cameras, not

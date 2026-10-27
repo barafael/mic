@@ -90,6 +90,14 @@ pub enum Error {
     #[from(ignore)]
     #[display("the room was left")]
     Left,
+    /// Nothing to share a screen from: this client has no screen source.
+    #[from(ignore)]
+    #[display("no screen to share")]
+    NoScreen,
+    /// The screen's capture wouldn't start.
+    #[from(ignore)]
+    #[display("sharing the screen: {_0}")]
+    Screen(#[error(not(source))] String),
 }
 
 fn moq(error: impl std::fmt::Display) -> Error {
@@ -180,6 +188,8 @@ pub struct Media {
     pub noise: mic_media::audio::noise::NoiseSuppression,
     /// What this participant sends as its camera, if it has one.
     pub camera: Option<crate::video::Camera>,
+    /// What a screenshare captures, if it can share one.
+    pub screen: Option<crate::video::ScreenSource>,
 }
 
 impl Inner {
@@ -281,6 +291,7 @@ impl Inner {
             camera_on,
             noise,
             mixer: media.mixer,
+            screen: media.screen,
             decoders: self
                 .config
                 .decoders

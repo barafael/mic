@@ -6,6 +6,24 @@ measurements, and things to revisit. Newest first within each milestone. Each sa
 
 ## M8: Rooms
 
+- **A screen is a track, not a broadcast of its own** (settled, commit 45). §5.6 has a
+  `screen.hang` broadcast; a track of the participant's broadcast needs no second catalog,
+  epoch or checkpoint signer, and a subscriber is told it's shared by the signed profile. The
+  track is subscribed to from the first share on: without pictures it costs nothing. The
+  encoder runs whenever it's shared, watched or not: demand-gating it (§5.7) waits for the
+  encoder to ask the track whether it's used.
+- **HD pictures came out in BT.709 on the GPU and BT.601 on the CPU** (settled, commit 45).
+  moq-video's renderer guesses a matrix from a picture's height when nothing says, BT.709 above
+  576 lines, while mic-render's CPU path, and every picture mic makes, are BT.601. Cameras are
+  360 lines, so it only showed with screens: a screen's colours differed with and without a
+  GPU, and the box's colour check missed it. mic-render now tags every picture BT.601, and a
+  capture in BT.709 is converted.
+- **Edits during a box run break its build check** (settled, by practice). The builder compiles
+  from the working tree, so `box`'s "a second build is a no-op" fails on a half-edited tree.
+  Edit between runs, not during them.
+- **Emoji need a font** (settled, commit 44): the client image has Noto Color Emoji, which
+  Slint's renderers draw in colour. A desktop without one shows boxes for reactions.
+
 - **Dropping a camera mid-group rejected its sender** (settled, commit 43). A camera no longer
   watched is unsubscribed wherever its group stands. The frames read of that group can't be
   confirmed without the rest, which the checkpoints' chain needs (D18), so after the 2 s grace

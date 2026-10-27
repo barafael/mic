@@ -21,6 +21,13 @@ pub struct Synthetic {
     _speaker: Running,
     /// What it sends as a camera, and the camera that draws it live, for as long as this lives.
     camera: Option<(mic_core::video::Camera, Option<Running>)>,
+    /// The pattern its screen shows, if it shares one.
+    screen: Option<u8>,
+}
+
+/// The pattern a synthetic screen shows, for a camera's `sender`: apart from every camera's.
+pub fn screen_pattern(sender: u8) -> u8 {
+    sender.wrapping_add(100)
 }
 
 /// How a synthetic camera is sent.
@@ -48,6 +55,8 @@ impl Synthetic {
         camera: Option<u8>,
         sending: Sending,
     ) -> Result<Self, String> {
+        // One with a camera shares a screen with a pattern of its own.
+        let screen = camera.map(screen_pattern);
         let mixer = Mixer::new();
         let (sink, analyzer) = AnalyzingSink::new();
         let speaker = Box::new(sink)
@@ -87,6 +96,7 @@ impl Synthetic {
             tone,
             microphone: Arc::new(Mutex::new(None)),
             _speaker: speaker,
+            screen,
             camera,
         })
     }
@@ -95,6 +105,19 @@ impl Synthetic {
     pub fn media(&self) -> impl Fn() -> Media + Send + Sync + 'static {
         let (mixer, tone, microphone) = (self.mixer.clone(), self.tone, self.microphone.clone());
         let camera = self.camera.as_ref().map(|(camera, _)| camera.clone());
+        let screen = self.screen.map(|sender| -> mic_core::video::ScreenSource {
+            std::sync::Arc::new(move |pictures| {
+                let settings = mic_core::video::SCREEN_SETTINGS;
+                PatternCamera {
+                    sender,
+                    width: settings.width,
+                    height: settings.height,
+                    fps: settings.fps,
+                }
+                .start(pictures)
+                .map_err(|error| error.to_string())
+            })
+        });
         move || {
             let capture = tone.and_then(|tone| {
                 let (writer, capture) = mic_media::audio::capture();
@@ -115,6 +138,7 @@ impl Synthetic {
                 mixer: Some(mixer.clone()),
                 noise: Default::default(),
                 camera: camera.clone(),
+                screen: screen.clone(),
             }
         }
     }

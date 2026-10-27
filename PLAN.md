@@ -517,7 +517,12 @@ from; the git pins move to releases as they land.
     reactions shown a moment on the sender's tile, a raised hand (Ctrl+Alt+H) in the signed
     profile. The client image gained Noto Color Emoji, which the reactions are drawn in.
 45. `mic-media, mic-slint: screenshare`. Capture in `mic-media`, the picker in the frontend, VP9 in
-    screen-content mode, and a synthetic screen source in the box. **`screenshare`**.
+    screen-content mode, and a synthetic screen source in the box. **`screenshare`**. *Done:* a
+    `screen` track of the participant's own broadcast rather than a broadcast of its own (one
+    catalog and one set of checkpoints; a track without pictures costs nothing), its sharing a
+    flag in the signed profile. 1280×720 at 5 fps, letterboxed, through moq-video's capture
+    (X11 here); the picker lists displays and windows; the stage shows a screen beside the
+    tiles. In the box, carol shares her real Xvnc display.
 46. `testbox: netem`, in a `NET_ADMIN` sidecar **⚠ unverified**. **`network`**: loss and delay
     keep audio intelligible (tone still dominant), and video recovers at the next keyframe.
 47. `mic-core: the WebSocket fallback and its opt-out` (D9), if the pinned `moq-relay` serves

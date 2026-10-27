@@ -106,6 +106,8 @@ pub enum Command {
     React { reaction: crate::chat::Reaction },
     /// Raise a hand, or lower it; everyone's tile of this participant says which.
     SetHand { raised: bool },
+    /// Share the screen the screen source captures, or stop.
+    ShareScreen { on: bool },
     /// Show the cameras of these participants only, as a frontend's visible tiles do; every
     /// camera with none (as at the start). Only those are subscribed to and decoded (§5.8).
     Watch {
@@ -150,6 +152,8 @@ struct Shared {
     runtime: tokio::runtime::Handle,
     /// What the others' cameras show.
     board: crate::video::Board,
+    /// What the others' screens show.
+    screens: crate::video::Board,
     /// What this participant's camera sends, if it sends one.
     preview: Option<crate::video::Pictures>,
 }
@@ -189,6 +193,8 @@ pub(crate) struct Joined {
     pub muted: watch::Sender<bool>,
     /// Whether the camera is on, which it follows.
     pub camera_on: watch::Sender<bool>,
+    /// What a screenshare captures, if this participant can share one.
+    pub screen: Option<crate::video::ScreenSource>,
     /// What suppresses the voice's noise, which it follows.
     pub noise: watch::Sender<mic_media::audio::noise::NoiseSuppression>,
     /// Where the others' voices play, if anywhere.
@@ -228,6 +234,7 @@ impl Room {
             origin: joined.origin.consume(),
             runtime: joined.runtime.clone(),
             board: crate::video::Board::default(),
+            screens: crate::video::Board::default(),
             preview: joined.preview,
         });
         let (roster, followed) = watch::channel(Roster::default());
@@ -245,6 +252,7 @@ impl Room {
             roster::Playing {
                 mixer: joined.mixer,
                 board: board.clone(),
+                screens: shared.screens.clone(),
                 decoders: joined.decoders.clone(),
                 voices: voices.clone(),
                 watching: watched_cameras,
@@ -269,6 +277,7 @@ impl Room {
             camera: joined.camera,
             muted: joined.muted,
             camera_on: joined.camera_on,
+            screen: joined.screen.map(Screen::new),
             noise: joined.noise,
             roster: followed,
             state,
@@ -355,6 +364,16 @@ impl Room {
         self.shared.board.count(whose)
     }
 
+    /// `whose` screen's pictures, as they're decoded: none until they share one.
+    pub fn screen(&self, whose: ParticipantKey) -> crate::video::Pictures {
+        self.shared.screens.pictures(whose)
+    }
+
+    /// How many of `whose` screen's pictures were decoded.
+    pub fn screen_count(&self, whose: ParticipantKey) -> u64 {
+        self.shared.screens.count(whose)
+    }
+
     /// The other participants' broadcasts as they arrive and go, those there already first.
     pub fn peers(&self) -> Peers {
         let _entered = self.shared.runtime.enter();
@@ -413,6 +432,8 @@ struct Task {
     camera: Option<tokio::task::JoinHandle<()>>,
     muted: watch::Sender<bool>,
     camera_on: watch::Sender<bool>,
+    /// The screenshare, if it can share one.
+    screen: Option<Screen>,
     noise: watch::Sender<mic_media::audio::noise::NoiseSuppression>,
     roster: watch::Receiver<Roster>,
     state: watch::Sender<RoomState>,
@@ -568,6 +589,18 @@ impl Task {
                 hand: raised,
                 ..self.profile.clone()
             }),
+            Command::ShareScreen { on } => {
+                let screen = self.screen.as_mut().ok_or(Error::NoScreen)?;
+                if on {
+                    screen.start(&mut self.publication)?;
+                } else {
+                    screen.stop();
+                }
+                self.set_profile(Profile {
+                    sharing: on,
+                    ..self.profile.clone()
+                })
+            }
             Command::SetMuted { muted } => {
                 self.set_profile(Profile {
                     muted,
@@ -687,6 +720,7 @@ impl Task {
         {
             sending.abort();
         }
+        self.screen = None;
         let Some(connection) = self.connection.take() else {
             return;
         };
@@ -713,6 +747,64 @@ impl Drop for Task {
     fn drop(&mut self) {
         self.following.abort();
         for sending in [&self.voice, &self.camera].into_iter().flatten() {
+            sending.abort();
+        }
+    }
+}
+
+/// A participant's screenshare: its track, made at the first share and kept, and what captures
+/// it while it's shared.
+struct Screen {
+    source: crate::video::ScreenSource,
+    /// What the capture sends into, and the track's sender reads.
+    pictures: watch::Sender<Option<Arc<mic_media::video::Picture>>>,
+    on: watch::Sender<bool>,
+    /// Sends the track, from the first share until the room is left.
+    sending: Option<tokio::task::JoinHandle<()>>,
+    /// The capture, while it's shared.
+    capturing: Option<mic_media::audio::Running>,
+}
+
+impl Screen {
+    fn new(source: crate::video::ScreenSource) -> Self {
+        Self {
+            source,
+            pictures: watch::channel(None).0,
+            on: watch::channel(false).0,
+            sending: None,
+            capturing: None,
+        }
+    }
+
+    /// Starts capturing and sending, the track made and named in the catalog the first time.
+    fn start(&mut self, publication: &mut Publication) -> Result<(), Error> {
+        if self.capturing.is_some() {
+            return Ok(());
+        }
+        self.capturing = Some((self.source)(self.pictures.clone()).map_err(Error::Screen)?);
+        if self.sending.is_none() {
+            let codec = mic_media::video::Codec::Vp9;
+            let track = publication.video_track(crate::video::SCREEN, codec)?;
+            self.sending = Some(tokio::spawn(crate::video::publish_screen(
+                self.pictures.subscribe(),
+                track,
+                self.on.subscribe(),
+            )));
+        }
+        self.on.send_replace(true);
+        Ok(())
+    }
+
+    /// Stops capturing; the next share starts with a keyframe.
+    fn stop(&mut self) {
+        self.on.send_replace(false);
+        self.capturing = None;
+    }
+}
+
+impl Drop for Screen {
+    fn drop(&mut self) {
+        if let Some(sending) = &self.sending {
             sending.abort();
         }
     }

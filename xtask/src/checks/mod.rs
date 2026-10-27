@@ -10,6 +10,7 @@ mod record;
 mod relay;
 mod room;
 mod roster;
+mod screenshare;
 mod testbox;
 mod version;
 mod video;
@@ -45,10 +46,12 @@ pub enum Phase {
     Links,
     /// Twelve in a room: the tiles shown, their cameras only, the speaker, chat, reactions, hands.
     Room,
+    /// A shared screen reaches everyone; a real one too.
+    Screenshare,
 }
 
 impl Phase {
-    pub const ALL: [Phase; 11] = [
+    pub const ALL: [Phase; 12] = [
         Phase::Box,
         Phase::Relay,
         Phase::Roster,
@@ -60,6 +63,7 @@ impl Phase {
         Phase::Version,
         Phase::Links,
         Phase::Room,
+        Phase::Screenshare,
     ];
 
     pub fn name(self) -> String {
@@ -82,6 +86,7 @@ impl Phase {
                 | Phase::Video
                 | Phase::Links
                 | Phase::Room
+                | Phase::Screenshare
         )
     }
 
@@ -109,6 +114,7 @@ impl Phase {
             Phase::Version => version::version(checks, the_box),
             Phase::Links => links::links(checks, the_box),
             Phase::Room => room::room(checks, the_box),
+            Phase::Screenshare => screenshare::screenshare(checks, the_box),
         }
     }
 }

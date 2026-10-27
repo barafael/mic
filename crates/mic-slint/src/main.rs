@@ -11,6 +11,7 @@
 
 mod devices;
 mod links;
+mod screens;
 mod videos;
 mod view;
 
@@ -201,6 +202,8 @@ fn run(cli: Cli) -> Result<(), String> {
         .then(|| mic_harness::synthetic::Synthetic::new(cli.tone, cli.camera_pattern))
         .transpose()
         .map_err(|error| format!("the synthetic media: {error}"))?;
+    // What a share captures: the picker's choice.
+    let screens = screens::Screens::default();
     #[cfg(all(unix, feature = "harness"))]
     let devices = synthetic.is_none().then(devices::Devices::new);
     #[cfg(not(all(unix, feature = "harness")))]
@@ -208,12 +211,12 @@ fn run(cli: Cli) -> Result<(), String> {
     #[cfg(all(unix, feature = "harness"))]
     let app = match (&synthetic, &devices) {
         (Some(synthetic), _) => App::with_media(client, synthetic.media()),
-        (None, Some(devices)) => App::with_media(client, devices.media()),
+        (None, Some(devices)) => App::with_media(client, devices.media(screens.source())),
         (None, None) => App::new(client),
     };
     #[cfg(not(all(unix, feature = "harness")))]
     let app = match &devices {
-        Some(devices) => App::with_media(client, devices.media()),
+        Some(devices) => App::with_media(client, devices.media(screens.source())),
         None => App::new(client),
     };
 
@@ -224,6 +227,8 @@ fn run(cli: Cli) -> Result<(), String> {
     window.set_tiles(ModelRc::from(tiles.clone()));
     let chat = Rc::new(VecModel::<ChatLine>::default());
     window.set_chat(ModelRc::from(chat.clone()));
+    let shared = Rc::new(VecModel::<Tile>::default());
+    window.set_screens(ModelRc::from(shared.clone()));
     window.set_reactions(ModelRc::new(VecModel::from(
         mic_core::chat::Reaction::ALL
             .map(|reaction| slint::SharedString::from(reaction.emoji()))
@@ -446,6 +451,51 @@ fn run(cli: Cli) -> Result<(), String> {
             }
         }
     });
+    // Sharing: the picker asks what, the core shares it until asked to stop.
+    let offered = Rc::new(std::cell::RefCell::new(Vec::<screens::Choice>::new()));
+    window.on_toggle_share({
+        let command = command.clone();
+        let window = window.as_weak();
+        let offered = offered.clone();
+        move || {
+            let Some(window) = window.upgrade() else {
+                return;
+            };
+            if window.get_sharing() {
+                command(Command::ShareScreen { on: false });
+                return;
+            }
+            let choices = screens::Screens::choices();
+            if choices.is_empty() {
+                tracing::warn!("nothing to share: no display or window found");
+                return;
+            }
+            window.set_share_choices(ModelRc::new(VecModel::from(
+                choices
+                    .iter()
+                    .map(|choice| slint::SharedString::from(choice.label.as_str()))
+                    .collect::<Vec<_>>(),
+            )));
+            *offered.borrow_mut() = choices;
+        }
+    });
+    window.on_share({
+        let command = command.clone();
+        let window = window.as_weak();
+        let screens = screens.clone();
+        move |index| {
+            if let Some(window) = window.upgrade() {
+                window.set_share_choices(ModelRc::default());
+            }
+            let chosen = usize::try_from(index)
+                .ok()
+                .and_then(|index| offered.borrow().get(index).cloned());
+            if let Some(chosen) = chosen {
+                screens.choose(chosen.source);
+                command(Command::ShareScreen { on: true });
+            }
+        }
+    });
     window.on_say(move |text| {
         command(Command::Say {
             text: text.to_string(),
@@ -468,6 +518,7 @@ fn run(cli: Cli) -> Result<(), String> {
         let window = window.as_weak();
         let tiles = tiles.clone();
         let chat = chat.clone();
+        let shared = shared.clone();
         async move {
             let mut last = None;
             let sweep = slint::Timer::default();
@@ -476,15 +527,12 @@ fn run(cli: Cli) -> Result<(), String> {
                 let Some(window) = window.upgrade() else {
                     return;
                 };
-                apply(
-                    &window,
-                    &tiles,
-                    &chat,
-                    &sweep,
-                    &view,
-                    &*tell.view,
-                    &mut last,
-                );
+                let models = Models {
+                    tiles: &tiles,
+                    chat: &chat,
+                    screens: &shared,
+                };
+                apply(&window, &models, &sweep, &view, &*tell.view, &mut last);
                 drop(window);
                 if viewed.changed().await.is_err() {
                     return;
@@ -569,9 +617,9 @@ fn run(cli: Cli) -> Result<(), String> {
     let looking = slint::Timer::default();
     {
         let mut videos = videos::Videos::new(gpu, frames, cost.clone());
-        let (app, tiles) = (app.clone(), tiles.clone());
+        let (app, tiles, shared) = (app.clone(), tiles.clone(), shared.clone());
         looking.start(slint::TimerMode::Repeated, videos::LOOK, move || {
-            videos.look(&app, &tiles);
+            videos.look(&app, &tiles, &shared);
         });
     }
 
@@ -674,10 +722,16 @@ fn join(
 const FADING: Duration = Duration::from_millis(240);
 
 /// Sets `view` on the window, unless it's what shows already, and tells `shown`.
+/// The window's models, which `apply` brings to each view.
+struct Models<'a> {
+    tiles: &'a Rc<VecModel<Tile>>,
+    chat: &'a VecModel<ChatLine>,
+    screens: &'a VecModel<Tile>,
+}
+
 fn apply(
     window: &AppWindow,
-    tiles: &Rc<VecModel<Tile>>,
-    chat: &VecModel<ChatLine>,
+    models: &Models<'_>,
     sweep: &slint::Timer,
     view: &View,
     shown: &dyn Fn(&View),
@@ -695,6 +749,38 @@ fn apply(
     window.set_has_camera(view.camera);
     window.set_overflow(i32::try_from(view.overflow).unwrap_or(i32::MAX));
     window.set_hand(view.hand);
+    window.set_sharing(view.sharing);
+    let Models {
+        tiles,
+        chat,
+        screens,
+    } = models;
+    if last
+        .as_ref()
+        .is_none_or(|last| last.screens != view.screens)
+    {
+        // A screen still shared keeps its last picture.
+        let rows: Vec<Tile> = view
+            .screens
+            .iter()
+            .map(|screen| {
+                let kept = screens.iter().find(|old| old.key == screen.key.as_str());
+                Tile {
+                    key: screen.key.as_str().into(),
+                    name: screen.name.as_str().into(),
+                    initials: view::initials(&screen.name).into(),
+                    video: kept
+                        .as_ref()
+                        .map(|old| old.video.clone())
+                        .unwrap_or_default(),
+                    has_video: kept.as_ref().is_some_and(|old| old.has_video),
+                    screen: true,
+                    ..Tile::default()
+                }
+            })
+            .collect();
+        screens.set_vec(rows);
+    }
     if last.as_ref().is_none_or(|last| last.chat != view.chat) {
         chat.set_vec(
             view.chat
@@ -988,6 +1074,12 @@ mod harness {
                     .iter()
                     .map(|line| format!("{}: {}", line.name, line.text))
                     .collect(),
+                screens: view
+                    .screens
+                    .iter()
+                    .map(|screen| screen.key.clone())
+                    .collect(),
+                sharing: view.sharing,
                 ..Ui::default()
             };
             drop(ui);

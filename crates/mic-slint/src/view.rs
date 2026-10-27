@@ -80,6 +80,10 @@ pub struct View {
     pub hand: bool,
     /// The chat, oldest first.
     pub chat: Vec<Line>,
+    /// The others sharing a screen, which the stage shows, in the order they joined.
+    pub screens: Vec<Tile>,
+    /// Whether this participant shares its screen.
+    pub sharing: bool,
 }
 
 /// Which of the others have a tile, when there are more than fit: the active speaker, and those
@@ -139,6 +143,8 @@ pub fn view(room: Option<(&RoomState, String)>) -> View {
             overflow: 0,
             hand: false,
             chat: Vec::new(),
+            screens: Vec::new(),
+            sharing: false,
         };
     };
     let first = Shown::default().choose(state);
@@ -209,6 +215,19 @@ pub fn view_of(state: &RoomState, invite: String, shown: &[ParticipantKey]) -> V
         overflow: state.participants.len().saturating_sub(shown.len()),
         hand: state.me.profile.hand,
         chat,
+        screens: state
+            .participants
+            .iter()
+            .filter(|them| them.profile.sharing)
+            .map(|them| Tile {
+                name: format!("{}'s screen", them.profile.name),
+                speaking: false,
+                hand: false,
+                reaction: None,
+                ..tile(them, false)
+            })
+            .collect(),
+        sharing: state.me.profile.sharing,
     }
 }
 

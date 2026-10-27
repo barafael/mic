@@ -73,7 +73,13 @@ pub fn video(checks: &mut Checks, the_box: &TestBox) -> Result<()> {
         ] {
             let deadline = Instant::now() + PATIENCE;
             loop {
-                let counts = colours(the_box, &tool, &directory, client, &[alices, bobs])?;
+                let counts = colours(
+                    the_box,
+                    &tool,
+                    &directory,
+                    client,
+                    &[colour(alices), colour(bobs)],
+                )?;
                 let count = |sender: u8| counts[usize::from(sender == bobs)];
                 let right = shows.iter().all(|&sender| count(sender) >= SHOWN)
                     && not.iter().all(|&sender| count(sender) < SHOWN / 10);
@@ -214,29 +220,28 @@ const COST_SAMPLES: usize = 5;
 /// What a colour on the display may be off by, per channel: Slint's sampling, and the codec.
 const TOLERANCE: u8 = 12;
 
-/// How many pixels of each of `senders`' colours `client`'s display has, as a screenshot kept in
-/// the record shows it.
-fn colours(
+/// How many pixels of each of `colours` `client`'s display has, as a screenshot kept in the record
+/// shows it.
+pub(super) fn colours(
     the_box: &TestBox,
     tool: &Path,
     directory: &Path,
     client: &'static str,
-    senders: &[u8],
+    colours: &[[u8; 3]],
 ) -> Result<Vec<usize>> {
     let display = format!("{client}={}", the_box.view_socket(client).display());
     view::shot(tool, directory, "video", std::slice::from_ref(&display))?;
     let (pixels, channels) =
         crate::checks::png_pixels(&directory.join(format!("video-{client}.png")))?;
-    Ok(senders
+    Ok(colours
         .iter()
-        .map(|&sender| {
-            let colour = colour(sender);
+        .map(|colour| {
             pixels
                 .chunks_exact(channels)
                 .filter(|pixel| {
                     pixel[..3]
                         .iter()
-                        .zip(&colour)
+                        .zip(colour)
                         .all(|(a, b)| a.abs_diff(*b) <= TOLERANCE)
                 })
                 .count()
@@ -267,7 +272,7 @@ fn cpu_seconds(the_box: &TestBox, client: &'static str) -> Result<f64> {
 }
 
 /// A sender's pattern's background colour, as RGB: its luma and tint, as mic-render shows them.
-fn colour(sender: u8) -> [u8; 3] {
+pub(super) fn colour(sender: u8) -> [u8; 3] {
     let (u, v) = mic_media::video::tint(sender);
     let mut picture = mic_media::video::Picture::grey(2, 2);
     picture.y_mut().fill(mic_media::video::BACKGROUND);
