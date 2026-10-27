@@ -554,6 +554,11 @@ from; the git pins move to releases as they land.
 ### M10: Release
 
 50. `ci: release packages` for Windows, Linux and macOS: an AppImage and tarball, a dmg, a zip.
+    *Done:* a tag `v<version>` makes a draft release (`.github/workflows/release.yml`), each
+    platform's package built by `packaging/<platform>.sh` and uploaded with `gh`; appimagetool
+    and its runtime pinned by hash. Built here: the tarball and the AppDir, which runs. Not yet
+    run anywhere: the AppImage, the dmg, the zip, which wait for CI (docs/observations.md).
+    `mic --register` now installs the icon on Linux, and on Windows writes the scheme's keys.
 51. `docs: README, TESTPLAN and CHANGELOG for 0.1.0`.
 
 ### After v1

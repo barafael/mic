@@ -88,6 +88,10 @@ pub fn listen(_opened: impl Fn(String) + Send + 'static) -> std::io::Result<()> 
     Ok(())
 }
 
+/// mic's icon (packaging/), which `--register` installs beside the desktop file.
+#[cfg(all(unix, not(target_os = "macos")))]
+const ICON: &str = include_str!("../../../packaging/io.github.barafael.mic.svg");
+
 /// Installs this binary as the handler of `mic://` links, for this user: a desktop file, made the
 /// default for the scheme. Says what it did.
 #[cfg(all(unix, not(target_os = "macos")))]
@@ -111,6 +115,11 @@ pub fn register(arguments: &[String]) -> Result<String, String> {
     let desktop = applications.join(format!("{}.desktop", crate::APP_ID));
     std::fs::write(&desktop, desktop_file(&exe.to_string_lossy(), arguments))
         .map_err(|error| format!("{}: {error}", desktop.display()))?;
+    // Its icon, which the desktop file names, where icon themes look.
+    let icons = data.join("icons/hicolor/scalable/apps");
+    std::fs::create_dir_all(&icons).map_err(|error| error.to_string())?;
+    let icon = icons.join(format!("{}.svg", crate::APP_ID));
+    std::fs::write(&icon, ICON).map_err(|error| format!("{}: {error}", icon.display()))?;
     // The desktop file an earlier mic installed, before mic had an app id: one handler, not two.
     let _gone = std::fs::remove_file(applications.join("mic.desktop"));
     // As xdg-mime would set it, without needing xdg-utils.
@@ -132,9 +141,53 @@ pub fn register(arguments: &[String]) -> Result<String, String> {
     ))
 }
 
-#[cfg(not(all(unix, not(target_os = "macos"))))]
+/// Installs this binary as the handler of `mic://` links, for this user: the scheme's keys under
+/// `HKCU\Software\Classes`, as `reg.exe` writes them, which needs no administrator. Says what it
+/// did.
+#[cfg(windows)]
+pub fn register(arguments: &[String]) -> Result<String, String> {
+    let exe = std::env::current_exe().map_err(|error| format!("this binary: {error}"))?;
+    let command = std::iter::once(exe.display().to_string())
+        .chain(arguments.iter().cloned())
+        .map(|argument| windows_argument(&argument))
+        .chain(["\"%1\"".to_owned()])
+        .collect::<Vec<_>>()
+        .join(" ");
+    const KEY: &str = r"HKCU\Software\Classes\mic";
+    let open = format!(r"{KEY}\shell\open\command");
+    for values in [
+        &[KEY, "/ve", "/d", "URL:mic link"][..],
+        &[KEY, "/v", "URL Protocol", "/d", ""],
+        &[open.as_str(), "/ve", "/d", &command],
+    ] {
+        let status = std::process::Command::new("reg")
+            .arg("add")
+            .args(values)
+            .arg("/f")
+            .status()
+            .map_err(|error| format!("reg.exe: {error}"))?;
+        if !status.success() {
+            return Err(format!("reg add {values:?}: {status}"));
+        }
+    }
+    Ok(format!("{} opens mic:// links now: {KEY}", exe.display()))
+}
+
+/// `argument` as a Windows command line takes it: quoted if it has a space or a quote, its quotes
+/// doubled.
+#[cfg(any(windows, test))]
+fn windows_argument(argument: &str) -> String {
+    if argument.is_empty() || argument.contains([' ', '\t', '"']) {
+        format!("\"{}\"", argument.replace('"', "\"\""))
+    } else {
+        argument.to_owned()
+    }
+}
+
+/// On macOS, the app's bundle says what it opens, in its `Info.plist` (packaging/macos.sh).
+#[cfg(target_os = "macos")]
 pub fn register(_arguments: &[String]) -> Result<String, String> {
-    Err("--register is for Linux; Windows and macOS register with their installers".to_owned())
+    Err("on macOS, mic.app opens mic:// links once it's in Applications".to_owned())
 }
 
 /// `argument` as the desktop file's `Exec` takes it: quoted only if it must be (a character the
@@ -175,8 +228,9 @@ fn desktop_file(exe: &str, arguments: &[String]) -> String {
         .join(" ");
     format!(
         "[Desktop Entry]\nType=Application\nName=mic\nComment=Video calls, end-to-end encrypted\n\
-         Exec={exec} %u\nTerminal=false\nMimeType=x-scheme-handler/mic;\n\
-         Categories=Network;VideoConference;\n"
+         Exec={exec} %u\nIcon={}\nTerminal=false\nMimeType=x-scheme-handler/mic;\n\
+         Categories=Network;VideoConference;\n",
+        crate::APP_ID
     )
 }
 
@@ -236,6 +290,16 @@ mod tests {
             desktop_file("/opt/mic/mic", &relay)
                 .contains("Exec=/opt/mic/mic --relay https://relay.example:4443/ %u\n")
         );
+    }
+
+    #[test]
+    fn a_windows_argument_is_quoted_when_it_must_be() {
+        assert_eq!(windows_argument(r"C:\mic\mic.exe"), r"C:\mic\mic.exe");
+        assert_eq!(
+            windows_argument(r"C:\Program Files\mic\mic.exe"),
+            r#""C:\Program Files\mic\mic.exe""#
+        );
+        assert_eq!(windows_argument(r#"a"b"#), r#""a""b""#);
     }
 
     #[test]
