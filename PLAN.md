@@ -559,7 +559,9 @@ from; the git pins move to releases as they land.
     and its runtime pinned by hash. Built here: the tarball and the AppDir, which runs. Not yet
     run anywhere: the AppImage, the dmg, the zip, which wait for CI (docs/observations.md).
     `mic --register` now installs the icon on Linux, and on Windows writes the scheme's keys.
-51. `docs: README, TESTPLAN and CHANGELOG for 0.1.0`.
+51. `docs: README, TESTPLAN and CHANGELOG for 0.1.0`. *Done:* the README says what mic does,
+    how to install, use and build it, and how it's tested; TESTPLAN.md what a person checks on
+    each platform that the box can't; CHANGELOG.md what 0.1.0 is, and its known limits.
 
 ### After v1
 
