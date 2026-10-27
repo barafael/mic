@@ -8,6 +8,7 @@ mod impersonation;
 mod links;
 mod network;
 mod record;
+mod recording;
 mod relay;
 mod room;
 mod room_40;
@@ -52,6 +53,8 @@ pub enum Phase {
     Screenshare,
     /// Loss, delay, and UDP blocked: what's heard and seen holds, and the WebSocket fallback.
     Network,
+    /// One records: everyone sees it, and the files play back.
+    Recording,
     /// Forty in a room, measured each minute against the budget: not in a default round.
     #[value(name = "room-40")]
     Room40,
@@ -59,7 +62,7 @@ pub enum Phase {
 
 impl Phase {
     /// What `run` runs when it isn't told which: every phase but `room-40`, which takes minutes.
-    pub const ROUNDS: [Phase; 13] = [
+    pub const ROUNDS: [Phase; 14] = [
         Phase::Box,
         Phase::Relay,
         Phase::Roster,
@@ -73,6 +76,7 @@ impl Phase {
         Phase::Room,
         Phase::Screenshare,
         Phase::Network,
+        Phase::Recording,
     ];
 
     pub fn name(self) -> String {
@@ -97,6 +101,7 @@ impl Phase {
                 | Phase::Room
                 | Phase::Screenshare
                 | Phase::Network
+                | Phase::Recording
                 | Phase::Room40
         )
     }
@@ -133,6 +138,7 @@ impl Phase {
             Phase::Screenshare => screenshare::screenshare(checks, the_box),
             Phase::Network => network::network(checks, the_box),
             Phase::Room40 => room_40::room_40(checks, the_box),
+            Phase::Recording => recording::recording(checks, the_box),
         }
     }
 }

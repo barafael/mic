@@ -84,6 +84,12 @@ pub struct View {
     pub screens: Vec<Tile>,
     /// Whether this participant shares its screen.
     pub sharing: bool,
+    /// Who records the room, by key, this participant among them if it does (D7).
+    pub recording: Vec<String>,
+    /// What the window says of it: who records, or nothing.
+    pub recording_notice: String,
+    /// Whether this participant records.
+    pub recording_self: bool,
 }
 
 /// Which of the others have a tile, when there are more than fit: the active speaker, and those
@@ -145,6 +151,9 @@ pub fn view(room: Option<(&RoomState, String)>) -> View {
             chat: Vec::new(),
             screens: Vec::new(),
             sharing: false,
+            recording: Vec::new(),
+            recording_notice: String::new(),
+            recording_self: false,
         };
     };
     let first = Shown::default().choose(state);
@@ -228,6 +237,37 @@ pub fn view_of(state: &RoomState, invite: String, shown: &[ParticipantKey]) -> V
             })
             .collect(),
         sharing: state.me.profile.sharing,
+        recording: std::iter::once(&state.me)
+            .chain(&state.participants)
+            .filter(|them| them.profile.recording)
+            .map(|them| them.key.to_string())
+            .collect(),
+        recording_notice: recording_notice(state),
+        recording_self: state.me.profile.recording,
+    }
+}
+
+/// Who records `state`'s room, as the window says it.
+fn recording_notice(state: &RoomState) -> String {
+    let others: Vec<&str> = state
+        .participants
+        .iter()
+        .filter(|them| them.profile.recording)
+        .map(|them| them.profile.name.as_str())
+        .collect();
+    let others = match others.as_slice() {
+        [] => None,
+        [one] => Some(format!("{one} is recording this call.")),
+        [rest @ .., last] => Some(format!(
+            "{} and {last} are recording this call.",
+            rest.join(", ")
+        )),
+    };
+    match (state.me.profile.recording, others) {
+        (false, None) => String::new(),
+        (true, None) => "You're recording this call; everyone sees that you are.".to_owned(),
+        (true, Some(others)) => format!("You're recording this call. {others}"),
+        (false, Some(others)) => others,
     }
 }
 
@@ -461,5 +501,25 @@ mod tests {
         assert_eq!(bobs.reaction, Some((mic_core::chat::Reaction::Heart, 4)));
         assert_eq!(shown.chat.len(), 1);
         assert!(shown.chat[0].me);
+    }
+
+    #[test]
+    fn who_records_is_said() {
+        let mut state = state();
+        assert_eq!(view(Some((&state, String::new()))).recording_notice, "");
+        state.participants[0].profile.recording = true;
+        assert_eq!(
+            view(Some((&state, String::new()))).recording_notice,
+            "Bob is recording this call."
+        );
+        state.participants[1].profile.recording = true;
+        state.me.profile.recording = true;
+        let shown = view(Some((&state, String::new())));
+        assert_eq!(
+            shown.recording_notice,
+            "You're recording this call. Bob and Carol are recording this call."
+        );
+        assert_eq!(shown.recording.len(), 3);
+        assert!(shown.recording_self);
     }
 }

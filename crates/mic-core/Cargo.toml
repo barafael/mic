@@ -17,13 +17,16 @@ keyring-core = "1.0.1"
 mic-media = { version = "0.1.0", path = "../mic-media", features = ["vp9"] }
 # Opus only: no AAC, and no devices (mic-media has those).
 moq-audio = { version = "=0.1.16", default-features = false }
+# Recording: moq-mux's Matroska exporter, and the hang catalog it reads (D7).
+moq-mux = "=0.10.17"
+hang = "=0.21.17"
 moq-e2ee = "=0.0.17"
 moq-net = "=0.3.16"
 moq-tokio = { version = "=0.19.29", default-features = false, features = ["noq", "aws-lc-rs", "websocket"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 sha2 = "0.11.1"
-tokio = { version = "1.54.1", features = ["rt", "time", "sync", "macros"] }
+tokio = { version = "1.54.1", features = ["rt", "time", "sync", "macros", "fs", "io-util"] }
 tracing = "0.1.44"
 # The version check (D15): what moq-tokio already brings, with its TLS.
 reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls"] }

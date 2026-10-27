@@ -97,6 +97,9 @@ pub struct Profile {
     /// Whether it shares its screen: its `screen` track has pictures.
     #[serde(default)]
     pub sharing: bool,
+    /// Whether it records the room: everyone's window says so (D7).
+    #[serde(default)]
+    pub recording: bool,
 }
 
 impl Profile {
@@ -108,6 +111,7 @@ impl Profile {
             camera_off: false,
             hand: false,
             sharing: false,
+            recording: false,
         }
     }
 }
@@ -128,6 +132,9 @@ struct ProfileFrame {
     /// Likewise: no screen shared.
     #[serde(default)]
     sharing: bool,
+    /// Likewise: not recording.
+    #[serde(default)]
+    recording: bool,
 }
 
 impl ProfileFrame {
@@ -138,6 +145,7 @@ impl ProfileFrame {
             camera_off: profile.camera_off,
             hand: profile.hand,
             sharing: profile.sharing,
+            recording: profile.recording,
         };
         serde_json::to_vec(&frame).expect("a profile serializes")
     }
@@ -150,6 +158,7 @@ impl ProfileFrame {
             camera_off: frame.camera_off,
             hand: frame.hand,
             sharing: frame.sharing,
+            recording: frame.recording,
             ..Profile::new(&frame.name)
         })
     }
@@ -229,6 +238,8 @@ pub(crate) struct Playing {
     pub speaker: watch::Receiver<Option<ParticipantKey>>,
     /// Where what's said in chat and reactions goes.
     pub heard: mpsc::UnboundedSender<crate::chat::Heard>,
+    /// What a recording takes the voices and cameras from, while there's one.
+    pub tap: crate::recording::Tap,
 }
 
 impl Playing {
@@ -507,6 +518,11 @@ async fn read_peer(
                     mixer.clone(),
                     catalog.participant,
                     playing.voices.clone(),
+                    crate::recording::Tapping {
+                        tap: playing.tap.clone(),
+                        whose: catalog.participant,
+                        kind: crate::recording::Kind::Voice,
+                    },
                 )
                 .await;
             }
@@ -538,6 +554,7 @@ async fn read_peer(
                             track,
                             catalog.participant,
                             playing.screens.clone(),
+                            None,
                         ))));
                     }
                     Err(error) => tracing::debug!(%error, path = peer.path(), "no screen"),
@@ -556,7 +573,7 @@ async fn read_peer(
         };
         let shown = playing.shows(whose);
         if shown && camera.is_none() {
-            camera = play_camera(&peer, checked, whose, &playing.board).await;
+            camera = play_camera(&peer, checked, whose, &playing.board, &playing.tap).await;
         } else if !shown && let Some(unwatched) = camera.take() {
             unwatched.stop(checked);
         }
@@ -604,13 +621,23 @@ async fn play_camera(
     verification: &Verification,
     whose: ParticipantKey,
     board: &crate::video::Board,
+    tap: &crate::recording::Tap,
 ) -> Option<Camera> {
     match peer
         .verified_track_with_preferences(crate::video::CAMERA, verification)
         .await
     {
         Ok((track, preferences)) => Some(Camera {
-            playing: tokio::spawn(crate::video::play(track, whose, board.clone())),
+            playing: tokio::spawn(crate::video::play(
+                track,
+                whose,
+                board.clone(),
+                Some(crate::recording::Tapping {
+                    tap: tap.clone(),
+                    whose,
+                    kind: crate::recording::Kind::Camera,
+                }),
+            )),
             preferences,
             raised: false,
         }),
@@ -629,10 +656,11 @@ async fn play_voice(
     mixer: mic_media::audio::Mixer,
     whose: ParticipantKey,
     voices: crate::speaker::Voices,
+    tapping: crate::recording::Tapping,
 ) -> Option<Task> {
     match peer.verified_track(crate::audio::AUDIO, verification).await {
         Ok(track) => Some(Task(tokio::spawn(crate::audio::play(
-            track, mixer, whose, voices,
+            track, mixer, whose, voices, tapping,
         )))),
         Err(error) => {
             tracing::debug!(%error, path = peer.path(), "no voice");

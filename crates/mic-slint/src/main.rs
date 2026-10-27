@@ -52,6 +52,10 @@ struct Cli {
     /// A CA's certificate (PEM) that the relay's is trusted by; the system's roots otherwise.
     #[arg(long, conflicts_with = "fingerprint")]
     ca: Option<PathBuf>,
+    /// Where recordings go, a directory a recording; `Videos/mic` in the home directory unless
+    /// told.
+    #[arg(long, env = "MIC_RECORDINGS")]
+    recordings: Option<PathBuf>,
     /// QUIC only: no WebSocket over TCP raced against it, for a network that blocks UDP (D9).
     #[arg(long, env = "MIC_NO_WEBSOCKET")]
     no_websocket: bool,
@@ -195,6 +199,9 @@ fn run(cli: Cli) -> Result<(), String> {
         config.trust = Trust::Fingerprints(vec![fingerprint]);
     }
     config.websocket = !cli.no_websocket;
+    if let Some(recordings) = cli.recordings.clone() {
+        config.recordings = recordings;
+    }
     #[cfg(all(unix, feature = "harness"))]
     if let Some(Decoders(decoders)) = cli.decoders {
         config.decoders = decoders;
@@ -504,6 +511,16 @@ fn run(cli: Cli) -> Result<(), String> {
             }
         }
     });
+    window.on_toggle_recording({
+        let command = command.clone();
+        let window = window.as_weak();
+        move || {
+            let on = !window
+                .upgrade()
+                .is_some_and(|window| window.get_recording_self());
+            command(Command::Record { on });
+        }
+    });
     window.on_say(move |text| {
         command(Command::Say {
             text: text.to_string(),
@@ -758,6 +775,8 @@ fn apply(
     window.set_overflow(i32::try_from(view.overflow).unwrap_or(i32::MAX));
     window.set_hand(view.hand);
     window.set_sharing(view.sharing);
+    window.set_recording(view.recording_notice.as_str().into());
+    window.set_recording_self(view.recording_self);
     let Models {
         tiles,
         chat,
@@ -1088,6 +1107,9 @@ mod harness {
                     .map(|screen| screen.key.clone())
                     .collect(),
                 sharing: view.sharing,
+                recording: (!view.recording_notice.is_empty())
+                    .then(|| view.recording_notice.clone()),
+                recorders: view.recording.clone(),
                 ..Ui::default()
             };
             drop(ui);

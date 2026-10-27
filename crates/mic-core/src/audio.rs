@@ -38,7 +38,7 @@ const PACKET_MICROS: u64 = 20_000;
 const QUEUE: usize = 6 * FRAME;
 
 /// What the voice is encoded with, and so decoded with.
-fn settings() -> Settings {
+pub(crate) fn settings() -> Settings {
     Settings::new(SAMPLE_RATE, Layout::Mono)
 }
 
@@ -60,6 +60,7 @@ pub(crate) async fn publish(
     mut track: SignedTrack,
     muted: tokio::sync::watch::Receiver<bool>,
     mut noise: tokio::sync::watch::Receiver<NoiseSuppression>,
+    tapping: crate::recording::Tapping,
 ) {
     let mut suppressor = Suppressor::new(*noise.borrow_and_update());
     let mut encoder = match Encoder::new(&settings()) {
@@ -110,6 +111,11 @@ pub(crate) async fn publish(
                 return;
             }
         };
+        tapping.give(|| crate::recording::Frame {
+            timestamp,
+            payload: bytes::Bytes::copy_from_slice(&packet.payload),
+            keyframe: true,
+        });
         if let Some(open) = group.as_mut()
             && let Err(error) = open.write_frame(timestamp, &packet.payload)
         {
@@ -132,6 +138,7 @@ pub(crate) async fn play(
     mixer: Mixer,
     whose: crate::roster::ParticipantKey,
     voices: crate::speaker::Voices,
+    tapping: crate::recording::Tapping,
 ) {
     let mut decoder = match decoder() {
         Ok(decoder) => decoder,
@@ -159,6 +166,11 @@ pub(crate) async fn play(
                     break;
                 }
             };
+            tapping.give(|| crate::recording::Frame {
+                timestamp: frame.timestamp,
+                payload: frame.plaintext.clone(),
+                keyframe: true,
+            });
             // Decoded all the same, so the decoder's state follows the stream.
             match decoder.decode(&frame.plaintext) {
                 Ok(decoded) => {

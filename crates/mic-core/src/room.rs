@@ -108,6 +108,10 @@ pub enum Command {
     SetHand { raised: bool },
     /// Share the screen the screen source captures, or stop.
     ShareScreen { on: bool },
+    /// Record the room into a new directory of recordings (`Config::recordings`), each
+    /// participant's camera and voice a WebM file, or stop, once they're written out. Everyone
+    /// is told; every camera is watched while it records.
+    Record { on: bool },
     /// Show the cameras of these participants only, as a frontend's visible tiles do; every
     /// camera with none (as at the start). Only those are subscribed to and decoded (§5.8).
     Watch {
@@ -195,6 +199,10 @@ pub(crate) struct Joined {
     pub camera_on: watch::Sender<bool>,
     /// What a screenshare captures, if this participant can share one.
     pub screen: Option<crate::video::ScreenSource>,
+    /// What a recording takes this participant's voice and camera from, and the others'.
+    pub tap: crate::recording::Tap,
+    /// Where recordings go.
+    pub recordings: std::path::PathBuf,
     /// What suppresses the voice's noise, which it follows.
     pub noise: watch::Sender<mic_media::audio::noise::NoiseSuppression>,
     /// Where the others' voices play, if anywhere.
@@ -258,6 +266,7 @@ impl Room {
                 watching: watched_cameras,
                 speaker: followed_speaker,
                 heard,
+                tap: joined.tap.clone(),
             },
         ));
         let task = Task {
@@ -278,6 +287,10 @@ impl Room {
             muted: joined.muted,
             camera_on: joined.camera_on,
             screen: joined.screen.map(Screen::new),
+            tap: joined.tap,
+            recordings: joined.recordings,
+            recording: None,
+            asked_watch: None,
             noise: joined.noise,
             roster: followed,
             state,
@@ -434,6 +447,12 @@ struct Task {
     camera_on: watch::Sender<bool>,
     /// The screenshare, if it can share one.
     screen: Option<Screen>,
+    tap: crate::recording::Tap,
+    recordings: std::path::PathBuf,
+    /// The recording under way, if any.
+    recording: Option<crate::recording::Recording>,
+    /// Whose cameras the frontend asked to watch: every one is, while it records.
+    asked_watch: Option<Vec<ParticipantKey>>,
     noise: watch::Sender<mic_media::audio::noise::NoiseSuppression>,
     roster: watch::Receiver<Roster>,
     state: watch::Sender<RoomState>,
@@ -622,14 +641,43 @@ impl Task {
                 Ok(())
             }
             Command::Watch { participants } => {
-                self.watching.send_if_modified(|watching| {
-                    let changed = *watching != participants;
-                    *watching = participants;
-                    changed
-                });
+                self.asked_watch = participants;
+                self.watch();
                 Ok(())
             }
+            Command::Record { on } => {
+                if on && self.recording.is_none() {
+                    let room = self.state.borrow().room.clone();
+                    self.recording = Some(crate::recording::Recording::start(
+                        &self.tap,
+                        &self.recordings,
+                        &room,
+                        self.state.subscribe(),
+                    )?);
+                } else if !on && let Some(recording) = self.recording.take() {
+                    recording.stop().await;
+                }
+                self.watch();
+                self.set_profile(Profile {
+                    recording: on,
+                    ..self.profile.clone()
+                })
+            }
         }
+    }
+
+    /// The cameras watched: those the frontend asked for, or, while it records, every one.
+    fn watch(&self) {
+        let participants = if self.recording.is_some() {
+            None
+        } else {
+            self.asked_watch.clone()
+        };
+        self.watching.send_if_modified(|watching| {
+            let changed = *watching != participants;
+            *watching = participants;
+            changed
+        });
     }
 
     /// `said`, for everyone in the room, and in the state as anyone's is.
@@ -721,6 +769,9 @@ impl Task {
             sending.abort();
         }
         self.screen = None;
+        if let Some(recording) = self.recording.take() {
+            recording.stop().await;
+        }
         let Some(connection) = self.connection.take() else {
             return;
         };

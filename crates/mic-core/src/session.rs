@@ -36,6 +36,18 @@ pub struct Config {
     /// Whether a WebSocket over TCP races QUIC, for networks that block UDP (D9): on unless
     /// opted out of, QUIC only then.
     pub websocket: bool,
+    /// Where recordings go: a directory a recording, in it.
+    pub recordings: std::path::PathBuf,
+}
+
+/// Where recordings go unless told: `Videos/mic` in the user's home, or the working directory.
+pub fn default_recordings() -> std::path::PathBuf {
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(std::path::PathBuf::from)
+        .unwrap_or_default()
+        .join("Videos")
+        .join("mic")
 }
 
 impl Config {
@@ -47,6 +59,7 @@ impl Config {
             connect_timeout: CONNECT_TIMEOUT,
             decoders: mic_media::video::Codec::ALL.to_vec(),
             websocket: true,
+            recordings: default_recordings(),
         }
     }
 }
@@ -102,6 +115,10 @@ pub enum Error {
     #[from(ignore)]
     #[display("sharing the screen: {_0}")]
     Screen(#[error(not(source))] String),
+    /// A recording couldn't be started or written.
+    #[from(ignore)]
+    #[display("recording: {_0}")]
+    Recording(#[error(not(source))] String),
 }
 
 fn moq(error: impl std::fmt::Display) -> Error {
@@ -245,6 +262,13 @@ impl Inner {
             publication.track(crate::chat::CHAT)?,
             publication.track(crate::chat::REACTIONS)?,
         );
+        // What a recording takes this participant's voice and camera from.
+        let tap = crate::recording::Tap::default();
+        let tapping = |kind| crate::recording::Tapping {
+            tap: tap.clone(),
+            whose: participant,
+            kind,
+        };
         let (muted, follows) = tokio::sync::watch::channel(false);
         let (noise, noise_follows) = tokio::sync::watch::channel(media.noise);
         let voice = match media.capture {
@@ -253,6 +277,7 @@ impl Inner {
                 publication.track(crate::audio::AUDIO)?,
                 follows,
                 noise_follows,
+                tapping(crate::recording::Kind::Voice),
             ))),
             None => None,
         };
@@ -273,6 +298,7 @@ impl Inner {
                 camera,
                 publication.video_track(crate::video::CAMERA, codec)?,
                 camera_follows,
+                tapping(crate::recording::Kind::Camera),
             ))),
             _ => None,
         };
@@ -300,6 +326,8 @@ impl Inner {
             noise,
             mixer: media.mixer,
             screen: media.screen,
+            tap,
+            recordings: self.config.recordings.clone(),
             decoders: self
                 .config
                 .decoders

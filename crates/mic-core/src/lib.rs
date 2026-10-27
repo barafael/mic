@@ -12,6 +12,7 @@ pub mod chat;
 pub mod invite;
 pub mod keys;
 pub mod local;
+pub mod recording;
 pub mod room;
 pub mod roster;
 pub mod secrets;
