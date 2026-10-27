@@ -210,7 +210,17 @@ impl TestBox {
         let file = pod.rendered(&self.repo);
         error::create_dir_all(&self.repo.join(RENDERED))?;
         error::write(&file, self.render(pod)?)?;
-        let mut play = podman(&["kube", "play", "--replace", "--network", pod.network()]);
+        // Logs in a file per container, not the journal, which drops old lines: a check reads
+        // a probe's ready line hours after it was written, and a record keeps whole logs.
+        let mut play = podman(&[
+            "kube",
+            "play",
+            "--replace",
+            "--log-driver",
+            "k8s-file",
+            "--network",
+            pod.network(),
+        ]);
         play.arg(&file);
         process::run(play)
     }
