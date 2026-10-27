@@ -151,6 +151,9 @@ pub struct Ui {
     pub screen: String,
     /// The tiles on it, by participant key, in the order shown.
     pub tiles: Vec<String>,
+    /// The tiles that show their participant muted, by key.
+    #[serde(default)]
+    pub muted: Vec<String>,
 }
 
 /// Pushed to a subscriber on every change of what it shows.

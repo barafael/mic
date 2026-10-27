@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use clap::Parser;
 use mic_core::secrets::Keyring;
-use mic_core::{App, Client, Config, Invite, Profile, Room, Trust};
+use mic_core::{App, Client, Command, Config, Invite, Profile, Room, Trust};
 use slint::{ComponentHandle, Model, ModelRc, VecModel};
 use tokio::sync::watch;
 
@@ -168,6 +168,22 @@ fn run(cli: Cli) -> Result<(), String> {
             }
         }
     });
+    window.on_toggle_mute({
+        let app = app.clone();
+        let window = window.as_weak();
+        let runtime = runtime.handle().clone();
+        move || {
+            let Some(room) = app.current() else {
+                return;
+            };
+            let muted = window.upgrade().is_some_and(|window| window.get_muted());
+            runtime.spawn(async move {
+                if let Err(error) = room.command(Command::SetMuted { muted: !muted }).await {
+                    tracing::warn!(%error, "muting");
+                }
+            });
+        }
+    });
     window.on_leave({
         let app = app.clone();
         let runtime = runtime.handle().clone();
@@ -271,6 +287,7 @@ fn apply(
     window.set_room_invite(view.invite.as_str().into());
     window.set_status(view.status.as_str().into());
     window.set_warning(view.warning.as_str().into());
+    window.set_muted(view.muted);
     let rows: Vec<Tile> = view
         .tiles
         .iter()
@@ -278,6 +295,7 @@ fn apply(
             key: tile.key.as_str().into(),
             name: tile.name.as_str().into(),
             me: tile.me,
+            muted: tile.muted,
         })
         .collect();
     if tiles.iter().ne(rows.iter().cloned()) {
@@ -380,6 +398,7 @@ mod harness {
         let ui = Arc::new(Mutex::new(Ui {
             screen: "join".to_owned(),
             tiles: Vec::new(),
+            muted: Vec::new(),
         }));
         let source = ui.clone();
         let harness = Harness::new(
@@ -409,6 +428,12 @@ mod harness {
             *ui.lock().unwrap_or_else(PoisonError::into_inner) = Ui {
                 screen: view.screen.name().to_owned(),
                 tiles: view.tiles.iter().map(|tile| tile.key.clone()).collect(),
+                muted: view
+                    .tiles
+                    .iter()
+                    .filter(|tile| tile.muted)
+                    .map(|tile| tile.key.clone())
+                    .collect(),
             };
             harness.ui_changed();
         })

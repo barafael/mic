@@ -8,6 +8,7 @@ mod record;
 mod relay;
 mod roster;
 mod testbox;
+mod window;
 
 use crate::error::{Error, Result};
 use crate::podman::TestBox;

@@ -118,3 +118,51 @@ async fn one_without_a_microphone_only_listens() {
     // Carol has no voice for Alice to hear.
     assert!(alice.heard.rms() < 0.01, "{}", alice.heard.rms());
 }
+
+/// Waits until `participant` hears `tone` hardly at all.
+async fn silent(participant: &Participant, tone: f64) {
+    let deadline = tokio::time::Instant::now() + PATIENCE;
+    while participant.heard.level(tone) >= 0.02 {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "{tone} Hz still at {}",
+            participant.heard.level(tone)
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn muted_is_silence_on_the_far_end_and_said_in_the_profile() {
+    let relay = TestRelay::start().await.unwrap();
+    let invite = Invite::new_room();
+    let alice = join(&relay, &invite, "Alice", Some(440.0)).await;
+    let bob = join(&relay, &invite, "Bob", Some(660.0)).await;
+    hears(&bob, 440.0, 660.0).await;
+
+    alice
+        .room
+        .command(mic_core::Command::SetMuted { muted: true })
+        .await
+        .unwrap();
+    assert!(alice.room.state().borrow().me.profile.muted);
+    let mut state = bob.room.state();
+    tokio::time::timeout(
+        PATIENCE,
+        state.wait_for(|state| state.participants.iter().any(|them| them.profile.muted)),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    silent(&bob, 440.0).await;
+    // Alice still hears Bob: muting is hers alone.
+    hears(&alice, 660.0, 440.0).await;
+
+    alice
+        .room
+        .command(mic_core::Command::SetMuted { muted: false })
+        .await
+        .unwrap();
+    hears(&bob, 440.0, 660.0).await;
+    assert!(!bob.room.state().borrow().participants[0].profile.muted);
+}

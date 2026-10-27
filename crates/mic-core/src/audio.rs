@@ -52,8 +52,13 @@ fn decoder() -> Result<Decoder, TrackError> {
 }
 
 /// Encodes what `capture` gives onto `track`, a group a second, until the capture ends or the
-/// track fails.
-pub(crate) async fn publish(mut capture: Capture, mut track: SignedTrack) {
+/// track fails. While `muted` says so, what it gives is read and sent nowhere: the far end hears
+/// nothing.
+pub(crate) async fn publish(
+    mut capture: Capture,
+    mut track: SignedTrack,
+    muted: tokio::sync::watch::Receiver<bool>,
+) {
     let mut encoder = match Encoder::new(&settings()) {
         Ok(encoder) => encoder,
         Err(error) => {
@@ -65,6 +70,9 @@ pub(crate) async fn publish(mut capture: Capture, mut track: SignedTrack) {
     let mut group = None;
     let mut packets: u64 = 0;
     while let Some(frame) = capture.frame().await {
+        if *muted.borrow() {
+            continue;
+        }
         let packet = match encoder.encode(&frame) {
             Ok(packet) => packet,
             Err(error) => {

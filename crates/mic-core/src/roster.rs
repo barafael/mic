@@ -85,13 +85,17 @@ impl fmt::Debug for ParticipantKey {
 pub struct Profile {
     /// Self-asserted (D5): trimmed, at most [`NAME_LIMIT`] characters.
     pub name: String,
+    /// Whether it sends no voice, by its own word: a tile shows it.
+    #[serde(default)]
+    pub muted: bool,
 }
 
 impl Profile {
-    /// A profile with `name`, trimmed and cut to [`NAME_LIMIT`] characters.
+    /// A profile with `name`, trimmed and cut to [`NAME_LIMIT`] characters, not muted.
     pub fn new(name: &str) -> Self {
         Self {
             name: name.trim().chars().take(NAME_LIMIT).collect(),
+            muted: false,
         }
     }
 }
@@ -100,12 +104,16 @@ impl Profile {
 #[derive(Serialize, Deserialize)]
 struct ProfileFrame {
     name: String,
+    /// Left out by a client from before it existed: not muted.
+    #[serde(default)]
+    muted: bool,
 }
 
 impl ProfileFrame {
     fn encode(profile: &Profile) -> Vec<u8> {
         let frame = Self {
             name: profile.name.clone(),
+            muted: profile.muted,
         };
         serde_json::to_vec(&frame).expect("a profile serializes")
     }
@@ -113,7 +121,10 @@ impl ProfileFrame {
     /// The profile a frame carries; none if it isn't one.
     fn decode(bytes: &[u8]) -> Option<Profile> {
         let frame: Self = serde_json::from_slice(bytes).ok()?;
-        Some(Profile::new(&frame.name))
+        Some(Profile {
+            muted: frame.muted,
+            ..Profile::new(&frame.name)
+        })
     }
 }
 
@@ -526,6 +537,22 @@ mod tests {
         );
         let json = serde_json::to_string(&key).unwrap();
         assert_eq!(serde_json::from_str::<ParticipantKey>(&json).unwrap(), key);
+    }
+
+    #[test]
+    fn muted_reads_back_and_defaults_to_not() {
+        let muted = Profile {
+            muted: true,
+            ..Profile::new("Alice")
+        };
+        assert_eq!(
+            ProfileFrame::decode(&ProfileFrame::encode(&muted)),
+            Some(muted)
+        );
+        assert_eq!(
+            ProfileFrame::decode(br#"{"name": "Bob"}"#),
+            Some(Profile::new("Bob"))
+        );
     }
 
     #[test]

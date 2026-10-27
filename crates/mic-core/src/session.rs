@@ -208,10 +208,12 @@ impl Inner {
         // participant finds its name.
         let mut profile_track = publication.track(roster::PROFILE)?;
         roster::write_profile(&mut profile_track, &profile)?;
+        let (muted, follows) = tokio::sync::watch::channel(false);
         let voice = match media.capture {
             Some(capture) => Some(tokio::spawn(crate::audio::publish(
                 capture,
                 publication.track(crate::audio::AUDIO)?,
+                follows,
             ))),
             None => None,
         };
@@ -229,6 +231,7 @@ impl Inner {
             origin,
             runtime: self.runtime.clone(),
             voice,
+            muted,
             mixer: media.mixer,
         }))
     }

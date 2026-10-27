@@ -418,7 +418,8 @@ Each numbered item below is about one commit. Box phases are in **bold**.
     the client's analyzer (`mic_harness::synthetic`), and the window takes `--tone` with the
     harness feature until devices arrive (commit 28).
 27. `mic-core, mic-slint: mute`. `Command::SetMuted`, and a button. **`audio`**: muted means
-    silence on the far end, and the tile shows it.
+    silence on the far end, and the tile shows it. *Done:* muted is in the signed profile,
+    and `audio` also clicks the button.
 28. `testbox: PipeWire in the clients` with a speaker-to-mic loopback **⚠ unverified**.
     **`audio-devices`**: the `cpal` path end to end. The CI smoke job now builds `cpal` on
     Windows and macOS.

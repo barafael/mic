@@ -27,6 +27,8 @@ pub struct Tile {
     pub key: String,
     pub name: String,
     pub me: bool,
+    /// Whether it says it sends no voice.
+    pub muted: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -40,6 +42,8 @@ pub struct View {
     pub status: String,
     /// Broadcasts that didn't stand, when there are any.
     pub warning: String,
+    /// Whether this participant is muted.
+    pub muted: bool,
 }
 
 /// What shows of `room` (its state and its invite), or of none: the join screen.
@@ -51,12 +55,14 @@ pub fn view(room: Option<(&RoomState, String)>) -> View {
             invite: String::new(),
             status: String::new(),
             warning: String::new(),
+            muted: false,
         };
     };
     let tile = |participant: &mic_core::Participant, me| Tile {
         key: participant.key.to_string(),
         name: participant.profile.name.clone(),
         me,
+        muted: participant.profile.muted,
     };
     let tiles = std::iter::once(tile(&state.me, true))
         .chain(state.participants.iter().map(|them| tile(them, false)))
@@ -79,6 +85,7 @@ pub fn view(room: Option<(&RoomState, String)>) -> View {
         invite,
         status: status.to_owned(),
         warning,
+        muted: state.me.profile.muted,
     }
 }
 
@@ -124,6 +131,17 @@ mod tests {
         assert_eq!(shown.invite, "mic://join/1/x#y");
         assert_eq!(shown.status, "");
         assert_eq!(shown.warning, "");
+    }
+
+    #[test]
+    fn who_is_muted_shows_on_their_tile() {
+        let mut state = state();
+        state.me.profile.muted = true;
+        state.participants[1].profile.muted = true;
+        let shown = view(Some((&state, String::new())));
+        assert!(shown.muted);
+        let muted: Vec<bool> = shown.tiles.iter().map(|tile| tile.muted).collect();
+        assert_eq!(muted, [true, false, true]);
     }
 
     #[test]

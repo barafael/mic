@@ -54,6 +54,8 @@ pub enum Command {
     Leave,
     /// Be called this, for everyone in the room.
     SetName { name: String },
+    /// Send no voice, or send it again; everyone's tile of this participant says which.
+    SetMuted { muted: bool },
 }
 
 /// One-off things that happen in a room, beside its state.
@@ -115,6 +117,8 @@ pub(crate) struct Joined {
     pub runtime: tokio::runtime::Handle,
     /// Sends this participant's voice, if it has one.
     pub voice: Option<tokio::task::JoinHandle<()>>,
+    /// Whether the voice is muted, which it follows.
+    pub muted: watch::Sender<bool>,
     /// Where the others' voices play, if anywhere.
     pub mixer: Option<mic_media::audio::Mixer>,
 }
@@ -163,6 +167,7 @@ impl Room {
             origin: joined.origin,
             following,
             voice: joined.voice,
+            muted: joined.muted,
             roster: followed,
             state,
             events,
@@ -272,6 +277,7 @@ struct Task {
     following: tokio::task::JoinHandle<()>,
     /// Sends the voice, until the room is left.
     voice: Option<tokio::task::JoinHandle<()>>,
+    muted: watch::Sender<bool>,
     roster: watch::Receiver<Roster>,
     state: watch::Sender<RoomState>,
     events: broadcast::Sender<Event>,
@@ -322,15 +328,28 @@ impl Task {
                 self.leave().await;
                 Ok(())
             }
-            Command::SetName { name } => {
-                let profile = Profile::new(&name);
-                let track = self.profile_track.as_mut().ok_or(Error::Left)?;
-                roster::write_profile(track, &profile)?;
-                self.profile = profile.clone();
-                self.state.send_modify(|state| state.me.profile = profile);
+            Command::SetName { name } => self.set_profile(Profile {
+                muted: self.profile.muted,
+                ..Profile::new(&name)
+            }),
+            Command::SetMuted { muted } => {
+                self.set_profile(Profile {
+                    muted,
+                    ..self.profile.clone()
+                })?;
+                self.muted.send_replace(muted);
                 Ok(())
             }
         }
+    }
+
+    /// `profile`, for everyone in the room, and in the state.
+    fn set_profile(&mut self, profile: Profile) -> Result<(), Error> {
+        let track = self.profile_track.as_mut().ok_or(Error::Left)?;
+        roster::write_profile(track, &profile)?;
+        self.profile = profile.clone();
+        self.state.send_modify(|state| state.me.profile = profile);
+        Ok(())
     }
 
     /// What the connection said into the state. A connection gives up after its redial window;
