@@ -8,6 +8,11 @@ measurements, and things to revisit. Newest first within each milestone. Each sa
 
 - **The Pages actions' SHAs come from GitHub's API, read through a summarizer** (open). Confirm
   them on the first run of `site.yml`: a wrong pin fails loudly, not silently.
+- **No version check by default** (open): without a domain, mic checks only where it's told to
+  (`--version-url`, `MIC_VERSION_URL`). `mic_core::version::DEFAULT_URL` takes it once there is
+  one. (commit 40)
+- **`video` was missing from the phases that lease the clients** (settled): an edit whose text
+  rustfmt had reflowed didn't apply, unnoticed, since `video` runs alone anyway. (commit 40)
 - **The site has no domain yet** (open). Its pages link relatively, and `Invite::to_https_url`
   takes the host; a CNAME file and the release's download links come with one.
 - **The Slint badge is a text link** (open). The royalty-free terms' option (b), the badge on the

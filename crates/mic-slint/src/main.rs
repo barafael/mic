@@ -45,6 +45,10 @@ struct Cli {
     /// A CA's certificate (PEM) that the relay's is trusted by; the system's roots otherwise.
     #[arg(long)]
     ca: Option<PathBuf>,
+    /// Where to read the latest version from (the site's `version.json`), at start. No check
+    /// without one, until mic has a domain.
+    #[arg(long, env = "MIC_VERSION_URL")]
+    version_url: Option<String>,
     /// Serves the box's harness on a Unix socket here, known by the socket's file name.
     #[cfg(all(unix, feature = "harness"))]
     #[arg(long)]
@@ -69,6 +73,20 @@ struct Cli {
 
 /// What it prints once the window shows: mic-harness's `SHOWN`, which the box waits for.
 const SHOWN: &str = "the window shows";
+
+/// What the window says of how this build stands, if anything.
+fn notice_of(standing: &mic_core::version::Standing) -> Option<String> {
+    use mic_core::version::{CURRENT, Standing};
+    match standing {
+        Standing::Latest => None,
+        Standing::Newer { latest, .. } => Some(format!(
+            "mic {latest} is out; this is {CURRENT}. Download it from the site."
+        )),
+        Standing::Incompatible { latest, .. } => Some(format!(
+            "mic {latest} is out, and this {CURRENT} can't join rooms with it. Download it from the site."
+        )),
+    }
+}
 
 /// Video codecs, as `--decoders` takes them.
 #[cfg(all(unix, feature = "harness"))]
@@ -156,8 +174,9 @@ fn run(cli: Cli) -> Result<(), String> {
     let tiles = Rc::new(VecModel::<Tile>::default());
     window.set_tiles(ModelRc::from(tiles.clone()));
 
-    // What drawing the tiles costs, for the harness.
+    // What drawing the tiles costs, and the version's notice, for the harness.
     let cost = Arc::new(Mutex::new(videos::Cost::default()));
+    let notice: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
     // What the window shows, told to the harness with its feature, after each change.
     #[cfg_attr(not(all(unix, feature = "harness")), expect(unused_mut))]
     let mut shown: Box<dyn Fn(&View)> = Box::new(|_| {});
@@ -171,6 +190,7 @@ fn run(cli: Cli) -> Result<(), String> {
                 .as_ref()
                 .map(|synthetic| synthetic.analyzer.clone()),
             cost.clone(),
+            notice.clone(),
         );
     }
 
@@ -319,6 +339,29 @@ fn run(cli: Cli) -> Result<(), String> {
         tracing::debug!(%error, "no rendering notifier");
         shows.start(slint::TimerMode::SingleShot, Duration::ZERO, || {
             println!("{SHOWN}");
+        });
+    }
+
+    // Am I on the latest? Once, at start, said in a notice (D15).
+    if let Some(url) = cli
+        .version_url
+        .clone()
+        .or(mic_core::version::DEFAULT_URL.map(str::to_owned))
+    {
+        let window = window.as_weak();
+        let noticed = notice.clone();
+        runtime.spawn(async move {
+            let said = match mic_core::version::check(&url).await {
+                Ok(standing) => notice_of(&standing),
+                Err(error) => {
+                    tracing::info!(%error, "the version check");
+                    None
+                }
+            };
+            *noticed.lock().unwrap_or_else(PoisonError::into_inner) = said.clone();
+            let _shown = window.upgrade_in_event_loop(move |window| {
+                window.set_notice(said.unwrap_or_default().into());
+            });
         });
     }
 
@@ -536,6 +579,7 @@ mod harness {
         socket: PathBuf,
         hearing: Option<mic_media::audio::Analyzer>,
         cost: Arc<Mutex<crate::videos::Cost>>,
+        notice: Arc<Mutex<Option<String>>>,
     ) -> Box<dyn Fn(&View)> {
         let name = socket
             .file_name()
@@ -548,6 +592,7 @@ mod harness {
             cant_decode: Vec::new(),
             render: None,
             video: Vec::new(),
+            notice: None,
         }));
         let source = ui.clone();
         let harness = Harness::new(
@@ -560,6 +605,10 @@ mod harness {
                     .clone();
                 let cost = cost.lock().unwrap_or_else(PoisonError::into_inner).clone();
                 ui.video = cost.showing.clone();
+                ui.notice = notice
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .clone();
                 ui.render = Some(mic_harness::Render {
                     video_tiles: cost.tiles,
                     pictures: cost.pictures,
@@ -600,6 +649,7 @@ mod harness {
                     .collect(),
                 render: None,
                 video: Vec::new(),
+                notice: None,
             };
             harness.ui_changed();
         })

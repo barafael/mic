@@ -9,6 +9,7 @@ mod record;
 mod relay;
 mod roster;
 mod testbox;
+mod version;
 mod video;
 mod window;
 
@@ -36,10 +37,12 @@ pub enum Phase {
     AudioDevices,
     /// Each decodes every other's camera; one that can't says so.
     Video,
+    /// A newer version on the site is said.
+    Version,
 }
 
 impl Phase {
-    pub const ALL: [Phase; 8] = [
+    pub const ALL: [Phase; 9] = [
         Phase::Box,
         Phase::Relay,
         Phase::Roster,
@@ -48,6 +51,7 @@ impl Phase {
         Phase::Audio,
         Phase::AudioDevices,
         Phase::Video,
+        Phase::Version,
     ];
 
     pub fn name(self) -> String {
@@ -62,7 +66,12 @@ impl Phase {
     pub fn uses_clients(self) -> bool {
         matches!(
             self,
-            Phase::Roster | Phase::E2ee | Phase::Impersonation | Phase::Audio | Phase::AudioDevices
+            Phase::Roster
+                | Phase::E2ee
+                | Phase::Impersonation
+                | Phase::Audio
+                | Phase::AudioDevices
+                | Phase::Video
         )
     }
 
@@ -87,6 +96,7 @@ impl Phase {
             Phase::Audio => audio::audio(checks, the_box),
             Phase::AudioDevices => audio_devices::audio_devices(checks, the_box),
             Phase::Video => video::video(checks, the_box),
+            Phase::Version => version::version(checks, the_box),
         }
     }
 }

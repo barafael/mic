@@ -1,0 +1,27 @@
+# The site (site/), as GitHub Pages serves it, inside the box: what the clients' version check
+# reads. `cargo testbox up` builds it into target/testbox-site announcing a newer version than any
+# mic (xtask's `podman::NEWER`), and fills in the image placeholder.
+{
+  apiVersion: "v1",
+  kind: "Pod",
+  metadata: {
+    name: "mic-testbox-site",
+  },
+  spec: {
+    restartPolicy: "Always",
+    containers: [
+      # busybox's httpd, plain HTTP on 8080: the box's network is internal, and what a check reads
+      # here is the version, not TLS, which the relay's covers.
+      {
+        name: "site",
+        image: "@IMAGE:moq@",
+        args: ["busybox", "httpd", "-f", "-p", "8080", "-h", "/site"],
+        securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: ["ALL"] } },
+        volumeMounts: [{ name: "site", mountPath: "/site", readOnly: true }],
+      },
+    ],
+    volumes: [
+      { name: "site", hostPath: { path: "@REPO@/target/testbox-site", type: "Directory" } },
+    ],
+  },
+}

@@ -491,7 +491,8 @@ from; the git pins move to releases as they land.
     *Done* (`site/`, `site.yml`); the invite page's logic is tested under node against the
     invite mic-core writes.
 40. `mic-core, mic-slint: the version check` against `version.json` (D15). **`version`**: the
-    box's `site` container serves a newer version; the client says so.
+    box's `site` container serves a newer version; the client says so. *Done;* no default URL
+    until mic has a domain (`--version-url` or `MIC_VERSION_URL`).
 41. `mic-slint: open mic:// links`. On Linux, `mic --register` installs the desktop file and the
     scheme handler (an AppImage can't do that by itself). On Windows, it's a registry entry; on
     macOS, `Info.plist`, which works only from the bundle, so it lands with the dmg in M10.

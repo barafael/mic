@@ -16,6 +16,7 @@ pub mod secrets;
 pub mod session;
 pub mod sig;
 pub mod tracks;
+pub mod version;
 pub mod video;
 
 pub use app::App;

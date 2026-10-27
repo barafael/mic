@@ -258,8 +258,20 @@ export component AppWindow inherits Window {
         }
     }
     in property <string> version;
+    // What it says of the version check, if anything (D15).
+    in property <string> notice;
 
     VerticalLayout {
+        if root.notice != "": Rectangle {
+            background: #2b4a6b;
+            height: notice-text.preferred-height + 12px;
+            notice-text := Text {
+                text: root.notice;
+                color: white;
+                wrap: word-wrap;
+                width: parent.width - 16px;
+            }
+        }
         if root.screen == "join": JoinScreen {
             vertical-stretch: 1;
             name <=> root.name;

@@ -24,6 +24,10 @@ const RENDERED: &str = "target/testbox-pods";
 /// A directory per pod with a display, for its display's socket, which only that pod mounts: no
 /// client reaches another's display.
 pub const VIEW: &str = "target/testbox-view";
+/// The site the box serves (`Pod::Site`).
+pub const SITE: &str = "target/testbox-site";
+/// The version the box's site announces: newer than any mic, so every client says one is out.
+pub const NEWER: &str = "99.0.0";
 /// A directory per client for its harness's socket, which only that client mounts.
 pub const RUN: &str = "target/testbox-run";
 /// The clients `up` plays, each a pod of its own from testbox/pods/client.yaml: a window.
@@ -72,6 +76,8 @@ pub enum Pod {
     Relay,
     /// The checks' tools inside the network.
     Tools,
+    /// The site (site/), as the clients' version check reads it, announcing a newer version.
+    Site,
     /// The probe window on a display of its own, with the host's GPU (testbox/probe).
     Probe,
     /// A participant, by name.
@@ -84,7 +90,7 @@ pub enum Pod {
 impl Pod {
     /// The box's pods, in the order they're played: the relay makes the keys the others read.
     pub fn all() -> Vec<Pod> {
-        [Pod::Relay, Pod::Tools, Pod::Probe]
+        [Pod::Relay, Pod::Tools, Pod::Site, Pod::Probe]
             .into_iter()
             .chain(CLIENTS.map(Pod::Client))
             .collect()
@@ -94,6 +100,7 @@ impl Pod {
         match self {
             Pod::Relay => "relay",
             Pod::Tools => "tools",
+            Pod::Site => "site",
             Pod::Probe => "probe",
             Pod::Client(name) => name,
             Pod::Builder => "builder",
@@ -111,7 +118,7 @@ impl Pod {
     /// The network it's played on.
     fn network(self) -> &'static str {
         match self {
-            Pod::Relay | Pod::Tools | Pod::Probe | Pod::Client(_) => NETWORK,
+            Pod::Relay | Pod::Tools | Pod::Site | Pod::Probe | Pod::Client(_) => NETWORK,
             Pod::Builder => "podman",
         }
     }
@@ -186,10 +193,21 @@ impl TestBox {
         self.network()?;
         self.view_directories()?;
         self.run_directories()?;
+        self.site()?;
         for pod in Pod::all() {
             self.play(pod)?;
         }
         crate::ready::all(self)
+    }
+
+    /// The site as the box serves it (site/build.sh) into target/testbox-site, announcing
+    /// [`NEWER`], so every client's version check finds a newer one.
+    fn site(&self) -> Result<()> {
+        let mut build = std::process::Command::new(self.repo.join("site/build.sh"));
+        build
+            .arg(self.repo.join(SITE))
+            .env("MIC_SITE_LATEST", NEWER);
+        process::run(build)
     }
 
     /// Each display's directory for its socket.
@@ -623,6 +641,7 @@ mod tests {
         for pod in [
             Pod::Relay,
             Pod::Tools,
+            Pod::Site,
             Pod::Probe,
             Pod::Client("alice"),
             Pod::Builder,
