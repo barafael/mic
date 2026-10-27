@@ -362,7 +362,16 @@ Each numbered item below is about one commit. Box phases are in **bold**.
 
 ### M3: Signatures
 
-20. `mic-core: signed catalogs` (D18, step 1). Tests: a tampered catalog is rejected.
+20. `mic-core: signed catalogs` (D18, step 1). Each broadcast's first track is its catalog:
+    canonical bytes with a versioned domain prefix, signed with the room key, naming the room,
+    the key, the key id, the epoch, a sequence number, the tracks and the app's version. It
+    stands only if its signature checks against the key it names, the broadcast's participant
+    segment is the one that key derives (so a catalog signed with one key can't stand at
+    another's path), its room, key id and epoch are the broadcast's, and its number is above the
+    last. The roster takes a participant's key from its catalog only; broadcasts that don't
+    stand are listed in `RoomState::rejected`, and announced as events. Tests: every changed
+    byte is refused; a member signing as herself at Alice's path, and a catalog naming Alice
+    signed by another key, are both rejected, and Alice is shown once.
 21. `mic-core: the sig track`. Checkpoints every 250 ms; verification fails closed after 2 s.
     **`impersonation`**: a box-only forger publishes under alice's path with another key; bob
     marks the tile and drops its tracks within the grace deadline. M5 and M6 rerun it with media.

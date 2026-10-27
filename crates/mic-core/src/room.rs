@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
 use crate::invite::{Invite, RoomId};
-use crate::roster::{self, Participant, ParticipantKey, Profile, Roster};
+use crate::roster::{self, Participant, ParticipantKey, Profile, Rejected, Roster};
 use crate::session::Error;
 use crate::tracks::{Peers, Publication, RoomCrypto};
 
@@ -27,6 +27,9 @@ pub struct RoomState {
     pub me: Participant,
     /// The others, in the order they joined.
     pub participants: Vec<Participant>,
+    /// Broadcasts in the room whose signed catalog doesn't stand: someone publishing what they
+    /// can't sign, as when they pose as someone else. A frontend warns of them.
+    pub rejected: Vec<Rejected>,
     pub connection: Connection,
 }
 
@@ -61,6 +64,8 @@ pub enum Event {
     Arrived { participant: Participant },
     /// Someone left.
     Departed { participant: Participant },
+    /// A broadcast in the room didn't stand, and nothing of it is shown.
+    Rejected { rejected: Rejected },
 }
 
 /// A room joined. Cheap to clone; every clone is the same room.
@@ -121,6 +126,7 @@ impl Room {
             room: joined.invite.room.to_string(),
             me,
             participants: Vec::new(),
+            rejected: Vec::new(),
             connection: Connection::Connected,
         });
         let (events, _) = broadcast::channel(EVENTS);
@@ -134,14 +140,18 @@ impl Room {
             origin: joined.origin.consume(),
             runtime: joined.runtime.clone(),
         });
-        let (roster, followed) = watch::channel(Roster::new());
-        let peers = Peers::new(joined.crypto, joined.path, joined.origin.consume());
-        let following = joined.runtime.spawn(roster::follow(peers, roster));
+        let (roster, followed) = watch::channel(Roster::default());
+        let peers = Peers::new(joined.crypto.clone(), joined.path, joined.origin.consume());
+        let following = joined.runtime.spawn(roster::follow(
+            peers,
+            joined.crypto,
+            shared.invite.room,
+            roster,
+        ));
         let task = Task {
             publication: joined.publication,
             profile: joined.profile,
             profile_track: Some(joined.profile_track),
-            participant: joined.participant,
             connection: Some(joined.connection),
             moq: joined.moq,
             url: joined.url,
@@ -247,7 +257,6 @@ struct Task {
     profile: Profile,
     /// Until the room is left.
     profile_track: Option<moq_e2ee::track::Producer>,
-    participant: ParticipantKey,
     /// Until the room is left.
     connection: Option<moq_tokio::Connection>,
     moq: moq_tokio::Client,
@@ -308,7 +317,7 @@ impl Task {
             Command::SetName { name } => {
                 let profile = Profile::new(&name);
                 let track = self.profile_track.as_mut().ok_or(Error::Left)?;
-                roster::write_profile(track, &profile, &self.participant)?;
+                roster::write_profile(track, &profile)?;
                 self.profile = profile.clone();
                 self.state.send_modify(|state| state.me.profile = profile);
                 Ok(())
@@ -343,22 +352,37 @@ impl Task {
         });
     }
 
-    /// The new roster into the state, and who came and went as events.
+    /// The new roster into the state, and who came and went, and what didn't stand, as events.
     fn roster_changed(&self, roster: Roster) {
-        let before = self.state.borrow().participants.clone();
+        let (before, rejected_before) = {
+            let state = self.state.borrow();
+            (state.participants.clone(), state.rejected.clone())
+        };
+        let Roster {
+            participants: roster,
+            rejected,
+        } = roster;
         let known = |list: &[Participant], participant: &Participant| {
             list.iter().any(|other| other.key == participant.key)
         };
         let arrived = roster.iter().filter(|now| !known(&before, now)).cloned();
         let departed = before.iter().filter(|then| !known(&roster, then)).cloned();
         // Nobody listening to events is fine: the state has it all.
+        let newly_rejected = rejected
+            .iter()
+            .filter(|now| !rejected_before.contains(now))
+            .cloned();
         for event in arrived
             .map(|participant| Event::Arrived { participant })
             .chain(departed.map(|participant| Event::Departed { participant }))
+            .chain(newly_rejected.map(|rejected| Event::Rejected { rejected }))
         {
             let _unheard: Result<usize, _> = self.events.send(event);
         }
-        self.state.send_modify(|state| state.participants = roster);
+        self.state.send_modify(|state| {
+            state.participants = roster;
+            state.rejected = rejected;
+        });
     }
 
     /// Finishes this participant's tracks and closes its broadcast, so the others see it go at

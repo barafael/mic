@@ -531,7 +531,12 @@ how this one handles them:**
    - app version (§5.12);
    - later, an X25519 key for rekeying (§5.3.1).
 
-   **The exact list is still open.**
+   Fixed in commit 20 as canonical bytes, `"mic/v1/catalog\0"` and a format
+   number first, then room, participant key, `kid`, epoch, sequence number,
+   tracks and app version, the signature last (`crates/mic-core/src/catalog.rs`).
+   The broadcast's path is bound to the key: its participant segment must be
+   the one the catalog's key derives. The X25519 key for rekeying comes with
+   MLS.
 3. **Epoch rule.** Follow the greatest epoch *whose decrypted catalog verifies*
    against the expected participant key, never simply the greatest epoch
    (P5).

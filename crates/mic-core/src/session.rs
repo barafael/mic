@@ -178,12 +178,12 @@ impl Inner {
                 after: self.config.connect_timeout,
                 why: error.to_string(),
             })?;
-        let mut publication = Publication::new(generation, broadcast);
+        let participant = ParticipantKey::from_bytes(key.public().to_bytes());
+        let mut publication = Publication::new(generation, broadcast, key, invite.room)?;
         // The profile first: the broadcast is announced with it, so whoever finds the
         // participant finds its name.
-        let participant = ParticipantKey::from_bytes(key.public().to_bytes());
         let mut profile_track = publication.track(roster::PROFILE)?;
-        roster::write_profile(&mut profile_track, &profile, &participant)?;
+        roster::write_profile(&mut profile_track, &profile)?;
         Ok(Room::start(Joined {
             invite,
             participant,

@@ -1,10 +1,8 @@
-//! Who is in the room (§1.5, §5.2): every participant publishes a `profile` track, encrypted like
-//! every track, whose latest group is its profile; the roster comes from the broadcasts announced
-//! under the room's prefix, and their profiles. A participant that leaves, or whose session ends,
-//! is unannounced, and leaves the roster.
-//!
-//! The profile names the participant's key in the room. Until the signatures (D18, M3) bind it,
-//! that's only what the profile says.
+//! Who is in the room (§1.5, §5.2): the broadcasts announced under the room's prefix whose signed
+//! catalog stands (`crate::catalog`), which says whose each is, with the profile each publishes on
+//! its `profile` track, the latest group its profile. A participant that leaves, or whose session
+//! ends, is unannounced, and leaves the roster. A broadcast whose catalog doesn't stand is listed
+//! apart, with why: someone in the room is publishing what they can't sign.
 
 use std::collections::HashMap;
 use std::fmt;
@@ -12,7 +10,9 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, watch};
 
-use crate::tracks::{Peer, PeerEvent, Peers, TrackError};
+use crate::catalog::{CATALOG, Catalog, Expected};
+use crate::invite::RoomId;
+use crate::tracks::{Peer, PeerEvent, Peers, RoomCrypto, TrackError};
 
 /// The profile track's semantic name.
 pub const PROFILE: &str = "profile";
@@ -95,30 +95,24 @@ impl Profile {
     }
 }
 
-/// A profile as the track carries it: JSON, one frame a group.
+/// A profile as the track carries it: JSON, one frame a group. Whose it is, the catalog says.
 #[derive(Serialize, Deserialize)]
 struct ProfileFrame {
     name: String,
-    /// The participant's key in the room, hex.
-    key: String,
 }
 
 impl ProfileFrame {
-    pub(crate) fn encode(profile: &Profile, key: &ParticipantKey) -> Vec<u8> {
+    fn encode(profile: &Profile) -> Vec<u8> {
         let frame = Self {
             name: profile.name.clone(),
-            key: key.to_string(),
         };
         serde_json::to_vec(&frame).expect("a profile serializes")
     }
 
-    /// The participant a profile frame describes; none if it isn't one.
-    fn decode(bytes: &[u8]) -> Option<Participant> {
+    /// The profile a frame carries; none if it isn't one.
+    fn decode(bytes: &[u8]) -> Option<Profile> {
         let frame: Self = serde_json::from_slice(bytes).ok()?;
-        Some(Participant {
-            key: frame.key.parse().ok()?,
-            profile: Profile::new(&frame.name),
-        })
+        Some(Profile::new(&frame.name))
     }
 }
 
@@ -126,13 +120,9 @@ impl ProfileFrame {
 pub(crate) fn write_profile(
     track: &mut moq_e2ee::track::Producer,
     profile: &Profile,
-    key: &ParticipantKey,
 ) -> Result<(), TrackError> {
     let mut group = track.append_group()?;
-    group.write_frame(
-        moq_net::Timestamp::now(),
-        &ProfileFrame::encode(profile, key),
-    )?;
+    group.write_frame(moq_net::Timestamp::now(), &ProfileFrame::encode(profile))?;
     group.finish()?;
     Ok(())
 }
@@ -144,23 +134,61 @@ pub struct Participant {
     pub profile: Profile,
 }
 
-/// The other participants, in the order they joined, the same for everyone in the room.
-pub type Roster = Vec<Participant>;
+/// Who is in the room, as `follow` keeps it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Roster {
+    /// The other participants, in the order they joined, the same for everyone in the room.
+    pub participants: Vec<Participant>,
+    /// Broadcasts in the room whose catalog doesn't stand, by path.
+    pub rejected: Vec<Rejected>,
+}
 
-/// Follows the room's peers and their profiles into `roster` until the peers end or nobody
-/// watches the roster any more.
-pub(crate) async fn follow(mut peers: Peers, roster: watch::Sender<Roster>) {
-    // Each peer's profiles as they come, from a task of its own, by its broadcast's path.
-    let (profiles, mut updates) = mpsc::unbounded_channel::<(String, Participant)>();
+/// A broadcast in the room whose catalog doesn't stand: someone with the room's secret publishing
+/// what they can't sign, as when they pose as someone else.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Rejected {
+    /// Its path under the room's prefix.
+    pub path: String,
+    pub reason: String,
+}
+
+/// What a peer's readers find.
+enum Found {
+    /// Its catalog stands: whose the broadcast is.
+    Verified(ParticipantKey),
+    Profile(Profile),
+    Rejected(String),
+}
+
+/// What `follow` knows of a broadcast.
+#[derive(Default)]
+struct Known {
+    key: Option<ParticipantKey>,
+    profile: Option<Profile>,
+}
+
+/// Follows the room's peers, their catalogs and their profiles into `roster` until the peers end
+/// or nobody watches the roster any more.
+pub(crate) async fn follow(
+    mut peers: Peers,
+    crypto: RoomCrypto,
+    room: RoomId,
+    roster: watch::Sender<Roster>,
+) {
+    // What each peer's readers find, from tasks of their own, by its broadcast's path.
+    let (found, mut finds) = mpsc::unbounded_channel::<(String, Found)>();
     let mut readers: HashMap<String, tokio::task::JoinHandle<()>> = HashMap::new();
-    // Who is at which path.
-    let mut present: Vec<(String, Participant)> = Vec::new();
+    let mut known: HashMap<String, Known> = HashMap::new();
+    let mut rejected: Vec<Rejected> = Vec::new();
     loop {
         tokio::select! {
             event = peers.next() => match event {
                 Some(Ok(PeerEvent::Arrived(peer))) => {
                     let path = peer.path().to_owned();
-                    let reader = tokio::spawn(read_profiles(peer, profiles.clone()));
+                    known.insert(path.clone(), Known::default());
+                    rejected.retain(|gone| gone.path != path);
+                    let reader =
+                        tokio::spawn(read_peer(peer, crypto.clone(), room, found.clone()));
                     if let Some(former) = readers.insert(path, reader) {
                         former.abort();
                     }
@@ -169,7 +197,8 @@ pub(crate) async fn follow(mut peers: Peers, roster: watch::Sender<Roster>) {
                     if let Some(reader) = readers.remove(&path) {
                         reader.abort();
                     }
-                    present.retain(|(at, _)| *at != path);
+                    known.remove(&path);
+                    rejected.retain(|gone| gone.path != path);
                 }
                 // A broadcast that isn't a participant's: not someone in the room.
                 Some(Err(error)) => {
@@ -178,30 +207,31 @@ pub(crate) async fn follow(mut peers: Peers, roster: watch::Sender<Roster>) {
                 }
                 None => break,
             },
-            Some((path, participant)) = updates.recv() => {
-                // A profile its reader sent before the peer went: the peer is gone all the same.
-                if !readers.contains_key(&path) {
+            Some((path, find)) = finds.recv() => {
+                // Found by a reader before its peer went: the peer is gone all the same.
+                let Some(entry) = known.get_mut(&path) else {
                     continue;
-                }
-                // A rejoin is a new broadcast with the same key: the newer one stands.
-                present.retain(|(at, known)| *at == path || known.key != participant.key);
-                match present.iter_mut().find(|(at, _)| *at == path) {
-                    Some((_, known)) => *known = participant,
-                    None => {
-                        present.push((path, participant));
-                        // By when each joined: the epoch ending a path is a UUIDv7, which sorts
-                        // by time. Arrival here isn't that order for someone who joins late.
-                        present.sort_by(|(left, _), (right, _)| epoch(left).cmp(epoch(right)));
+                };
+                match find {
+                    Found::Verified(key) => entry.key = Some(key),
+                    Found::Profile(profile) => entry.profile = Some(profile),
+                    Found::Rejected(reason) => {
+                        tracing::warn!(%path, %reason, "a broadcast in the room doesn't stand");
+                        known.remove(&path);
+                        if let Some(reader) = readers.remove(&path) {
+                            reader.abort();
+                        }
+                        rejected.push(Rejected { path, reason });
                     }
                 }
             }
             () = roster.closed() => break,
         }
+        let now = Roster {
+            participants: participants(&known),
+            rejected: rejected.clone(),
+        };
         roster.send_if_modified(|shown| {
-            let now: Roster = present
-                .iter()
-                .map(|(_, participant)| participant.clone())
-                .collect();
             let changed = *shown != now;
             *shown = now;
             changed
@@ -212,13 +242,117 @@ pub(crate) async fn follow(mut peers: Peers, roster: watch::Sender<Roster>) {
     }
 }
 
+/// The participants among the broadcasts known, by when each joined: the epoch ending a path is a
+/// UUIDv7, which sorts by time. Of two broadcasts of one key (a rejoin, before the first is
+/// gone), the newer stands.
+fn participants(known: &HashMap<String, Known>) -> Vec<Participant> {
+    let mut standing: Vec<(&str, Participant)> = known
+        .iter()
+        .filter_map(|(path, known)| {
+            Some((
+                epoch(path),
+                Participant {
+                    key: known.key?,
+                    profile: known.profile.clone()?,
+                },
+            ))
+        })
+        .collect();
+    standing.sort_by_key(|(epoch, _)| *epoch);
+    let mut participants: Vec<Participant> = Vec::new();
+    for (_, participant) in standing.into_iter().rev() {
+        if !participants
+            .iter()
+            .any(|newer| newer.key == participant.key)
+        {
+            participants.push(participant);
+        }
+    }
+    participants.reverse();
+    participants
+}
+
 /// The publisher instance's epoch, which ends a broadcast's path.
 fn epoch(path: &str) -> &str {
     path.rsplit_once('/').map_or(path, |(_, epoch)| epoch)
 }
 
-/// `peer`'s profile, and each change to it, into `profiles`, until its track ends.
-async fn read_profiles(peer: Peer, profiles: mpsc::UnboundedSender<(String, Participant)>) {
+/// Stops a task when dropped.
+struct Task(tokio::task::JoinHandle<()>);
+
+impl Drop for Task {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+/// `peer`'s catalog, and each one after it, into `found`: nothing of the broadcast is believed
+/// before its first catalog stands, and once one doesn't, the broadcast is rejected. Its profiles
+/// are read once its catalog stands.
+async fn read_peer(
+    peer: Peer,
+    crypto: RoomCrypto,
+    room: RoomId,
+    found: mpsc::UnboundedSender<(String, Found)>,
+) {
+    let path = peer.path().to_owned();
+    let send = |find: Found| found.send((path.clone(), find)).is_ok();
+    let mut catalogs = match peer.track(CATALOG).await {
+        Ok(track) => track,
+        Err(error) => {
+            send(Found::Rejected(format!("no catalog: {error}")));
+            return;
+        }
+    };
+    let segment_of = |key: &ParticipantKey| crypto.participant_segment(key.as_bytes()).ok();
+    let mut last: Option<u64> = None;
+    let mut profiles: Option<Task> = None;
+    loop {
+        let group = match catalogs.recv_group().await {
+            Ok(Some(group)) => group,
+            Ok(None) => return,
+            Err(error) => {
+                send(Found::Rejected(format!(
+                    "its catalog track failed: {error}"
+                )));
+                return;
+            }
+        };
+        let mut group = group;
+        let Ok(Some(frame)) = group.read_frame().await else {
+            continue;
+        };
+        let expected = Expected {
+            room,
+            kid: crypto.kid(),
+            epoch: peer.epoch(),
+            participant_segment: peer.participant_segment(),
+            segment_of: &segment_of,
+            last,
+        };
+        match Catalog::verify(&frame.plaintext, &expected) {
+            Ok(catalog) => {
+                last = Some(catalog.seq);
+                if !send(Found::Verified(catalog.participant)) {
+                    return;
+                }
+                if profiles.is_none() {
+                    profiles = Some(Task(tokio::spawn(read_profiles(
+                        peer.clone(),
+                        found.clone(),
+                    ))));
+                }
+            }
+            Err(rejection) => {
+                send(Found::Rejected(rejection.to_string()));
+                return;
+            }
+        }
+    }
+}
+
+/// `peer`'s profile, and each change to it, into `found`, until its track ends.
+async fn read_profiles(peer: Peer, found: mpsc::UnboundedSender<(String, Found)>) {
     let mut track = match peer.track(PROFILE).await {
         Ok(track) => track,
         Err(error) => {
@@ -238,9 +372,9 @@ async fn read_profiles(peer: Peer, profiles: mpsc::UnboundedSender<(String, Part
         let Ok(Some(frame)) = group.read_frame().await else {
             continue;
         };
-        if let Some(participant) = ProfileFrame::decode(&frame.plaintext)
-            && profiles
-                .send((peer.path().to_owned(), participant))
+        if let Some(profile) = ProfileFrame::decode(&frame.plaintext)
+            && found
+                .send((peer.path().to_owned(), Found::Profile(profile)))
                 .is_err()
         {
             return;
@@ -254,10 +388,40 @@ mod tests {
 
     #[test]
     fn a_profile_reads_back_as_written() {
-        let key = ParticipantKey([0xab; 32]);
         let profile = Profile::new("Alice");
-        let read = ProfileFrame::decode(&ProfileFrame::encode(&profile, &key)).unwrap();
-        assert_eq!(read, Participant { key, profile });
+        assert_eq!(
+            ProfileFrame::decode(&ProfileFrame::encode(&profile)),
+            Some(profile)
+        );
+    }
+
+    #[test]
+    fn of_two_broadcasts_of_one_key_the_newer_stands() {
+        let known = |key: u8, name: &str| Known {
+            key: Some(ParticipantKey([key; 32])),
+            profile: Some(Profile::new(name)),
+        };
+        let known: HashMap<String, Known> = [
+            (
+                "a/01a17a43-0000-7000-8000-000000000003".to_owned(),
+                known(1, "Alice again"),
+            ),
+            (
+                "b/01a17a43-0000-7000-8000-000000000002".to_owned(),
+                known(2, "Bob"),
+            ),
+            (
+                "a/01a17a43-0000-7000-8000-000000000001".to_owned(),
+                known(1, "Alice"),
+            ),
+        ]
+        .into_iter()
+        .collect();
+        let names: Vec<String> = participants(&known)
+            .into_iter()
+            .map(|participant| participant.profile.name)
+            .collect();
+        assert_eq!(names, ["Bob", "Alice again"]);
     }
 
     #[test]
@@ -290,6 +454,6 @@ mod tests {
     #[test]
     fn what_isnt_a_profile_is_none() {
         assert!(ProfileFrame::decode(b"not json").is_none());
-        assert!(ProfileFrame::decode(br#"{"name": "x", "key": "zz"}"#).is_none());
+        assert!(ProfileFrame::decode(br#"{"nickname": "x"}"#).is_none());
     }
 }

@@ -21,7 +21,10 @@ use moq_e2ee::{Credential, Epoch, Generation};
 use moq_net::{Path, PathOwned};
 use sha2::Sha256;
 
-use crate::invite::Invite;
+use crate::catalog::{CATALOG, Catalog};
+use crate::invite::{Invite, RoomId};
+use crate::keys::RoomKey;
+use crate::roster::ParticipantKey;
 
 /// The HKDF info's prefix for a room's broadcast prefix.
 const ROOM_PREFIX: &[u8] = b"mic/v1/room-prefix";
@@ -102,6 +105,17 @@ impl RoomCrypto {
         Ok((path, generation))
     }
 
+    /// The participant segment of `participant`'s broadcasts in the room: what a catalog's key
+    /// must derive for the catalog to stand at a path (`crate::catalog`).
+    pub fn participant_segment(&self, participant: &[u8; 32]) -> Result<String, TrackError> {
+        Ok(self.credential.path(&hex(participant))?.as_str().to_owned())
+    }
+
+    /// The room credential's key id.
+    pub fn kid(&self) -> u64 {
+        KID
+    }
+
     /// The generation of the broadcast at `path`, from its last segment, the epoch; `path` is
     /// relative to the room's prefix, as announcements under it name broadcasts.
     pub fn generation_of(&self, path: &str) -> Result<Generation, TrackError> {
@@ -112,38 +126,77 @@ impl RoomCrypto {
     }
 }
 
+/// Track `semantic` of `broadcast`, encrypted under `generation`.
+fn produce(
+    generation: &Generation,
+    broadcast: &moq_net::broadcast::Producer,
+    semantic: &str,
+) -> Result<moq_e2ee::track::Producer, TrackError> {
+    let name = generation.name(semantic)?;
+    let track = broadcast.create_track(name.as_str(), None)?;
+    Ok(generation.produce(track)?)
+}
+
 /// Lowercase hex.
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
-/// This participant's broadcast in the room: every track of it encrypted.
+/// This participant's broadcast in the room: every track of it encrypted, its first the signed
+/// catalog (`crate::catalog`), signed again with every track added.
 pub struct Publication {
     generation: Generation,
     broadcast: moq_net::broadcast::Producer,
-    announced: bool,
+    key: RoomKey,
+    catalog: Catalog,
+    catalog_track: moq_e2ee::track::Producer,
 }
 
 impl Publication {
-    pub(crate) fn new(generation: Generation, broadcast: moq_net::broadcast::Producer) -> Self {
-        Self {
+    /// The broadcast with its catalog, announced: whoever finds it finds who publishes it.
+    pub(crate) fn new(
+        generation: Generation,
+        broadcast: moq_net::broadcast::Producer,
+        key: RoomKey,
+        room: RoomId,
+    ) -> Result<Self, TrackError> {
+        let catalog = Catalog {
+            room,
+            participant: ParticipantKey::from_bytes(key.public().to_bytes()),
+            kid: KID,
+            epoch: generation.epoch().as_str().to_owned(),
+            seq: 0,
+            tracks: vec![CATALOG.to_owned()],
+            app: env!("CARGO_PKG_VERSION").to_owned(),
+        };
+        let catalog_track = produce(&generation, &broadcast, CATALOG)?;
+        let mut publication = Self {
             generation,
             broadcast,
-            announced: false,
-        }
+            key,
+            catalog,
+            catalog_track,
+        };
+        publication.write_catalog()?;
+        publication.broadcast.announce(Default::default())?;
+        Ok(publication)
     }
 
-    /// A track `semantic` of this broadcast, encrypted; the broadcast is announced once it has
-    /// its first track, so a subscriber acting on the announcement finds it.
+    /// A track `semantic` of this broadcast, encrypted, and the catalog that names it signed.
     pub fn track(&mut self, semantic: &str) -> Result<moq_e2ee::track::Producer, TrackError> {
-        let name = self.generation.name(semantic)?;
-        let track = self.broadcast.create_track(name.as_str(), None)?;
-        let track = self.generation.produce(track)?;
-        if !self.announced {
-            self.broadcast.announce(Default::default())?;
-            self.announced = true;
-        }
+        let track = produce(&self.generation, &self.broadcast, semantic)?;
+        self.catalog.tracks.push(semantic.to_owned());
+        self.catalog.seq += 1;
+        self.write_catalog()?;
         Ok(track)
+    }
+
+    /// The catalog, signed, as the track's latest group.
+    fn write_catalog(&mut self) -> Result<(), TrackError> {
+        let mut group = self.catalog_track.append_group()?;
+        group.write_frame(moq_net::Timestamp::now(), &self.catalog.sign(&self.key))?;
+        group.finish()?;
+        Ok(())
     }
 
     /// Ends the broadcast: it's unannounced, and its tracks end.
@@ -217,6 +270,7 @@ impl Peers {
 }
 
 /// Someone's broadcast in the room, found under its prefix.
+#[derive(Clone)]
 pub struct Peer {
     path: String,
     generation: Generation,
@@ -239,6 +293,18 @@ impl Peer {
     /// Its path under the room's prefix: `<participant>/<epoch>`.
     pub fn path(&self) -> &str {
         &self.path
+    }
+
+    /// Its path's participant segment.
+    pub fn participant_segment(&self) -> &str {
+        self.path
+            .rsplit_once('/')
+            .map_or("", |(participant, _)| participant)
+    }
+
+    /// Its publisher instance's epoch, which ends its path.
+    pub fn epoch(&self) -> &str {
+        self.generation.epoch().as_str()
     }
 
     /// Its track `semantic`, decrypted as it's read: a frame that doesn't open fails the track.

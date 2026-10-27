@@ -5,6 +5,7 @@
 // Every outcome is handled: a discarded `Result` would hide a failure.
 #![deny(clippy::let_underscore_must_use, clippy::let_underscore_untyped)]
 
+pub mod catalog;
 pub mod invite;
 pub mod keys;
 pub mod room;
