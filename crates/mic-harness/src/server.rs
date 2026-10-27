@@ -1,18 +1,19 @@
 //! The harness's server: a frontend, or a headless participant, embeds it with its `mic-core`
-//! client and serves it on a Unix socket, the owner's only.
+//! app and serves it on a Unix socket, the owner's only. It joins and leaves through the app, as
+//! the frontend's own screens do, and shows whichever room the app is in.
 //!
 //! ```no_run
-//! # async fn run(client: mic_core::Client) -> std::io::Result<()> {
-//! mic_harness::server::Harness::new(client, "alice", None)
+//! # async fn run(app: mic_core::App) -> std::io::Result<()> {
+//! mic_harness::server::Harness::new(app, "alice", None)
 //!     .serve(std::path::Path::new("/run/mic/harness"))
 //!     .await
 //! # }
 //! ```
 
 use std::path::Path;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::Arc;
 
-use mic_core::{Command, Invite, Profile, Room};
+use mic_core::{App, Command, Invite, Profile, Room};
 use serde::Serialize;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
@@ -33,37 +34,31 @@ pub struct Harness {
 }
 
 struct Inner {
-    client: mic_core::Client,
+    app: App,
     name: String,
     ui: Option<UiSource>,
-    /// The room it's in, if any.
-    room: Mutex<Option<Current>>,
     /// Bumped on every change of what a snapshot shows; subscribers follow it.
     changes: watch::Sender<u64>,
 }
 
-/// The room it's in, and the task that tells subscribers of its changes.
-struct Current {
-    room: Room,
-    watching: tokio::task::JoinHandle<()>,
-}
+/// Aborts a task when dropped.
+struct Task(tokio::task::JoinHandle<()>);
 
-impl Drop for Current {
+impl Drop for Task {
     fn drop(&mut self) {
-        self.watching.abort();
+        self.0.abort();
     }
 }
 
 impl Harness {
-    /// A harness for `client`, which the box knows as `name`, with the frontend's `ui` for every
+    /// A harness for `app`, which the box knows as `name`, with the frontend's `ui` for every
     /// snapshot's [`Ui`] section, if it has one.
-    pub fn new(client: mic_core::Client, name: &str, ui: Option<UiSource>) -> Self {
+    pub fn new(app: App, name: &str, ui: Option<UiSource>) -> Self {
         Self {
             inner: Arc::new(Inner {
-                client,
+                app,
                 name: name.to_owned(),
                 ui,
-                room: Mutex::new(None),
                 changes: watch::channel(0).0,
             }),
         }
@@ -71,7 +66,7 @@ impl Harness {
 
     /// Tells subscribers that what the UI shows changed: a frontend calls it after it redraws.
     pub fn ui_changed(&self) {
-        self.inner.changes.send_modify(|seq| *seq += 1);
+        self.changed();
     }
 
     /// Serves on a socket at `path` (one left there from before is replaced), the owner's only,
@@ -85,6 +80,7 @@ impl Harness {
         let listener = UnixListener::bind(path)?;
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+        let _following = Task(tokio::spawn(self.clone().follow()));
         tracing::info!(socket = %path.display(), "{LISTENING}");
         println!("{LISTENING}");
         loop {
@@ -175,11 +171,9 @@ impl Harness {
     pub fn snapshot(&self) -> Snapshot {
         let room = self
             .inner
-            .room
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .as_ref()
-            .map(|current| current.room.state().borrow().clone());
+            .app
+            .current()
+            .map(|room| room.state().borrow().clone());
         Snapshot {
             room,
             ui: self.inner.ui.as_ref().map(|ui| ui()),
@@ -202,63 +196,65 @@ impl Harness {
 
     async fn join(&self, invite: &str, name: &str) -> Result<Joined, String> {
         let invite: Invite = invite.parse().map_err(|error| format!("{error}"))?;
-        self.reset().await;
         let room = self
             .inner
-            .client
+            .app
             .join(invite, Profile::new(name))
             .await
             .map_err(|error| error.to_string())?;
         let state = room.state().borrow().clone();
-        let watching = tokio::spawn(self.clone().watch(room.state()));
-        *self
-            .inner
-            .room
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner) = Some(Current { room, watching });
-        self.inner.changes.send_modify(|seq| *seq += 1);
         Ok(Joined { state })
     }
 
-    /// Tells subscribers of every change of the room's state.
-    async fn watch(self, mut state: watch::Receiver<mic_core::RoomState>) {
-        while state.changed().await.is_ok() {
-            self.inner.changes.send_modify(|seq| *seq += 1);
+    /// Tells subscribers of every change of the room the app is in, and of its state.
+    async fn follow(self) {
+        let mut rooms = self.inner.app.room();
+        loop {
+            let room: Option<Room> = rooms.borrow_and_update().clone();
+            self.changed();
+            let Some(room) = room else {
+                if rooms.changed().await.is_err() {
+                    return;
+                }
+                continue;
+            };
+            let mut state = room.state();
+            // Until another room, or none, is in place. A room that's over says so no more.
+            let mut over = false;
+            loop {
+                tokio::select! {
+                    changed = rooms.changed() => {
+                        if changed.is_err() {
+                            return;
+                        }
+                        break;
+                    }
+                    changed = state.changed(), if !over => match changed {
+                        Ok(()) => self.changed(),
+                        Err(_) => over = true,
+                    },
+                }
+            }
         }
     }
 
+    fn changed(&self) {
+        self.inner.changes.send_modify(|seq| *seq += 1);
+    }
+
     async fn act(&self, command: Command) -> Result<Acted, String> {
-        let room = self
-            .inner
-            .room
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .as_ref()
-            .map(|current| current.room.clone())
-            .ok_or("in no room: `join` first")?;
+        let room = self.inner.app.current().ok_or("in no room: `join` first")?;
         room.command(command)
             .await
             .map_err(|error| error.to_string())?;
         Ok(Acted { ok: true })
     }
 
-    /// Leaves the room it's in, if any, and forgets it.
+    /// Leaves the room it's in, if any.
     async fn reset(&self) -> Done {
-        let current = self
-            .inner
-            .room
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .take();
-        let ok = match current {
-            Some(current) => {
-                let left = current.room.command(Command::Leave).await;
-                self.inner.changes.send_modify(|seq| *seq += 1);
-                left.is_ok() || matches!(left, Err(mic_core::session::Error::Left))
-            }
-            None => true,
-        };
-        Done { ok }
+        Done {
+            ok: self.inner.app.leave().await,
+        }
     }
 }
 

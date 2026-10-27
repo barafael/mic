@@ -13,7 +13,7 @@ use clap::Parser;
 #[cfg(unix)]
 use mic_core::secrets::InMemory;
 #[cfg(unix)]
-use mic_core::{Client, Config, Trust};
+use mic_core::{App, Client, Config, Trust};
 
 #[derive(Parser)]
 #[command(version, about)]
@@ -83,7 +83,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             tokio::runtime::Handle::current(),
         )
         .map_err(|error| format!("{name}: {error}"))?;
-        let harness = mic_harness::server::Harness::new(client, &name, None);
+        let harness = mic_harness::server::Harness::new(App::new(client), &name, None);
         let socket = cli.harness.join(&name);
         served.spawn(async move {
             harness
