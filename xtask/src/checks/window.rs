@@ -63,3 +63,8 @@ pub fn type_join(
 pub fn toggle_mute(the_box: &TestBox, client: &'static str) -> Result<()> {
     xdotool(the_box, client, &[&["key", "ctrl+d"]])
 }
+
+/// Presses `key` in `client`'s window, as xdotool names it: `Return`, `Escape`, …
+pub fn press(the_box: &TestBox, client: &'static str, key: &str) -> Result<()> {
+    xdotool(the_box, client, &[&["key", key]])
+}

@@ -6,12 +6,13 @@ measurements, and things to revisit. Newest first within each milestone. Each sa
 
 ## M7: Invites, version check, site
 
-- **A link joins at once, leaving the call it's in** (open, decide). A link handed to a running
-  mic leaves its room and joins the link's, unmuted with the camera on, without asking: a page
-  that sets `location.href = 'mic://join/…'` (as the invite page does) with the browser's "always
-  open" on moves a user between rooms. A confirmation when already in a call, or keeping mute and
-  camera, would answer it. (review of M7)
-- **The window keeps the whole last profile for a link** (open, minor): only its name is used.
+- **A link joins at once, leaving the call it's in** (settled, after M7). A link handed to a
+  running mic left its room and joined the link's, unmuted with the camera on, without asking: a
+  page that sets `location.href = 'mic://join/…'` (as the invite page does) with the browser's
+  "always open" on moved a user between rooms. Now a link never joins by itself. Out of a call
+  it's filled in, under the last name, for Join (Enter); in one, the window asks whether to leave
+  for it (Enter, Escape), and joins as the call stood: muted, camera off. The `links` phase
+  checks both. (review of M7)
 - **The review of M7** (settled): the link socket was bound before it was made private, fell back
   to a shared /tmp without `$XDG_RUNTIME_DIR`, took over another mic's live socket, and read
   without a timeout; `--register` wrote Exec without the relay a link needs to start mic, could
@@ -23,8 +24,8 @@ measurements, and things to revisit. Newest first within each milestone. Each sa
   part of the command, finds none, and falls back to a browser; and it looks for a scheme's
   handler only with a `$DISPLAY`. mic's desktop file quotes its path only when it must.
   (commit 41)
-- **Opening a link needs a name** (settled, revisit): it joins under the last name the app
-  joined with, or fills in the invite and asks for one. A remembered name across starts would
+- **Opening a link needs a name** (settled, revisit): it's filled in under the last name the
+  app joined with, or with none for one to be typed. A remembered name across starts would
   want a settings file mic doesn't have yet.
 - **Links on Windows and macOS** (open): the registry entry and `Info.plist` come with the
   installers (M10), their steps with TESTPLAN (commit 51). The hand-over to a running mic is a
