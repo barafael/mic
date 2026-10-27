@@ -6,6 +6,11 @@ measurements, and things to revisit. Newest first within each milestone. Each sa
 
 ## M6: Video (VP9)
 
+- **A click at fixed coordinates hit the wrong button** (settled). The new Camera button pushed
+  Mute left, and `audio`'s click landed on Camera. Checks now press the room's shortcuts (Ctrl+D,
+  Ctrl+E, as Meet has them), which call what the buttons call; no check clicks at coordinates.
+  Slint reports Ctrl+D's text as "d" under winit on X11. (commit 38)
+
 - **VP9 on VA-API is deferred** (open, upstream). moq-vaapi has no VP9 decoder (the plan's
   unverified point), and ChromeOS's `cros-codecs`, which has one in Rust, doesn't build here:
   its binding `cros-libva` 0.0.12, from crates.io and from git `main` alike, misses fields

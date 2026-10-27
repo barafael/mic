@@ -88,6 +88,9 @@ pub struct Profile {
     /// Whether it sends no voice, by its own word: a tile shows it.
     #[serde(default)]
     pub muted: bool,
+    /// Whether its camera is off, by its own word: its tile shows its name, not its last picture.
+    #[serde(default)]
+    pub camera_off: bool,
 }
 
 impl Profile {
@@ -96,6 +99,7 @@ impl Profile {
         Self {
             name: name.trim().chars().take(NAME_LIMIT).collect(),
             muted: false,
+            camera_off: false,
         }
     }
 }
@@ -107,6 +111,9 @@ struct ProfileFrame {
     /// Left out by a client from before it existed: not muted.
     #[serde(default)]
     muted: bool,
+    /// Likewise: the camera on.
+    #[serde(default)]
+    camera_off: bool,
 }
 
 impl ProfileFrame {
@@ -114,6 +121,7 @@ impl ProfileFrame {
         let frame = Self {
             name: profile.name.clone(),
             muted: profile.muted,
+            camera_off: profile.camera_off,
         };
         serde_json::to_vec(&frame).expect("a profile serializes")
     }
@@ -123,6 +131,7 @@ impl ProfileFrame {
         let frame: Self = serde_json::from_slice(bytes).ok()?;
         Some(Profile {
             muted: frame.muted,
+            camera_off: frame.camera_off,
             ..Profile::new(&frame.name)
         })
     }

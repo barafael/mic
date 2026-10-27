@@ -478,7 +478,9 @@ Each numbered item below is about one commit. Box phases are in **bold**.
     none; `cros-codecs` doesn't build against current libva), and writing one is upstream work;
     software decoding holds at these sizes. Revisit before M8's large rooms
     (docs/observations.md).
-38. `mic-core, mic-slint: camera off`. **`video`**: the tile falls back to the name.
+38. `mic-core, mic-slint: camera off`. **`video`**: the tile falls back to the name. *Done:*
+    `camera_off` in the signed profile, as `muted` is; back on, the camera starts with a
+    keyframe.
 
 Upstreaming codec work to `moq-video` happens alongside, from the branches these commits come
 from; the git pins move to releases as they land.

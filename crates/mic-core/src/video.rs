@@ -38,8 +38,13 @@ pub const CAMERA_SETTINGS: Settings = Settings {
 };
 
 /// Encodes what `pictures` gives onto `track`, a group a second, each starting with a keyframe,
-/// until the pictures or the track end.
-pub(crate) async fn publish(mut pictures: Pictures, mut track: SignedTrack) {
+/// until the pictures or the track end. While `on` says it's off, nothing is sent, and the next
+/// picture after it's on again starts a group.
+pub(crate) async fn publish(
+    mut pictures: Pictures,
+    mut track: SignedTrack,
+    on: watch::Receiver<bool>,
+) {
     let settings = CAMERA_SETTINGS;
     let mut encoder = match Vp9Encoder::new(settings) {
         Ok(encoder) => Some(encoder),
@@ -54,6 +59,11 @@ pub(crate) async fn publish(mut pictures: Pictures, mut track: SignedTrack) {
         let Some(picture) = pictures.borrow_and_update().clone() else {
             continue;
         };
+        if !*on.borrow() {
+            // Back on, it starts with a keyframe.
+            sent = sent.next_multiple_of(u64::from(settings.fps));
+            continue;
+        }
         if (picture.width, picture.height) != (settings.width, settings.height) {
             tracing::debug!(
                 width = picture.width,

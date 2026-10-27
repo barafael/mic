@@ -25,8 +25,10 @@ pub struct Gpu {
 }
 
 /// What drawing the tiles costs, over the last second.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Cost {
+    /// The tiles showing video, by key: with a picture, and the camera not off.
+    pub showing: Vec<String>,
     /// Tiles showing video.
     pub tiles: u32,
     /// Pictures drawn a second, all tiles together.
@@ -139,6 +141,11 @@ impl Videos {
         let frames =
             std::mem::take(&mut *self.frames.lock().unwrap_or_else(PoisonError::into_inner));
         *self.cost.lock().unwrap_or_else(PoisonError::into_inner) = Cost {
+            showing: tiles
+                .iter()
+                .filter(|tile| tile.has_video && !tile.camera_off)
+                .map(|tile| tile.key.to_string())
+                .collect(),
             tiles: tiles.iter().filter(|tile| tile.has_video).count() as u32,
             pictures: self.drawn as f64 / seconds,
             draw_ms: if self.drawn == 0 {

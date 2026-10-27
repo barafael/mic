@@ -62,13 +62,13 @@ pub fn audio(checks: &mut Checks, the_box: &TestBox) -> Result<()> {
             Ok(())
         },
     );
-    checks.record("bob mutes and unmutes with his window's button", || {
-        super::window::click_mute(the_box, "bob")?;
+    checks.record("bob mutes and unmutes from his window's keyboard", || {
+        super::window::toggle_mute(the_box, "bob")?;
         alice.wait_for("with Bob muted", PATIENCE, |state| {
             state.participants.iter().any(|them| them.profile.muted)
         })?;
         alice.wait_for_silence(&[bobs], PATIENCE)?;
-        super::window::click_mute(the_box, "bob")?;
+        super::window::toggle_mute(the_box, "bob")?;
         alice.wait_for("with Bob unmuted", PATIENCE, |state| {
             state.participants.iter().all(|them| !them.profile.muted)
         })?;

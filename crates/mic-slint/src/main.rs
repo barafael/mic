@@ -230,6 +230,24 @@ fn run(cli: Cli) -> Result<(), String> {
             });
         }
     });
+    window.on_toggle_camera({
+        let app = app.clone();
+        let window = window.as_weak();
+        let runtime = runtime.handle().clone();
+        move || {
+            let Some(room) = app.current() else {
+                return;
+            };
+            let off = window
+                .upgrade()
+                .is_some_and(|window| window.get_camera_off());
+            runtime.spawn(async move {
+                if let Err(error) = room.command(Command::SetCamera { on: off }).await {
+                    tracing::warn!(%error, "the camera");
+                }
+            });
+        }
+    });
     window.on_leave({
         let app = app.clone();
         let runtime = runtime.handle().clone();
@@ -393,6 +411,7 @@ fn apply(
     window.set_status(view.status.as_str().into());
     window.set_warning(view.warning.as_str().into());
     window.set_muted(view.muted);
+    window.set_camera_off(view.camera_off);
     // A tile's video stays with its participant while the roster changes around it.
     let video_of = |key: &str| {
         tiles
@@ -411,6 +430,7 @@ fn apply(
             name: tile.name.as_str().into(),
             me: tile.me,
             muted: tile.muted,
+            camera_off: tile.camera_off,
             cant_decode: tile
                 .cant_decode
                 .as_deref()
@@ -420,8 +440,8 @@ fn apply(
         })
         .collect();
     let unchanged = |a: &Tile, b: &Tile| {
-        (&a.key, &a.name, a.me, a.muted, &a.cant_decode)
-            == (&b.key, &b.name, b.me, b.muted, &b.cant_decode)
+        (&a.key, &a.name, a.me, a.muted, &a.cant_decode, a.camera_off)
+            == (&b.key, &b.name, b.me, b.muted, &b.cant_decode, b.camera_off)
     };
     if tiles.row_count() != rows.len() || tiles.iter().zip(&rows).any(|(a, b)| !unchanged(&a, b)) {
         tiles.set_vec(rows);
@@ -527,6 +547,7 @@ mod harness {
             muted: Vec::new(),
             cant_decode: Vec::new(),
             render: None,
+            video: Vec::new(),
         }));
         let source = ui.clone();
         let harness = Harness::new(
@@ -537,7 +558,8 @@ mod harness {
                     .lock()
                     .unwrap_or_else(PoisonError::into_inner)
                     .clone();
-                let cost = *cost.lock().unwrap_or_else(PoisonError::into_inner);
+                let cost = cost.lock().unwrap_or_else(PoisonError::into_inner).clone();
+                ui.video = cost.showing.clone();
                 ui.render = Some(mic_harness::Render {
                     video_tiles: cost.tiles,
                     pictures: cost.pictures,
@@ -577,6 +599,7 @@ mod harness {
                     .map(|tile| tile.key.clone())
                     .collect(),
                 render: None,
+                video: Vec::new(),
             };
             harness.ui_changed();
         })

@@ -32,6 +32,8 @@ pub struct Tile {
     /// The codec of its camera, when this client can't decode it: the tile says so, rather
     /// than stay black.
     pub cant_decode: Option<String>,
+    /// Whether its camera is off: the tile shows the name, not the last picture.
+    pub camera_off: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -47,6 +49,8 @@ pub struct View {
     pub warning: String,
     /// Whether this participant is muted.
     pub muted: bool,
+    /// Whether its camera is off.
+    pub camera_off: bool,
 }
 
 /// What shows of `room` (its state and its invite), or of none: the join screen.
@@ -59,6 +63,7 @@ pub fn view(room: Option<(&RoomState, String)>) -> View {
             status: String::new(),
             warning: String::new(),
             muted: false,
+            camera_off: false,
         };
     };
     let tile = |participant: &mic_core::Participant, me| Tile {
@@ -66,6 +71,7 @@ pub fn view(room: Option<(&RoomState, String)>) -> View {
         name: participant.profile.name.clone(),
         me,
         muted: participant.profile.muted,
+        camera_off: participant.profile.camera_off,
         cant_decode: participant
             .renditions
             .iter()
@@ -94,6 +100,7 @@ pub fn view(room: Option<(&RoomState, String)>) -> View {
         status: status.to_owned(),
         warning,
         muted: state.me.profile.muted,
+        camera_off: state.me.profile.camera_off,
     }
 }
 
@@ -165,6 +172,14 @@ mod tests {
         let shown = view(Some((&state, String::new())));
         assert_eq!(shown.tiles[1].cant_decode.as_deref(), Some("vp9"));
         assert_eq!(shown.tiles[2].cant_decode, None, "Carol sends no camera");
+    }
+
+    #[test]
+    fn a_camera_turned_off_shows_on_its_tile() {
+        let mut state = state();
+        state.participants[0].profile.camera_off = true;
+        let shown = view(Some((&state, String::new())));
+        assert!(shown.tiles[1].camera_off && !shown.tiles[2].camera_off);
     }
 
     #[test]

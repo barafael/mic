@@ -15,6 +15,8 @@ export struct Tile {
     // Its camera's latest picture, once there's one.
     video: image,
     has-video: bool,
+    // Its camera is off: the name shows, not the last picture.
+    camera-off: bool,
 }
 
 component NameTile inherits Rectangle {
@@ -22,13 +24,13 @@ component NameTile inherits Rectangle {
     background: tile.me ? #2b4a6b : #3a3a44;
     border-radius: 8px;
     clip: true;
-    if tile.has-video: Image {
+    if tile.has-video && !tile.camera-off: Image {
         width: parent.width;
         height: parent.height;
         source: tile.video;
         image-fit: contain;
     }
-    if !tile.has-video: Text {
+    if !tile.has-video || tile.camera-off: Text {
         text: tile.me ? tile.name + " (you)" : tile.name;
         color: white;
         font-size: 20px;
@@ -38,7 +40,7 @@ component NameTile inherits Rectangle {
         width: parent.width - 16px;
     }
     // With video, the name in a corner, over it.
-    if tile.has-video: Rectangle {
+    if tile.has-video && !tile.camera-off: Rectangle {
         x: 6px;
         y: 6px;
         width: label.preferred-width + 12px;
@@ -131,8 +133,10 @@ component RoomScreen inherits VerticalBox {
     in property <string> status;
     in property <string> warning;
     in property <bool> muted;
+    in property <bool> camera-off;
     callback leave();
     callback toggle-mute();
+    callback toggle-camera();
     // As square a grid as the tiles make.
     property <int> columns: Math.max(1, Math.ceil(Math.sqrt(root.tiles.length)));
     property <int> rows: Math.max(1, Math.ceil(root.tiles.length / root.columns));
@@ -147,6 +151,12 @@ component RoomScreen inherits VerticalBox {
             text: root.muted ? "Unmute" : "Mute";
             clicked => {
                 root.toggle-mute();
+            }
+        }
+        Button {
+            text: root.camera-off ? "Camera on" : "Camera off";
+            clicked => {
+                root.toggle-camera();
             }
         }
         Button {
@@ -194,10 +204,40 @@ export component AppWindow inherits Window {
     in property <string> status;
     in property <string> warning;
     in property <bool> muted;
+    in property <bool> camera-off;
     callback join(string, string);
     callback new-room();
     callback leave();
     callback toggle-mute();
+    callback toggle-camera();
+
+    // The room's shortcuts, as Google Meet has them: Ctrl+D the microphone, Ctrl+E the camera.
+    // Out of the layout, and given the keyboard whenever the room shows.
+    shortcuts := FocusScope {
+        x: 0;
+        y: 0;
+        width: 0;
+        height: 0;
+        key-pressed(event) => {
+            if (root.screen != "room" || !event.modifiers.control) {
+                return reject;
+            }
+            if (event.text == "d") {
+                root.toggle-mute();
+                return accept;
+            }
+            if (event.text == "e") {
+                root.toggle-camera();
+                return accept;
+            }
+            reject
+        }
+    }
+    changed screen => {
+        if (root.screen == "room") {
+            shortcuts.focus();
+        }
+    }
 
     about := PopupWindow {
         x: (root.width - 320px) / 2;
@@ -240,12 +280,17 @@ export component AppWindow inherits Window {
             status: root.status;
             warning: root.warning;
             muted: root.muted;
-            leave => {
-                root.leave();
-            }
+            camera-off: root.camera-off;
             toggle-mute => {
                 root.toggle-mute();
             }
+            toggle-camera => {
+                root.toggle-camera();
+            }
+            leave => {
+                root.leave();
+            }
+
         }
         HorizontalLayout {
             vertical-stretch: 0;

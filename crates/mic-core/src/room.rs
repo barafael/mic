@@ -56,6 +56,8 @@ pub enum Command {
     SetName { name: String },
     /// Send no voice, or send it again; everyone's tile of this participant says which.
     SetMuted { muted: bool },
+    /// Turn the camera off, or on again; everyone's tile of this participant says which.
+    SetCamera { on: bool },
     /// Take the noise out of the voice with this suppressor, or none.
     SetNoiseSuppression {
         mode: mic_media::audio::noise::NoiseSuppression,
@@ -127,6 +129,8 @@ pub(crate) struct Joined {
     pub camera: Option<tokio::task::JoinHandle<()>>,
     /// Whether the voice is muted, which it follows.
     pub muted: watch::Sender<bool>,
+    /// Whether the camera is on, which it follows.
+    pub camera_on: watch::Sender<bool>,
     /// What suppresses the voice's noise, which it follows.
     pub noise: watch::Sender<mic_media::audio::noise::NoiseSuppression>,
     /// Where the others' voices play, if anywhere.
@@ -189,6 +193,7 @@ impl Room {
             voice: joined.voice,
             camera: joined.camera,
             muted: joined.muted,
+            camera_on: joined.camera_on,
             noise: joined.noise,
             roster: followed,
             state,
@@ -313,6 +318,7 @@ struct Task {
     /// Sends the camera, until the room is left.
     camera: Option<tokio::task::JoinHandle<()>>,
     muted: watch::Sender<bool>,
+    camera_on: watch::Sender<bool>,
     noise: watch::Sender<mic_media::audio::noise::NoiseSuppression>,
     roster: watch::Receiver<Roster>,
     state: watch::Sender<RoomState>,
@@ -374,6 +380,14 @@ impl Task {
                     ..self.profile.clone()
                 })?;
                 self.muted.send_replace(muted);
+                Ok(())
+            }
+            Command::SetCamera { on } => {
+                self.set_profile(Profile {
+                    camera_off: !on,
+                    ..self.profile.clone()
+                })?;
+                self.camera_on.send_replace(on);
                 Ok(())
             }
             Command::SetNoiseSuppression { mode } => {

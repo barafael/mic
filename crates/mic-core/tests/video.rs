@@ -160,3 +160,56 @@ async fn one_who_decodes_nothing_decodes_nothing_and_the_others_still_see() {
     assert_eq!(theirs.renditions[0].codec, "vp9");
     assert!(state.me.decoders.is_empty());
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_camera_turned_off_sends_nothing_and_says_so() {
+    let relay = TestRelay::start().await.unwrap();
+    let invite = Invite::new_room();
+    let alice = join(&invite, "Alice", Some(1), config(&relay)).await;
+    let bob = join(&invite, "Bob", Some(2), config(&relay)).await;
+    let alices = alice.room.participant();
+    sees(&bob, alices, 1).await;
+
+    alice
+        .room
+        .command(mic_core::Command::SetCamera { on: false })
+        .await
+        .unwrap();
+    let mut state = bob.room.state();
+    tokio::time::timeout(
+        PATIENCE,
+        state.wait_for(|state| {
+            state
+                .participants
+                .iter()
+                .any(|them| them.profile.camera_off)
+        }),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    // What was on its way has arrived by now; then nothing more comes.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let before = bob.room.video_count(alices);
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert_eq!(
+        bob.room.video_count(alices),
+        before,
+        "pictures while it's off"
+    );
+
+    alice
+        .room
+        .command(mic_core::Command::SetCamera { on: true })
+        .await
+        .unwrap();
+    let deadline = tokio::time::Instant::now() + PATIENCE;
+    while bob.room.video_count(alices) < before + 10 {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "no pictures once it's on again"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(!bob.room.state().borrow().participants[0].profile.camera_off);
+}

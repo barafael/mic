@@ -4,12 +4,13 @@
 //! sender's colour, and carol's says on each tile that it can't, rather than show black. Then a
 //! crowd of six with cameras of their own fills alice's window to nine tiles, and what drawing
 //! them costs is measured and kept in the record (`render.txt`), as the spike measured it. It
-//! measures, so it runs alone.
+//! measures, so it runs alone. Last, alice turns her camera off: bob's tile of her shows her
+//! name, and no more of her pictures come, until she turns it on again.
 
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use mic_core::Invite;
+use mic_core::{Command, Invite};
 
 use crate::error::{Error, Result};
 use crate::harness::{Participant, names};
@@ -158,6 +159,40 @@ pub fn video(checks: &mut Checks, the_box: &TestBox) -> Result<()> {
         } else {
             Err(Error::Failed(format!("carol decoded {decoded} pictures")))
         }
+    });
+    checks.record("alice's camera off, bob's tile shows her name", || {
+        let shows_her = |snapshot: &mic_harness::Snapshot| {
+            snapshot
+                .ui
+                .as_ref()
+                .is_some_and(|ui| ui.video.contains(&alice_key))
+        };
+        bob.wait_for_snapshot("showing alice's video", PATIENCE, shows_her)?;
+        alice.act(Command::SetCamera { on: false })?;
+        bob.wait_for_snapshot("showing alice's name", PATIENCE, |snapshot| {
+            !shows_her(snapshot)
+        })?;
+        let pictures = |bob: &mut Participant| -> Result<u64> {
+            Ok(bob
+                .seen()?
+                .cameras
+                .iter()
+                .find(|camera| camera.key == alice_key)
+                .map_or(0, |camera| camera.pictures))
+        };
+        std::thread::sleep(Duration::from_millis(500));
+        let before = pictures(&mut bob)?;
+        std::thread::sleep(Duration::from_secs(1));
+        let after = pictures(&mut bob)?;
+        if after != before {
+            return Err(Error::Failed(format!(
+                "{} of alice's pictures came while her camera was off",
+                after - before
+            )));
+        }
+        alice.act(Command::SetCamera { on: true })?;
+        bob.wait_for_snapshot("showing alice's video again", PATIENCE, shows_her)?;
+        Ok(())
     });
     for participant in [&mut alice, &mut bob, &mut carol] {
         participant.reset()?;

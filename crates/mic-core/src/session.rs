@@ -237,6 +237,7 @@ impl Inner {
         // The camera in the first codec everyone decodes. In v1 that's VP9 whatever the roster,
         // since one who decodes none of ours is left out; with a second codec, the choice follows
         // the roster as it changes.
+        let (camera_on, camera_follows) = tokio::sync::watch::channel(true);
         let camera = match (
             media.camera,
             mic_media::video::choose(&mic_media::video::Codec::ALL, std::iter::empty()),
@@ -244,6 +245,7 @@ impl Inner {
             (Some(pictures), Some(codec)) => Some(tokio::spawn(crate::video::publish(
                 pictures,
                 publication.video_track(crate::video::CAMERA, codec)?,
+                camera_follows,
             ))),
             _ => None,
         };
@@ -263,6 +265,7 @@ impl Inner {
             voice,
             camera,
             muted,
+            camera_on,
             noise,
             mixer: media.mixer,
             decoders: self

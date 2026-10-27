@@ -1,18 +1,13 @@
 //! Driving a client's window as a person would, with xdotool on its display: keys typed into it,
-//! and clicks on it. Xvnc has no window manager, so the window is given the keyboard first, and
-//! sits at the display's top left at its preferred size (crates/mic-slint/ui/app.slint), which is
-//! where clicks are aimed.
+//! and its shortcuts. Xvnc has no window manager, so the window is given the keyboard first. No
+//! clicks at coordinates: a button that moves when another arrives beside it took one to the
+//! wrong button once (docs/observations.md).
 
 use mic_core::Invite;
 
 use crate::error::{Error, Result};
 use crate::podman::TestBox;
 use crate::view;
-
-/// The window's size, as Slint gives it with no window manager: its preferred one.
-const WINDOW: (u32, u32) = (960, 600);
-/// Where the room screen's Mute button is: in the top row, left of Leave.
-const MUTE: (u32, u32) = (WINDOW.0 - 104, 23);
 
 /// Runs xdotool on `client`'s display, one invocation a step, after the window gets the
 /// keyboard. One invocation each, since `type` takes every argument after it as text.
@@ -63,8 +58,8 @@ pub fn type_join(
     )
 }
 
-/// Clicks the room screen's Mute button in `client`'s window.
-pub fn click_mute(the_box: &TestBox, client: &'static str) -> Result<()> {
-    let (x, y) = (MUTE.0.to_string(), MUTE.1.to_string());
-    xdotool(the_box, client, &[&["mousemove", &x, &y], &["click", "1"]])
+/// Presses the room screen's shortcut for the microphone, Ctrl+D, in `client`'s window: what
+/// its Mute button does (crates/mic-slint/ui/app.slint, `shortcuts`).
+pub fn toggle_mute(the_box: &TestBox, client: &'static str) -> Result<()> {
+    xdotool(the_box, client, &[&["key", "ctrl+d"]])
 }
