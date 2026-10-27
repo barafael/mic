@@ -6,6 +6,10 @@ measurements, and things to revisit. Newest first within each milestone. Each sa
 
 ## M10: Release
 
+- **0.1.0 reviewed as a product** (open): a full-scenario run of the box and exploratory sessions
+  in its windows, written up in [review-0.1.0.md](review-0.1.0.md): no settings screen, raised
+  hands off-screen invisible, the chat opening on its oldest, the window's cost doubled since M6,
+  and what the box would want to measure and show better.
 - **Only Linux's packaging has run** (open, commit 50). The tarball and the AppImage's AppDir
   build here and run (`mic --version`, libvpx carried along); packing the AppImage runs
   appimagetool, which this session wasn't allowed to run from a download. The dmg and the zip,

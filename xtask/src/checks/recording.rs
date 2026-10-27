@@ -5,7 +5,7 @@
 //! picture of the call as it went: alice's camera while she speaks, her screen while she shares,
 //! and once nobody speaks, a grid of everyone's.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use mic_core::{Command, Invite};
 
@@ -27,11 +27,13 @@ const SILENT: Duration = Duration::from_secs(6);
 /// less what the start and the end take.
 const PICTURES: u64 = 200;
 const PACKETS: u64 = 700;
-/// When in the recording each part is looked at, in seconds.
-const LOOKS: [(&str, &str); 3] = [
-    ("alice speaking", "3"),
-    ("alice sharing", "8"),
-    ("nobody speaking", "14.5"),
+/// When in each part it's looked at, in seconds from the part's start: once what it does has
+/// taken hold (a share's first pictures come a second or more after it starts; the grid, past the
+/// speaker's 3 s hold, after a mute reaches bob).
+const LOOKS: [(&str, f64); 3] = [
+    ("alice speaking", 3.0),
+    ("alice sharing", 5.0 + 3.5),
+    ("nobody speaking", 5.0 + 5.0 + 5.5),
 ];
 /// Where the windows record, in their pods (testbox/pods/client.yaml).
 const RECORDINGS: &str = "/run/mic/recordings";
@@ -64,7 +66,12 @@ pub fn recording(checks: &mut Checks, the_box: &TestBox) -> Result<()> {
     let bobs = keys[1].clone();
     // What was there before, so the new recording is told apart.
     let before = recordings(the_box)?;
+    // When the recording started: the parts below start once every window says it records, which
+    // a loaded host takes seconds to, and the file's timeline starts here.
+    let mut started = Instant::now();
+    let mut lead = Duration::ZERO;
     checks.record("bob records: every window says so, his own too", || {
+        started = Instant::now();
         clients[1].act(Command::Record { on: true })?;
         for client in &mut clients {
             let own = client.name == "bob";
@@ -84,6 +91,7 @@ pub fn recording(checks: &mut Checks, the_box: &TestBox) -> Result<()> {
         Ok(())
     });
     checks.record("he stops: no window says anyone records", || {
+        lead = started.elapsed();
         std::thread::sleep(SPEAKING);
         clients[0].act(Command::ShareScreen { on: true })?;
         std::thread::sleep(SHARING);
@@ -141,8 +149,9 @@ pub fn recording(checks: &mut Checks, the_box: &TestBox) -> Result<()> {
             }
             let mut wrong = Vec::new();
             let alices = camera("alice").ok_or("no camera")?;
-            for (part, at) in LOOKS {
-                let picture = picture_at(the_box, &file, at)?;
+            for (part, after) in LOOKS {
+                let at = format!("{:.1}", lead.as_secs_f64() + after);
+                let picture = picture_at(the_box, &file, &at)?;
                 let read = mic_media::video::read_pattern(&picture).map(|pattern| pattern.sender);
                 let right = match part {
                     "alice speaking" => read == Some(alices),
