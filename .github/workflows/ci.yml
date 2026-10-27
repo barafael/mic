@@ -27,8 +27,12 @@ jobs:
       # rustup on the runners installs the toolchain rust-toolchain.toml pins, with its components.
       - run: rustup show active-toolchain
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      # What mic's Slint window links against on Linux.
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev libxkbcommon-dev
       - run: cargo fmt --all -- --check
-      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      # Every feature: the window's harness too.
+      - run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
       # The system keyring's tests run too (MIC_TEST_KEYRING): Keychain and Credential Manager
       # are there on the runners; on Linux, GNOME Keyring in a D-Bus session of its own, unlocked
       # with a password, which makes its default collection.
@@ -39,11 +43,34 @@ jobs:
           MIC_TEST_KEYRING: "1"
         run: |
           dbus-run-session -- bash -c \
-            'echo ci | gnome-keyring-daemon --unlock --components=secrets >/dev/null && cargo test --workspace --locked'
+            'echo ci | gnome-keyring-daemon --unlock --components=secrets >/dev/null && cargo test --workspace --all-features --locked'
       - if: runner.os != 'Linux'
         env:
           MIC_TEST_KEYRING: "1"
-        run: cargo test --workspace --locked
+        run: cargo test --workspace --all-features --locked
+
+  # A release build of the `mic` binary on each platform, and that it runs (PLAN.md, commit 24):
+  # each native dependency is built on Windows and macOS when it arrives, not first at release.
+  release:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev libxkbcommon-dev
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - run: cargo build --release --locked -p mic-slint
+      # Git Bash on Windows finds mic.exe by this name too.
+      - shell: bash
+        run: ./target/release/mic --version
 
   # The box's display tooling, a workspace of its own: Linux only (Unix sockets, Landlock).
   testbox-view:
@@ -66,6 +93,28 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
+
+  # The video-tile spike (PLAN.md, commit 22), outside the workspace: it builds until it's
+  # deleted.
+  spikes:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: spikes/video-tiles
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      # Slint's window, and the VA-API bindings' headers and bindgen.
+      - run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev libxkbcommon-dev libva-dev libclang-dev
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: spikes/video-tiles
+      - run: cargo fmt -- --check
+      - run: cargo check --all-features --locked
 
   deny:
     runs-on: ubuntu-24.04

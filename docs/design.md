@@ -919,15 +919,30 @@ Whether `moq-tokio` exposes that switch needs checking **(unverified)**.
   widgets. PLAN.md has the interface.
 - **Video tiles:** `moq-video`'s `Renderer::new(&device, &queue, …)` takes a
   device it didn't create, so tiles are drawn on Slint's own device.
-- **Video-tile spike:**
-  - A Slint window with 9 tiles of `moq-video` frames at 30 fps (720p and
-    180p).
-  - Measure CPU and GPU time per frame.
-  - Check whether zero-copy imports (DMA-BUF and similar) work with
-    `WGPUConfiguration::Manual` **(unverified)**.
-  - It lives in `spikes/video-tiles/`, excluded from the Cargo workspace
-    (`[workspace] exclude = ["spikes"]`), and is deleted once the app's
-    own tiles are measured the same way.
+- **Video-tile spike** (`spikes/video-tiles/`, measured 2026-10-27; its
+  README has the tables):
+  - A Slint window with 9 tiles of `moq-video` frames at 30 fps, at 720p,
+    360p and 180p, on a Radeon 8060S (RADV) under Wayland.
+  - **9 tiles of 720p cost about 18% of one core and a few percent of the
+    GPU** (5.9 ms of process CPU per frame; 4.4 ms from a tick to the GPU
+    being done). At 180p it's barely less: the event loop and Slint's own
+    frame (1.5 ms) cost more than the tiles.
+  - **Zero-copy works with `WGPUConfiguration::Manual`**: a device made with
+    `VULKAN_EXTERNAL_MEMORY_DMA_BUF` and handed to Slint imports VA-API's
+    DMA-BUFs as NV12, with no fallback.
+  - **VA-API decode blocks the thread it's on** (21 ms of wall time for 9
+    streams, little of it CPU), so decoding stays off the UI thread.
+  - **Slint presents with `AutoVsync` (Fifo), fixed in its renderers.** On
+    Xvnc that stalls at under 2 fps; `MESA_VK_WSI_PRESENT_MODE=mailbox`
+    overrides it from outside, and the box's clients set it.
+  - **Slint panics without a font** (fontique, `NoMatch`), so the client
+    image carries one.
+  - `moq-video`'s VA-API H.264 encoder writes no parameter sets on this
+    Mesa, where ffmpeg's does. Not in `mic`'s path (libvpx encodes); to
+    report upstream.
+  - It's outside the Cargo workspace (`[workspace] exclude =
+    ["spikes"]`), and is deleted once the app's own tiles are measured the
+    same way.
 - **License (D24: MIT + Apache-2.0):** use Slint's **royalty-free license**.
   - Its condition is attribution, either:
     - (a) the `AboutSlint` widget in an About screen reachable from the
@@ -1255,7 +1270,7 @@ sequenceDiagram
 | **moq.pro (single point of failure)** | Relay only (D22) means every call depends on it. Young (launched 2026-08). 400 GB/month free (assumed; the site has said 400 and 500). A self-hosted `moq-relay` is the configuration fallback. |
 | **Video codec (D10)** | VP9 software decode is on upstream `main` but unreleased; VP9 encode and VA-API VP9 decode don't exist upstream. libvpx is a C library parsing other people's data. Macs always encode in software. |
 | E2EE + signatures | `moq-e2ee-00`'s epoch and path aren't authenticated, so `mic` needs the signed-catalog epoch rule. A static room secret means no forward secrecy against a leaked invite (accepted for v1). Rekeying without P2P needs per-member encryption or MLS. |
-| **UI** | Slint: the wgpu interop is "unstable" between minor releases; per-frame redraw cost not measured yet (the spike). |
+| **UI** | Slint: the wgpu interop is "unstable" between minor releases; presents only with `AutoVsync` (Mesa overrides it in the box). 9 tiles of 720p cost about 18% of a core (the spike). |
 | Audio | sonora (v0.2.0) is young. Noise suppression is chosen by testing. Integrating it into `moq-audio`'s capture path is our own work. |
 | Device secret | Needs a system keyring. A Linux desktop without a Secret Service has nowhere to keep it. |
 | Abuse | The moq.pro public prefix lets anyone spend our egress, and allows duplicate announcements in every room, until a token service exists. |

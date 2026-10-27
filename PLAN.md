@@ -173,7 +173,8 @@ container needs no extra groups.
 - **wgpu renders on RADV**, so Slint and `mic-render` run as on a desktop, and its frames reach
   Xvnc (commit 8). **But not with FIFO presentation:** Xvnc has no vertical blank, and 120
   frames of `vkcube` in FIFO took a minute, against a second in mailbox or immediate. Everything
-  in the box presents without waiting for vblank.
+  in the box presents without waiting for vblank: Slint can't be told to, so its clients run with
+  `MESA_VK_WSI_PRESENT_MODE=mailbox` (the spike, commit 22: under 2 fps without it, 30 with it).
 - **VP9 decodes on VA-API** once `moq-video` has a VA-API VP9 decoder **⚠ unverified** (M6).
   VP9 encoding is software everywhere: AMD has no VP9 encoder.
 - **Without a GPU** (CI, other hosts), `cargo testbox up --no-gpu` uses llvmpipe and lavapipe, and
@@ -387,13 +388,22 @@ Each numbered item below is about one commit. Box phases are in **bold**.
 
 22. `spikes/video-tiles`. The Slint video-tile spike (§5.10): 9 wgpu textures at 30 fps, CPU and
     GPU per frame measured on a real machine. It stays outside the workspace, and CI runs
-    `cargo check` on it until it's deleted (M6).
+    `cargo check` on it until it's deleted (M6). *Done:* about 18% of a core for 9 tiles of
+    720p; zero-copy from VA-API works through `WGPUConfiguration::Manual`. Slint presents only
+    with `AutoVsync`, which stalls on Xvnc, so the box's clients set
+    `MESA_VK_WSI_PRESENT_MODE=mailbox`; and Slint needs a font in the client image.
 23. `mic-slint: a window over the room state`. Join screen (name, invite) and a grid of name
     tiles. The core runs on a tokio runtime on a second thread; state reaches the UI through
     `invoke_from_event_loop`. It embeds `mic-harness` and fills the `ui` section. **`roster`**
     now runs with windows: the `ui` section matches the roster, the device secret comes from
-    the box's keyring, and screenshots are taken.
+    the box's keyring, and screenshots are taken. *Done,* with a commit before it:
+    `mic-core: the room a frontend is in` (`App`), which the join screen and the harness both
+    join through. `roster` also types a join into a window (`xdotool`), and restarts a client
+    to see its key kept. The relay is `--relay` (or `MIC_RELAY`) until moq.pro's public prefix
+    is settled (D8).
 24. `ci: a release build of mic on Linux, Windows and macOS`. The smoke job, `mic --version`.
+    *Written, not yet run:* there's no remote, so no CI run has happened; Slint's build on the
+    Windows and macOS runners is still **⚠ unverified**.
 
 ### M5: Audio
 
@@ -526,7 +536,6 @@ Each is checked by the commit named, which settles it in its body and in the des
 
 | Assumption | Checked in | If it's wrong |
 |---|---|---|
-| Slint's wgpu backend can present in mailbox or immediate mode, not only FIFO, which stalls on Xvnc | 23 | Slint's software renderer in the box, or a present mode set through `WGPUConfiguration::Manual` |
 | The keyring works on GitHub's Windows and macOS runners, and GNOME Keyring on its Linux one (it does in a container here) | 11 (CI) | The keyring test is skipped in CI where it can't run, and the box's clients cover Linux |
 | PipeWire runs in a rootless container with a speaker-to-mic loopback | 28 | A virtual sink and source in the `cpal` test path only, without PipeWire |
 | libvpx builds and links on the Windows and macOS CI runners | 32 | A vendored static build through the binding's build script |

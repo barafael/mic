@@ -21,6 +21,10 @@ pub use mic_core::{Command, RoomState};
 /// What a harness logs once it listens, which `cargo testbox` waits for.
 pub const LISTENING: &str = "the harness is listening";
 
+/// What a frontend prints, on a line of its own, once its window has drawn its first frame,
+/// which `cargo testbox` waits for before it looks at the display.
+pub const SHOWN: &str = "the window shows";
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Request {
     /// Echoed in the reply; 0 when a request didn't parse.

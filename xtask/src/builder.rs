@@ -10,18 +10,49 @@ use crate::process;
 /// Where the binaries land on the host; the clients mount it read-only.
 pub const BIN: &str = "target/testbox-bin";
 
-/// What the box runs, by workspace: mic's, and the display tools' (testbox/view), whose
-/// `with-display` runs a program on its display.
-const WORKSPACES: [(&str, &[&str]); 2] = [
-    ("Cargo.toml", &["forger", "mic-crowd", "probe"]),
-    ("testbox/view/Cargo.toml", &["with-display"]),
+/// A package the box runs, and its binary.
+struct Package {
+    name: &'static str,
+    /// Its Cargo features, comma-separated.
+    features: &'static str,
+    binary: &'static str,
+}
+
+const fn package(name: &'static str) -> Package {
+    Package {
+        name,
+        features: "",
+        binary: name,
+    }
+}
+
+/// What the box runs, by workspace: mic's, the window with its harness among it, and the
+/// display tools' (testbox/view), whose `with-display` runs a program on its display.
+const WORKSPACES: [(&str, &[Package]); 2] = [
+    (
+        "Cargo.toml",
+        &[
+            package("forger"),
+            package("mic-crowd"),
+            Package {
+                name: "mic-slint",
+                features: "mic-slint/harness",
+                binary: "mic",
+            },
+            package("probe"),
+        ],
+    ),
+    ("testbox/view/Cargo.toml", &[package("with-display")]),
 ];
 
 /// The pods that run `binary`, which a change to it restarts.
 pub fn pods_running(binary: &str) -> Vec<Pod> {
     match binary {
-        "mic-crowd" => crate::podman::CLIENTS.map(Pod::Client).to_vec(),
-        "probe" | "with-display" => vec![Pod::Probe],
+        "mic" => crate::podman::CLIENTS.map(Pod::Client).to_vec(),
+        "probe" => vec![Pod::Probe],
+        "with-display" => std::iter::once(Pod::Probe)
+            .chain(crate::podman::CLIENTS.map(Pod::Client))
+            .collect(),
         _ => Vec::new(),
     }
 }
@@ -35,16 +66,28 @@ const UPDATED: &str = "testbox-builder: updated ";
 fn script() -> String {
     let mut script = String::from("set -e\n");
     for (manifest, packages) in WORKSPACES {
-        let packages: String = packages
+        let names: String = packages
             .iter()
-            .map(|package| format!(" -p {package}"))
+            .map(|package| format!(" -p {}", package.name))
             .collect();
+        let features: Vec<&str> = packages
+            .iter()
+            .map(|package| package.features)
+            .filter(|features| !features.is_empty())
+            .collect();
+        let features = if features.is_empty() {
+            String::new()
+        } else {
+            format!(" --features {}", features.join(","))
+        };
         script.push_str(&format!(
-            "cargo build --profile testbox --locked --manifest-path {manifest}{packages}\n"
+            "cargo build --profile testbox --locked --manifest-path {manifest}{names}{features}\n"
         ));
     }
-    // Each package's binary is named as the package.
-    for binary in WORKSPACES.iter().flat_map(|(_, packages)| packages.iter()) {
+    for binary in WORKSPACES
+        .iter()
+        .flat_map(|(_, packages)| packages.iter().map(|package| package.binary))
+    {
         script.push_str(&format!(
             "if ! cmp -s /target/testbox/{binary} /out/{binary}; then \
              cp /target/testbox/{binary} /out/.{binary}.new; \

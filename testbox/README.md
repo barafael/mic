@@ -32,7 +32,7 @@ flowchart LR
             probe["probe<br/>with-display: Xvnc<br/>probe window: wgpu"]
         end
         subgraph palice["pods mic-testbox-alice, -bob"]
-            alice["client<br/>mic-crowd: one participant<br/>harness"]
+            alice["client<br/>with-display: Xvnc<br/>mic: Slint, wgpu<br/>harness, keyring"]
         end
         ca[("volume mic-testbox-keys")]
     end
@@ -42,6 +42,7 @@ flowchart LR
     bin -. "read-only" .-> probe
     bin -. "read-only" .-> alice
     probe --- view
+    alice --- view
     view -. "cargo testbox vnc / web, shot" .- xtask
     alice --- run
     run -- "join, act, snapshot" --- xtask
@@ -69,11 +70,17 @@ flowchart LR
   into `target/testbox-bin` only when it changed, by a rename, and client pods mount that
   directory read-only. The builder fetches crates, so it's on podman's default network, outside
   the box; `down` leaves it running, `down --wipe` removes it and its caches.
-- **Clients are `mic` participants**, a pod each (`alice`, `bob`), headless for now:
-  `mic-crowd` with one participant, trusting the relay by the box's CA. A check drives each
-  through its harness (crates/mic-harness), on a socket in `target/testbox-run/<client>/`
-  (the owner's only): it joins a fresh room, acts as a click would, and reads the room's state.
-  M4 gives them windows.
+- **Clients are `mic` participants**, a pod each (`alice`, `bob`): the window
+  (crates/mic-slint) on a display of its own, with the host's GPU, trusting the relay by the
+  box's CA. A check drives each through its harness (crates/mic-harness), on a socket in
+  `target/testbox-run/<client>/` (the owner's only): it joins a fresh room, acts as a click
+  would, and reads the room's state and what the window shows of it; or it types into the
+  window with `xdotool`, as a person would.
+- **Each client's device secret is in GNOME Keyring**, on a D-Bus session of the client's own
+  (`testbox/client/keyring-session`), as on a desktop. The keyring lives under a home in
+  `target/testbox-run/<client>/home`, so a restarted client is the same participant.
+- **Windows present in mailbox mode** (`MESA_VK_WSI_PRESENT_MODE`): Slint presents with Fifo,
+  which waits for a vertical blank Xvnc never has (spikes/video-tiles: under 2 fps).
 - **A display shows what runs on it**: `with-display` runs a program on TigerVNC's Xvnc, served on
   a Unix socket only, in `target/testbox-view/<client>/` (the owner's only), with the viewer's
   input and the clipboard off. `cargo testbox vnc` shows the displays in a window, `cargo testbox
@@ -139,6 +146,6 @@ Phases don't need a fresh box: each check uses rooms and broadcasts of its own. 
 |---|---|
 | `box` | The network is internal; a pod resolves no outside name and opens no outside connection; an unchanged box starts without a build; a second build of an unchanged tree is a no-op; a binary from the builder runs in the client image; the probe window renders on RADV (llvmpipe with `--no-gpu`); a client's display, through its socket, shows what it draws; VA-API decodes VP9; every binary from the builder finds its libraries in the client image |
 | `relay` | Frames pass through the relay between moq's own publisher and subscriber; a client without the box's CA is refused. If this fails, the box is broken, not `mic` |
-| `roster` | alice and bob join a room and see each other; a new name reaches the other; bob leaves and alice sees him go; after the relay restarts, both are connected again and see each other once; an honest room rejects nobody |
+| `roster` | alice and bob join a room and see each other; their windows show the room's tiles, in the roster's order, as the harness's `ui` section says and a screenshot of each shows; a new name reaches the other; bob leaves and alice sees him go, and his window shows the join screen; bob joins again by typing into his window; after the relay restarts, both are connected again and see each other once; a restarted alice has the same key, her device secret kept in her keyring; an honest room rejects nobody |
 | `impersonation` | The forger (testbox/forger), a member with the invite, run in the tools pod: at alice's path with a catalog it signed itself, it stands for no one; at its own path with frames no checkpoint covers, it's rejected within the 2 s grace; bob sees alice once |
 | `e2ee` | What a stranger on the relay sees (its HTTP interface: what's announced, a track's latest group): no room id, participant key or name, only ciphertext; a participant without the room's secret finds nobody |

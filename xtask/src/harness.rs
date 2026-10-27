@@ -83,21 +83,36 @@ impl Participant {
         patience: Duration,
         holds: impl Fn(&RoomState) -> bool,
     ) -> Result<RoomState> {
+        let snapshot = self.wait_for_snapshot(what, patience, |snapshot| {
+            snapshot.room.as_ref().is_some_and(&holds)
+        })?;
+        snapshot
+            .room
+            .ok_or_else(|| Error::Failed(format!("{}: in no room", self.name)))
+    }
+
+    /// The snapshot once `holds` says so, within `patience`, as for [`Self::wait_for`].
+    pub fn wait_for_snapshot(
+        &mut self,
+        what: &str,
+        patience: Duration,
+        holds: impl Fn(&Snapshot) -> bool,
+    ) -> Result<Snapshot> {
         let deadline = Instant::now() + patience;
         loop {
-            let room = self.snapshot()?.room;
-            match room {
-                Some(state) if holds(&state) => return Ok(state),
-                last if Instant::now() > deadline => {
-                    return Err(Error::Failed(format!(
-                        "{}: not {what} within {}s, but {}",
-                        self.name,
-                        patience.as_secs(),
-                        describe(last.as_ref())
-                    )));
-                }
-                _ => std::thread::sleep(POLL),
+            let snapshot = self.snapshot()?;
+            if holds(&snapshot) {
+                return Ok(snapshot);
             }
+            if Instant::now() > deadline {
+                return Err(Error::Failed(format!(
+                    "{}: not {what} within {}s, but {}",
+                    self.name,
+                    patience.as_secs(),
+                    describe(&snapshot)
+                )));
+            }
+            std::thread::sleep(POLL);
         }
     }
 }
@@ -111,9 +126,17 @@ pub fn names(state: &RoomState) -> Vec<String> {
         .collect()
 }
 
-fn describe(state: Option<&RoomState>) -> String {
-    match state {
+fn describe(snapshot: &Snapshot) -> String {
+    let room = match &snapshot.room {
         None => "in no room".to_owned(),
         Some(state) => format!("{:?} with {:?}", state.connection, names(state)),
+    };
+    match &snapshot.ui {
+        None => room,
+        Some(ui) => format!(
+            "{room}, showing {} with {} tiles",
+            ui.screen,
+            ui.tiles.len()
+        ),
     }
 }

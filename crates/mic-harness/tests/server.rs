@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use mic_core::secrets::InMemory;
-use mic_core::{Command, Config, Invite, RoomState, Trust};
+use mic_core::{App, Command, Config, Invite, Profile, RoomState, Trust};
 use mic_harness::client::Client;
 use mic_harness::server::Harness;
 use mic_harness::{Acted, Call, Done, Joined, Pong, Snapshot, Subscribed};
@@ -14,8 +14,9 @@ use mic_testrelay::TestRelay;
 
 const PATIENCE: Duration = Duration::from_secs(10);
 
-/// A harness for a client of `relay`, served at a socket of its own; returns the socket.
-fn serve(relay: &TestRelay, name: &str, directory: &Path) -> PathBuf {
+/// A harness for a client of `relay`, served at a socket of its own; returns the socket, and the
+/// app the harness drives, as a frontend's screens would.
+fn serve(relay: &TestRelay, name: &str, directory: &Path) -> (PathBuf, App) {
     let mut config = Config::new(relay.url());
     config.trust = Trust::Fingerprints(vec![relay.fingerprint().to_owned()]);
     let client = mic_core::Client::new(
@@ -25,10 +26,11 @@ fn serve(relay: &TestRelay, name: &str, directory: &Path) -> PathBuf {
     )
     .unwrap();
     let socket = directory.join(name);
-    let harness = Harness::new(client, name, None);
+    let app = App::new(client);
+    let harness = Harness::new(app.clone(), name, None);
     let path = socket.clone();
     tokio::spawn(async move { harness.serve(&path).await });
-    socket
+    (socket, app)
 }
 
 /// A client of the harness at `socket`, once it listens.
@@ -60,8 +62,8 @@ async fn a_check_drives_two_participants_through_their_harnesses() {
     let relay = TestRelay::start().await.unwrap();
     let directory = std::env::temp_dir().join(format!("mic-harness-{}", std::process::id()));
     std::fs::create_dir_all(&directory).unwrap();
-    let alice = serve(&relay, "alice", &directory);
-    let bob = serve(&relay, "bob", &directory);
+    let (alice, _) = serve(&relay, "alice", &directory);
+    let (bob, _) = serve(&relay, "bob", &directory);
     let invite = Invite::new_room().to_mic_url();
 
     tokio::task::spawn_blocking(move || {
@@ -125,7 +127,7 @@ async fn what_isnt_a_request_is_answered_with_an_error() {
     let relay = TestRelay::start().await.unwrap();
     let directory = std::env::temp_dir().join(format!("mic-harness-bad-{}", std::process::id()));
     std::fs::create_dir_all(&directory).unwrap();
-    let socket = serve(&relay, "carol", &directory);
+    let (socket, _) = serve(&relay, "carol", &directory);
     tokio::task::spawn_blocking(move || {
         let _client = connect(&socket);
         use std::io::{BufRead, Write};
@@ -139,6 +141,41 @@ async fn what_isnt_a_request_is_answered_with_an_error() {
             line.starts_with(r#"{"id":0,"error":"not a request"#),
             "{line}"
         );
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_room_the_frontend_joins_is_the_harnesss_too() {
+    let relay = TestRelay::start().await.unwrap();
+    let directory = std::env::temp_dir().join(format!("mic-harness-app-{}", std::process::id()));
+    std::fs::create_dir_all(&directory).unwrap();
+    let (socket, app) = serve(&relay, "dave", &directory);
+    let invite = Invite::new_room();
+    let mut harness = tokio::task::spawn_blocking(move || {
+        let mut harness = connect(&socket);
+        let _subscribed: Subscribed = harness.call(Call::Subscribe).unwrap();
+        harness
+    })
+    .await
+    .unwrap();
+    // As the join screen would.
+    app.join(invite.clone(), Profile::new("Dave"))
+        .await
+        .unwrap();
+    let app_left = app.clone();
+    tokio::task::spawn_blocking(move || {
+        let snapshot = pushed_until(&mut harness, |room| room.me.profile.name == "Dave");
+        assert_eq!(snapshot.room.unwrap().room, invite.room.to_string());
+        // As a click on "leave" would, from another thread: the harness sees it go.
+        let runtime = tokio::runtime::Handle::current();
+        assert!(runtime.block_on(app_left.leave()));
+        loop {
+            if harness.next_pushed().unwrap().snapshot.room.is_none() {
+                break;
+            }
+        }
     })
     .await
     .unwrap();

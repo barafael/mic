@@ -1,0 +1,23 @@
+[package]
+name = "video-tiles"
+version = "0.0.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false
+
+# Outside the workspace (PLAN.md, commit 22): a measurement, deleted in M6.
+[workspace]
+
+[dependencies]
+moq-net = "=0.3.16"
+moq-video = { version = "=0.1.16", default-features = false, features = ["render"] }
+slint = { version = "=1.18.1", default-features = false, features = ["std", "compat-1-2", "backend-winit", "renderer-femtovg-wgpu", "unstable-wgpu-30"] }
+bytes = "1"
+hang = "=0.21.17"
+libc = "0.2"
+pollster = "0.4"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[features]
+# VA-API decode, for `--source vaapi`.
+vaapi = ["moq-video/vaapi"]
