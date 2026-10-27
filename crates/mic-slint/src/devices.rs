@@ -5,9 +5,14 @@
 use std::sync::{Arc, Mutex, PoisonError};
 
 use mic_core::Media;
+use mic_media::audio::noise::NoiseSuppression;
 use mic_media::audio::{
     EchoCanceller, Microphone, Mixer, Running, Sink as _, Source as _, Speaker, capture,
 };
+
+/// The noise suppressor a microphone gets: RNNoise, measured best in the box (PLAN.md, commit
+/// 30; design §5.5).
+const NOISE_SUPPRESSION: NoiseSuppression = NoiseSuppression::Rnnoise;
 
 pub struct Devices {
     /// The speaker's mixer, if it opened.
@@ -66,6 +71,7 @@ impl Devices {
             Media {
                 capture,
                 mixer: mixer.clone(),
+                noise: NOISE_SUPPRESSION,
             }
         }
     }

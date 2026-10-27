@@ -792,6 +792,31 @@ a unit test: a near-end voice at speech level (-20 dBFS) over the echo is kept (
 a near-end *tone* at -6 dBFS is taken for echo and suppressed; double talk is measured with
 speech when noise suppression is chosen (commit 30) **(unverified for speech)**.
 
+**AEC3 starts out cautious (commit 30).** While it hasn't yet found that there's no echo, a quiet
+near-end voice talking over the far end is suppressed: by 16 dB at -30 dBFS for its first 6 s,
+none of it by 20 s. So someone on a headset is quieter for their first seconds in a room while
+others talk **(measured with synthetic signals; with speech, unverified)**. Worth revisiting:
+sonora's AEC3 settings, or starting with the canceller off until an echo is seen.
+
+**Noise suppression as chosen (commit 30): RNNoise (`nnnoiseless`).** Measured in the box:
+- **The signal:** a speech-like voice (harmonics of 150 Hz to 3 kHz in syllables, with pauses)
+  over white noise at -34 dBFS, played into carol's microphone.
+- **The measurement:** what alice hears, through PipeWire, Opus and the relay, as the power at
+  the voice's harmonics against the power between them.
+- **The results,** three runs:
+
+| Suppressor | Voice over noise, against off | What it takes of the voice |
+|---|---|---|
+| RNNoise (`nnnoiseless`) | +11.5 to +12.3 dB | 0.1 to 0.3 dB |
+| sonora's (WebRTC NS, high) | +9.4 to +10.6 dB | 1.6 to 2.0 dB |
+
+RNNoise gains more and keeps the voice whole; it's also what Jitsi Meet uses by default. It runs
+on the async side before Opus, 10 ms frames, no added latency, and can be switched per room
+(`Command::SetNoiseSuppression`). Neither suppressor is for a steady tone, which both take for
+noise, so the box's synthetic voices go without. `audio-devices` checks it gains at least 8 dB and
+takes at most 3 dB of the voice. Not measured yet: non-stationary noise (babble, keyboard), and
+real speech.
+
 **Noise-suppression options:**
 
 | Crate | Approach | Notes |

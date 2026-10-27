@@ -7,16 +7,17 @@ license.workspace = true
 publish.workspace = true
 
 [features]
-# The system's microphone and speaker, through cpal, and echo cancellation between them (sonora).
-# Off for what only uses synthetic ones (the box's crowd, tests), so they don't need the
+# The system's microphone and speaker, through cpal, and echo cancellation between them. Off for what only uses synthetic ones (the box's crowd, tests), so they don't need the
 # platform's audio libraries.
-devices = ["dep:cpal", "dep:sonora"]
+devices = ["dep:cpal"]
 
 [dependencies]
 cpal = { version = "0.18.2", optional = true }
 derive_more = { version = "2.1.1", features = ["display", "error"] }
 ringbuf = "0.5.1"
-sonora = { version = "0.2.0", optional = true }
+nnnoiseless = { version = "0.5.2", default-features = false }
+serde = { version = "1.0.229", features = ["derive"] }
+sonora = "0.2.0"
 tokio = { version = "1.54.1", features = ["time"] }
 tracing = "0.1.44"
 

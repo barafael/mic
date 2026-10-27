@@ -46,6 +46,7 @@ async fn join(relay: &TestRelay, invite: &Invite, name: &str, tone: Option<f64>)
     let media = Media {
         capture,
         mixer: Some(mixer),
+        ..Default::default()
     };
     let room = client(relay)
         .join_with(invite.clone(), Profile::new(name), media)

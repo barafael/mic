@@ -16,6 +16,7 @@ mod device;
 #[cfg(feature = "devices")]
 mod echo;
 mod mixer;
+pub mod noise;
 mod ring;
 mod tone;
 

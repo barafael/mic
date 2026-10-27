@@ -171,6 +171,9 @@ impl Client {
 pub struct Media {
     pub capture: Option<mic_media::audio::Capture>,
     pub mixer: Option<mic_media::audio::Mixer>,
+    /// What takes the noise out of the capture: a microphone wants it; a synthetic tone, which
+    /// a suppressor would take for noise, doesn't.
+    pub noise: mic_media::audio::noise::NoiseSuppression,
 }
 
 impl Inner {
@@ -209,11 +212,13 @@ impl Inner {
         let mut profile_track = publication.track(roster::PROFILE)?;
         roster::write_profile(&mut profile_track, &profile)?;
         let (muted, follows) = tokio::sync::watch::channel(false);
+        let (noise, noise_follows) = tokio::sync::watch::channel(media.noise);
         let voice = match media.capture {
             Some(capture) => Some(tokio::spawn(crate::audio::publish(
                 capture,
                 publication.track(crate::audio::AUDIO)?,
                 follows,
+                noise_follows,
             ))),
             None => None,
         };
@@ -232,6 +237,7 @@ impl Inner {
             runtime: self.runtime.clone(),
             voice,
             muted,
+            noise,
             mixer: media.mixer,
         }))
     }

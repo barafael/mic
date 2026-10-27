@@ -19,6 +19,7 @@
 //! backlog and then the live edge. The same cap keeps a sender's clock that runs a little fast
 //! from building up delay.
 
+use mic_media::audio::noise::{NoiseSuppression, Suppressor};
 use mic_media::audio::{Capture, FRAME, Mixer, SAMPLE_RATE};
 use moq_audio::Layout;
 use moq_audio::decode::Decoder;
@@ -52,13 +53,15 @@ fn decoder() -> Result<Decoder, TrackError> {
 }
 
 /// Encodes what `capture` gives onto `track`, a group a second, until the capture ends or the
-/// track fails. While `muted` says so, what it gives is read and sent nowhere: the far end hears
-/// nothing.
+/// track fails, its noise taken out by the suppressor `noise` names. While `muted` says so, what
+/// it gives is read and sent nowhere: the far end hears nothing.
 pub(crate) async fn publish(
     mut capture: Capture,
     mut track: SignedTrack,
     muted: tokio::sync::watch::Receiver<bool>,
+    mut noise: tokio::sync::watch::Receiver<NoiseSuppression>,
 ) {
+    let mut suppressor = Suppressor::new(*noise.borrow_and_update());
     let mut encoder = match Encoder::new(&settings()) {
         Ok(encoder) => encoder,
         Err(error) => {
@@ -69,10 +72,14 @@ pub(crate) async fn publish(
     debug_assert_eq!(encoder.frame_size(), FRAME);
     let mut group = None;
     let mut packets: u64 = 0;
-    while let Some(frame) = capture.frame().await {
+    while let Some(mut frame) = capture.frame().await {
+        if noise.has_changed().unwrap_or(false) {
+            suppressor = Suppressor::new(*noise.borrow_and_update());
+        }
         if *muted.borrow() {
             continue;
         }
+        suppressor.process(&mut frame);
         let packet = match encoder.encode(&frame) {
             Ok(packet) => packet,
             Err(error) => {

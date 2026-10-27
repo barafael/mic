@@ -56,6 +56,10 @@ pub enum Command {
     SetName { name: String },
     /// Send no voice, or send it again; everyone's tile of this participant says which.
     SetMuted { muted: bool },
+    /// Take the noise out of the voice with this suppressor, or none.
+    SetNoiseSuppression {
+        mode: mic_media::audio::noise::NoiseSuppression,
+    },
 }
 
 /// One-off things that happen in a room, beside its state.
@@ -119,6 +123,8 @@ pub(crate) struct Joined {
     pub voice: Option<tokio::task::JoinHandle<()>>,
     /// Whether the voice is muted, which it follows.
     pub muted: watch::Sender<bool>,
+    /// What suppresses the voice's noise, which it follows.
+    pub noise: watch::Sender<mic_media::audio::noise::NoiseSuppression>,
     /// Where the others' voices play, if anywhere.
     pub mixer: Option<mic_media::audio::Mixer>,
 }
@@ -168,6 +174,7 @@ impl Room {
             following,
             voice: joined.voice,
             muted: joined.muted,
+            noise: joined.noise,
             roster: followed,
             state,
             events,
@@ -278,6 +285,7 @@ struct Task {
     /// Sends the voice, until the room is left.
     voice: Option<tokio::task::JoinHandle<()>>,
     muted: watch::Sender<bool>,
+    noise: watch::Sender<mic_media::audio::noise::NoiseSuppression>,
     roster: watch::Receiver<Roster>,
     state: watch::Sender<RoomState>,
     events: broadcast::Sender<Event>,
@@ -338,6 +346,10 @@ impl Task {
                     ..self.profile.clone()
                 })?;
                 self.muted.send_replace(muted);
+                Ok(())
+            }
+            Command::SetNoiseSuppression { mode } => {
+                self.noise.send_replace(mode);
                 Ok(())
             }
         }

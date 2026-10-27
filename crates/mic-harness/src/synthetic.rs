@@ -50,9 +50,11 @@ impl Synthetic {
                     }
                 }
             });
+            // No noise suppression: it would take a steady tone for noise.
             Media {
                 capture,
                 mixer: Some(mixer.clone()),
+                noise: Default::default(),
             }
         }
     }

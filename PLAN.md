@@ -434,6 +434,9 @@ Each numbered item below is about one commit. Box phases are in **bold**.
 30. `mic-media: noise suppression`. `nnnoiseless` and `sonora-ns` measured in the box against
     injected noise; the choice and the numbers go in the commit body and the design doc.
     **`audio-devices`** checks a minimum gain in tone-to-noise ratio, set from that measurement.
+    *Done:* RNNoise, +12 dB against sonora's +10 dB, the voice kept (§5.5). Measured with a
+    speech-like voice, not a tone, which both take for noise. Found on the way: AEC3 suppresses
+    a quiet near-end voice for its first seconds while the far end plays (§5.5).
 
 ### M6: Video (VP9)
 
