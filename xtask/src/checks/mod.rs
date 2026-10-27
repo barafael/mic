@@ -1,5 +1,7 @@
 //! `cargo testbox test <phase>`'s checks. Each phase is a file of its own.
 
+mod audio;
+mod audio_devices;
 mod crashed;
 mod e2ee;
 mod impersonation;
@@ -7,6 +9,7 @@ mod record;
 mod relay;
 mod roster;
 mod testbox;
+mod window;
 
 use crate::error::{Error, Result};
 use crate::podman::TestBox;
@@ -26,15 +29,21 @@ pub enum Phase {
     E2ee,
     /// A member publishing what it can't sign is rejected.
     Impersonation,
+    /// Each hears every other's voice, never their own.
+    Audio,
+    /// Voices through real devices: cpal, ALSA, PipeWire.
+    AudioDevices,
 }
 
 impl Phase {
-    pub const ALL: [Phase; 5] = [
+    pub const ALL: [Phase; 7] = [
         Phase::Box,
         Phase::Relay,
         Phase::Roster,
         Phase::E2ee,
         Phase::Impersonation,
+        Phase::Audio,
+        Phase::AudioDevices,
     ];
 
     pub fn name(self) -> String {
@@ -47,13 +56,18 @@ impl Phase {
     /// as two driving alice at once would take each other's rooms. (Leasing clients to phases
     /// lifts that, once there are more phases with clients.)
     pub fn uses_clients(self) -> bool {
-        matches!(self, Phase::Roster | Phase::E2ee | Phase::Impersonation)
+        matches!(
+            self,
+            Phase::Roster | Phase::E2ee | Phase::Impersonation | Phase::Audio | Phase::AudioDevices
+        )
     }
 
-    /// Whether it disrupts the whole box (`roster` restarts the relay): such a phase runs alone,
-    /// with no other phase at once.
+    /// Whether it runs alone, with no other phase at once: because it disrupts the whole box
+    /// (`roster` restarts the relay), or because it measures, and another phase's load would
+    /// skew what it measures (`audio`). This is the box-wide measurement lock (PLAN.md, "The test
+    /// box").
     pub fn runs_alone(self) -> bool {
-        matches!(self, Phase::Roster)
+        matches!(self, Phase::Roster | Phase::Audio | Phase::AudioDevices)
     }
 
     pub fn run(self, checks: &mut Checks, the_box: &TestBox) -> Result<()> {
@@ -63,6 +77,8 @@ impl Phase {
             Phase::Roster => roster::roster(checks, the_box),
             Phase::E2ee => e2ee::e2ee(checks, the_box),
             Phase::Impersonation => impersonation::impersonation(checks, the_box),
+            Phase::Audio => audio::audio(checks, the_box),
+            Phase::AudioDevices => audio_devices::audio_devices(checks, the_box),
         }
     }
 }

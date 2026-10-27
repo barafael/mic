@@ -413,16 +413,30 @@ Each numbered item below is about one commit. Box phases are in **bold**.
     `testbox: the measurement lock` arrives here, with the first check that measures.
     Tests: tones through `mic-testrelay`, and after a relay restart. **`audio`**: each client
     hears every other's frequency and not its own. **`impersonation`** reruns with audio.
+    *Done:* a voice is a group a second, not a packet each, so checkpoints stay small (§5.7).
+    The measurement lock is `runs_alone`, which `audio` takes. The harness answers `heard` from
+    the client's analyzer (`mic_harness::synthetic`), and the window takes `--tone` with the
+    harness feature until devices arrive (commit 28).
 27. `mic-core, mic-slint: mute`. `Command::SetMuted`, and a button. **`audio`**: muted means
-    silence on the far end, and the tile shows it.
+    silence on the far end, and the tile shows it. *Done:* muted is in the signed profile,
+    and `audio` also clicks the button.
 28. `testbox: PipeWire in the clients` with a speaker-to-mic loopback **⚠ unverified**.
     **`audio-devices`**: the `cpal` path end to end. The CI smoke job now builds `cpal` on
-    Windows and macOS.
+    Windows and macOS. *Done* with a third client, carol, on the devices (alice and bob keep
+    their tones, which other phases measure exactly). PipeWire runs rootless with a speaker
+    and a microphone fed by a sink of its own; the loopback between them comes with commit 29,
+    which needs it.
 29. `mic-media: echo cancellation with sonora` (D14). **`audio-devices`**: with the loopback on,
-    alice doesn't hear her own tone back.
+    alice doesn't hear her own tone back. *Done:* the loopback is a `pw-link` the check makes
+    and undoes, and it carries the echo (alice hears herself at full level without the
+    canceller, silence with it). AEC3 keeps a voice at speech level over the echo, but takes a
+    near-end tone at -6 dBFS for echo: double talk is measured with speech in commit 30.
 30. `mic-media: noise suppression`. `nnnoiseless` and `sonora-ns` measured in the box against
     injected noise; the choice and the numbers go in the commit body and the design doc.
     **`audio-devices`** checks a minimum gain in tone-to-noise ratio, set from that measurement.
+    *Done:* RNNoise, +12 dB against sonora's +10 dB, the voice kept (§5.5). Measured with a
+    speech-like voice, not a tone, which both take for noise. Found on the way: AEC3 suppresses
+    a quiet near-end voice for its first seconds while the far end plays (§5.5).
 
 ### M6: Video (VP9)
 
@@ -537,7 +551,6 @@ Each is checked by the commit named, which settles it in its body and in the des
 | Assumption | Checked in | If it's wrong |
 |---|---|---|
 | The keyring works on GitHub's Windows and macOS runners, and GNOME Keyring on its Linux one (it does in a container here) | 11 (CI) | The keyring test is skipped in CI where it can't run, and the box's clients cover Linux |
-| PipeWire runs in a rootless container with a speaker-to-mic loopback | 28 | A virtual sink and source in the `cpal` test path only, without PipeWire |
 | libvpx builds and links on the Windows and macOS CI runners | 32 | A vendored static build through the binding's build script |
 | lavapipe renders offscreen in GitHub's Linux runners | 34 | `mic-render`'s pixel tests run in the box only |
 | `moq-vaapi` can take a VP9 decoder | 37 | VP9 decodes in software everywhere; the box's GPU is used for rendering |

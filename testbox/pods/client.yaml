@@ -1,6 +1,6 @@
 # A participant, @NAME@, in a pod of its own: all containers of a pod share a network namespace,
 # so shaping one participant's network takes a pod of its own. `cargo testbox up` plays one per
-# client from this file, filling in its name and the image placeholders.
+# client from this file, filling in its name, its voice and the image placeholders.
 {
   apiVersion: "v1",
   kind: "Pod",
@@ -13,18 +13,21 @@
       # The window (crates/mic-slint) on a display of its own (testbox/view/with-display), served
       # on a socket in target/testbox-view/@NAME@ for `cargo testbox vnc` and `shot`, with the
       # host's GPU. Driven by its harness, on a socket in target/testbox-run/@NAME@; its device
-      # secret in GNOME Keyring (keyring-session), under a home in that directory too, which
+      # secret in GNOME Keyring (client-session), under a home in that directory too, which
       # outlives the container. It trusts the relay by the box's CA.
       {
         name: "client",
         image: "@IMAGE:client@",
         args: [
           "/opt/mic/with-display", "/run/view/vnc", "1280x720", "--",
-          "keyring-session",
+          "client-session",
           "/opt/mic/mic",
           "--relay", "https://mic-testbox-relay:4443/",
           "--ca", "/keys/ca.pem",
           "--harness", "/run/mic/@NAME@",
+          # Its voice: a tone of its own and an analyzer for a speaker (xtask's `podman::tone`),
+          # or the box's PipeWire devices.
+          @VOICE@
         ],
         env: [
           # Plain logs: the record merges them into one timeline.

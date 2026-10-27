@@ -9,6 +9,7 @@
 // Every outcome is handled: a discarded `Result` would hide a failure.
 #![deny(clippy::let_underscore_must_use, clippy::let_underscore_untyped)]
 
+mod devices;
 mod view;
 
 use std::path::PathBuf;
@@ -18,7 +19,7 @@ use std::time::Duration;
 
 use clap::Parser;
 use mic_core::secrets::Keyring;
-use mic_core::{App, Client, Config, Invite, Profile, Room, Trust};
+use mic_core::{App, Client, Command, Config, Invite, Profile, Room, Trust};
 use slint::{ComponentHandle, Model, ModelRc, VecModel};
 use tokio::sync::watch;
 
@@ -46,6 +47,11 @@ struct Cli {
     #[cfg(all(unix, feature = "harness"))]
     #[arg(long)]
     harness: Option<PathBuf>,
+    /// Sends a tone at this many Hz for a voice, and plays the others into an analyzer the
+    /// harness reads, instead of devices: the box's synthetic microphone and speaker.
+    #[cfg(all(unix, feature = "harness"))]
+    #[arg(long)]
+    tone: Option<f64>,
     /// An invite to fill in, `mic://join/…`.
     invite: Option<String>,
 }
@@ -83,7 +89,29 @@ fn run(cli: Cli) -> Result<(), String> {
     let keyring = Keyring::system().map_err(|error| error.to_string())?;
     let client = Client::new(config, &keyring, runtime.handle().clone())
         .map_err(|error| error.to_string())?;
-    let app = App::new(client);
+    // The system's microphone and speaker; with the harness and `--tone`, the box's synthetic
+    // ones instead.
+    #[cfg(all(unix, feature = "harness"))]
+    let synthetic = cli
+        .tone
+        .map(|tone| mic_harness::synthetic::Synthetic::new(Some(tone)))
+        .transpose()
+        .map_err(|error| format!("the synthetic audio: {error}"))?;
+    #[cfg(all(unix, feature = "harness"))]
+    let devices = synthetic.is_none().then(devices::Devices::new);
+    #[cfg(not(all(unix, feature = "harness")))]
+    let devices = Some(devices::Devices::new());
+    #[cfg(all(unix, feature = "harness"))]
+    let app = match (&synthetic, &devices) {
+        (Some(synthetic), _) => App::with_media(client, synthetic.media()),
+        (None, Some(devices)) => App::with_media(client, devices.media()),
+        (None, None) => App::new(client),
+    };
+    #[cfg(not(all(unix, feature = "harness")))]
+    let app = match &devices {
+        Some(devices) => App::with_media(client, devices.media()),
+        None => App::new(client),
+    };
 
     select_backend()?;
     let window = AppWindow::new().map_err(|error| format!("the window: {error}"))?;
@@ -99,7 +127,14 @@ fn run(cli: Cli) -> Result<(), String> {
     let mut shown: Box<dyn Fn(&View)> = Box::new(|_| {});
     #[cfg(all(unix, feature = "harness"))]
     if let Some(socket) = cli.harness {
-        shown = harness::serve(&runtime, app.clone(), socket);
+        shown = harness::serve(
+            &runtime,
+            app.clone(),
+            socket,
+            synthetic
+                .as_ref()
+                .map(|synthetic| synthetic.analyzer.clone()),
+        );
     }
 
     window.on_join({
@@ -140,6 +175,22 @@ fn run(cli: Cli) -> Result<(), String> {
             if let Some(window) = window.upgrade() {
                 window.set_invite(Invite::new_room().to_mic_url().into());
             }
+        }
+    });
+    window.on_toggle_mute({
+        let app = app.clone();
+        let window = window.as_weak();
+        let runtime = runtime.handle().clone();
+        move || {
+            let Some(room) = app.current() else {
+                return;
+            };
+            let muted = window.upgrade().is_some_and(|window| window.get_muted());
+            runtime.spawn(async move {
+                if let Err(error) = room.command(Command::SetMuted { muted: !muted }).await {
+                    tracing::warn!(%error, "muting");
+                }
+            });
         }
     });
     window.on_leave({
@@ -245,6 +296,7 @@ fn apply(
     window.set_room_invite(view.invite.as_str().into());
     window.set_status(view.status.as_str().into());
     window.set_warning(view.warning.as_str().into());
+    window.set_muted(view.muted);
     let rows: Vec<Tile> = view
         .tiles
         .iter()
@@ -252,6 +304,7 @@ fn apply(
             key: tile.key.as_str().into(),
             name: tile.name.as_str().into(),
             me: tile.me,
+            muted: tile.muted,
         })
         .collect();
     if tiles.iter().ne(rows.iter().cloned()) {
@@ -345,6 +398,7 @@ mod harness {
         runtime: &tokio::runtime::Runtime,
         app: App,
         socket: PathBuf,
+        hearing: Option<mic_media::audio::Analyzer>,
     ) -> Box<dyn Fn(&View)> {
         let name = socket
             .file_name()
@@ -353,6 +407,7 @@ mod harness {
         let ui = Arc::new(Mutex::new(Ui {
             screen: "join".to_owned(),
             tiles: Vec::new(),
+            muted: Vec::new(),
         }));
         let source = ui.clone();
         let harness = Harness::new(
@@ -365,6 +420,10 @@ mod harness {
                     .clone()
             })),
         );
+        let harness = match hearing {
+            Some(analyzer) => harness.hearing(analyzer),
+            None => harness,
+        };
         let serving = harness.clone();
         runtime.spawn(async move {
             if let Err(error) = serving.serve(&socket).await {
@@ -378,6 +437,12 @@ mod harness {
             *ui.lock().unwrap_or_else(PoisonError::into_inner) = Ui {
                 screen: view.screen.name().to_owned(),
                 tiles: view.tiles.iter().map(|tile| tile.key.clone()).collect(),
+                muted: view
+                    .tiles
+                    .iter()
+                    .filter(|tile| tile.muted)
+                    .map(|tile| tile.key.clone())
+                    .collect(),
             };
             harness.ui_changed();
         })

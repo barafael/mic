@@ -20,7 +20,7 @@ use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::{mpsc, watch};
 
 use crate::{
-    Acted, Call, Done, Joined, LISTENING, Outcome, Pong, Pushed, Reply, Request, Snapshot,
+    Acted, Call, Done, Heard, Joined, LISTENING, Outcome, Pong, Pushed, Reply, Request, Snapshot,
     Subscribed, Ui, Unsubscribed,
 };
 
@@ -37,6 +37,8 @@ struct Inner {
     app: App,
     name: String,
     ui: Option<UiSource>,
+    /// What its speaker heard, if its speaker is an analyzer.
+    hearing: Option<mic_media::audio::Analyzer>,
     /// Bumped on every change of what a snapshot shows; subscribers follow it.
     changes: watch::Sender<u64>,
 }
@@ -59,9 +61,20 @@ impl Harness {
                 app,
                 name: name.to_owned(),
                 ui,
+                hearing: None,
                 changes: watch::channel(0).0,
             }),
         }
+    }
+
+    /// The harness, answering [`Call::Heard`](crate::Call::Heard) from `analyzer`: what the
+    /// client's speaker, an analyzer, heard. Call it before serving.
+    pub fn hearing(mut self, analyzer: mic_media::audio::Analyzer) -> Self {
+        match Arc::get_mut(&mut self.inner) {
+            Some(inner) => inner.hearing = Some(analyzer),
+            None => tracing::warn!("a harness given its hearing once it serves: ignored"),
+        }
+        self
     }
 
     /// Tells subscribers that what the UI shows changed: a frontend calls it after it redraws.
@@ -72,14 +85,7 @@ impl Harness {
     /// Serves on a socket at `path` (one left there from before is replaced), the owner's only,
     /// until the listener fails. Logs [`LISTENING`] once it listens.
     pub async fn serve(&self, path: &Path) -> std::io::Result<()> {
-        match std::fs::remove_file(path) {
-            Ok(()) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error),
-        }
-        let listener = UnixListener::bind(path)?;
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+        let listener = bind_private(path)?;
         let _following = Task(tokio::spawn(self.clone().follow()));
         tracing::info!(socket = %path.display(), "{LISTENING}");
         println!("{LISTENING}");
@@ -125,8 +131,8 @@ impl Harness {
             let id = request.id;
             // False once the writer is gone: then so is the connection.
             let sent = match request.call {
-                Call::Ping => send(&out, &reply(id, Ok(self.pong()))),
-                Call::Snapshot => send(&out, &reply(id, Ok(self.snapshot()))),
+                Call::Ping => answer(&out, id, Ok(self.pong())),
+                Call::Snapshot => answer(&out, id, Ok(self.snapshot())),
                 Call::Subscribe => {
                     if let Some(former) = pushing.take() {
                         former.abort();
@@ -135,19 +141,18 @@ impl Harness {
                     // missed, and none is pushed before the reply.
                     let mut changes = self.inner.changes.subscribe();
                     let seq = *changes.borrow_and_update();
-                    let sent = send(&out, &reply(id, Ok(Subscribed { seq })));
+                    let sent = answer(&out, id, Ok(Subscribed { seq }));
                     pushing = Some(tokio::spawn(self.clone().push(out.clone(), changes)));
                     sent
                 }
                 Call::Unsubscribe => {
                     let ok = pushing.take().map(|task| task.abort()).is_some();
-                    send(&out, &reply(id, Ok(Unsubscribed { ok })))
+                    answer(&out, id, Ok(Unsubscribed { ok }))
                 }
-                Call::Join { invite, name } => {
-                    send(&out, &reply(id, self.join(&invite, &name).await))
-                }
-                Call::Act { command } => send(&out, &reply(id, self.act(command).await)),
-                Call::Reset => send(&out, &reply(id, Ok(self.reset().await))),
+                Call::Join { invite, name } => answer(&out, id, self.join(&invite, &name).await),
+                Call::Act { command } => answer(&out, id, self.act(command).await),
+                Call::Reset => answer(&out, id, Ok(self.reset().await)),
+                Call::Heard { frequencies } => answer(&out, id, self.heard(&frequencies)),
             };
             if !sent {
                 break;
@@ -250,6 +255,21 @@ impl Harness {
         Ok(Acted { ok: true })
     }
 
+    fn heard(&self, frequencies: &[f64]) -> Result<Heard, String> {
+        let analyzer = self
+            .inner
+            .hearing
+            .as_ref()
+            .ok_or("its speaker isn't an analyzer: it can't say what it heard")?;
+        Ok(Heard {
+            levels: frequencies
+                .iter()
+                .map(|&frequency| analyzer.level(frequency))
+                .collect(),
+            rms: analyzer.rms(),
+        })
+    }
+
     /// Leaves the room it's in, if any.
     async fn reset(&self) -> Done {
         Done {
@@ -258,11 +278,57 @@ impl Harness {
     }
 }
 
+/// A listener at `path`, never reachable by anyone but the owner: bound inside a directory of
+/// its own, the owner's only, made private there, then moved into place. Binding at `path` and
+/// restricting it after would leave a moment in which anyone who can reach the directory could
+/// connect. The move replaces a socket left at `path` from before.
+fn bind_private(path: &Path) -> std::io::Result<UnixListener> {
+    use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+    let parent = path.parent().unwrap_or(Path::new("."));
+    let name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let staging = parent.join(format!(".{name}.{}.binding", std::process::id()));
+    // One left by a former process of this id, which can only be ours.
+    match std::fs::remove_dir_all(&staging) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+    std::fs::DirBuilder::new().mode(0o700).create(&staging)?;
+    let staged = staging.join("socket");
+    let bound = UnixListener::bind(&staged).and_then(|listener| {
+        std::fs::set_permissions(&staged, std::fs::Permissions::from_mode(0o600))?;
+        std::fs::rename(&staged, path)?;
+        Ok(listener)
+    });
+    let removed = std::fs::remove_dir_all(&staging);
+    let listener = bound?;
+    removed?;
+    Ok(listener)
+}
+
 fn reply<T>(id: u64, result: Result<T, String>) -> Reply<T> {
     Reply {
         id,
         outcome: result.into(),
     }
+}
+
+/// The reply to `id` as a line to `out`, or an error reply if it doesn't serialize, so the
+/// request is answered either way; false once `out` is closed.
+fn answer<T: Serialize>(
+    out: &mpsc::UnboundedSender<String>,
+    id: u64,
+    result: Result<T, String>,
+) -> bool {
+    let line = serde_json::to_string(&reply(id, result)).unwrap_or_else(|error| {
+        tracing::warn!(%error, "a harness reply didn't serialize");
+        let failed = reply::<()>(id, Err(format!("the reply didn't serialize: {error}")));
+        serde_json::to_string(&failed).unwrap_or_default()
+    });
+    out.send(line).is_ok()
 }
 
 /// `message` as a line to `out`; false once `out` is closed.

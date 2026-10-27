@@ -14,6 +14,9 @@ ed25519-dalek = "3.0.0"
 getrandom = "0.4.3"
 hkdf = "0.13.0"
 keyring-core = "1.0.1"
+mic-media = { version = "0.1.0", path = "../mic-media" }
+# Opus only: no AAC, and no devices (mic-media has those).
+moq-audio = { version = "=0.1.16", default-features = false }
 moq-e2ee = "=0.0.17"
 moq-net = "=0.3.16"
 moq-tokio = { version = "=0.19.29", default-features = false, features = ["noq", "aws-lc-rs", "websocket"] }

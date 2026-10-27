@@ -9,6 +9,7 @@ export struct Tile {
     key: string,
     name: string,
     me: bool,
+    muted: bool,
 }
 
 component NameTile inherits Rectangle {
@@ -23,6 +24,13 @@ component NameTile inherits Rectangle {
         vertical-alignment: center;
         wrap: word-wrap;
         width: parent.width - 16px;
+    }
+    if tile.muted: Text {
+        x: 8px;
+        y: parent.height - self.height - 8px;
+        text: "muted";
+        color: #ffb0b0;
+        font-size: 14px;
     }
 }
 
@@ -87,7 +95,9 @@ component RoomScreen inherits VerticalBox {
     in property <string> invite;
     in property <string> status;
     in property <string> warning;
+    in property <bool> muted;
     callback leave();
+    callback toggle-mute();
     // As square a grid as the tiles make.
     property <int> columns: Math.max(1, Math.ceil(Math.sqrt(root.tiles.length)));
     property <int> rows: Math.max(1, Math.ceil(root.tiles.length / root.columns));
@@ -97,6 +107,12 @@ component RoomScreen inherits VerticalBox {
             text: root.invite;
             read-only: true;
             accessible-label: "The room's invite";
+        }
+        Button {
+            text: root.muted ? "Unmute" : "Mute";
+            clicked => {
+                root.toggle-mute();
+            }
         }
         Button {
             text: "Leave";
@@ -142,9 +158,11 @@ export component AppWindow inherits Window {
     in property <string> room-invite;
     in property <string> status;
     in property <string> warning;
+    in property <bool> muted;
     callback join(string, string);
     callback new-room();
     callback leave();
+    callback toggle-mute();
 
     about := PopupWindow {
         x: (root.width - 320px) / 2;
@@ -186,8 +204,12 @@ export component AppWindow inherits Window {
             invite: root.room-invite;
             status: root.status;
             warning: root.warning;
+            muted: root.muted;
             leave => {
                 root.leave();
+            }
+            toggle-mute => {
+                root.toggle-mute();
             }
         }
         HorizontalLayout {

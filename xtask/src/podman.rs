@@ -27,9 +27,29 @@ pub const VIEW: &str = "target/testbox-view";
 /// A directory per client for its harness's socket, which only that client mounts.
 pub const RUN: &str = "target/testbox-run";
 /// The clients `up` plays, each a pod of its own from testbox/pods/client.yaml: a window.
-pub const CLIENTS: [&str; 2] = ["alice", "bob"];
+/// alice and bob send tones and listen through analyzers; carol uses the box's PipeWire devices.
+pub const CLIENTS: [&str; 3] = ["alice", "bob", "carol"];
+/// The tone a client sends for a voice, in Hz, if it sends one (crates/mic-harness,
+/// `synthetic`): apart from each other and from their harmonics, so an analyzer tells whose it
+/// hears. One that doesn't uses its PipeWire devices.
+pub fn tone(client: &str) -> Option<u32> {
+    match client {
+        "alice" => Some(440),
+        "bob" => Some(660),
+        _ => None,
+    }
+}
+
+/// What a client pod's `@VOICE@` line says: its tone, or that its devices are the box's.
+fn voice(client: &str) -> String {
+    match tone(client) {
+        Some(tone) => format!("\"--tone\", \"{tone}\","),
+        None => "# No tone: the box's PipeWire speaker and microphone.".to_owned(),
+    }
+}
+
 /// The pods with a display: the probe's, and each client's.
-pub const DISPLAYS: [&str; 3] = ["probe", "alice", "bob"];
+pub const DISPLAYS: [&str; 4] = ["probe", "alice", "bob", "carol"];
 
 /// A pod of the box, from `testbox/pods/<name>.yaml`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -329,7 +349,9 @@ impl TestBox {
                 .ok_or_else(|| Error::Failed(format!("{}: no image {name}", source.display())))?
                 .tag(&self.repo)
         })?;
-        Ok(gpu_lines(&rendered, self.settings.gpu).replace("@NAME@", pod.name()))
+        Ok(gpu_lines(&rendered, self.settings.gpu)
+            .replace("@NAME@", pod.name())
+            .replace("@VOICE@", &voice(pod.name())))
     }
 
     /// Stops and removes the box's pods; `wipe` also removes the builder, and then every volume

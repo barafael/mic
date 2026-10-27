@@ -54,6 +54,12 @@ pub enum Command {
     Leave,
     /// Be called this, for everyone in the room.
     SetName { name: String },
+    /// Send no voice, or send it again; everyone's tile of this participant says which.
+    SetMuted { muted: bool },
+    /// Take the noise out of the voice with this suppressor, or none.
+    SetNoiseSuppression {
+        mode: mic_media::audio::noise::NoiseSuppression,
+    },
 }
 
 /// One-off things that happen in a room, beside its state.
@@ -113,6 +119,14 @@ pub(crate) struct Joined {
     pub url: url::Url,
     pub origin: moq_net::origin::Producer,
     pub runtime: tokio::runtime::Handle,
+    /// Sends this participant's voice, if it has one.
+    pub voice: Option<tokio::task::JoinHandle<()>>,
+    /// Whether the voice is muted, which it follows.
+    pub muted: watch::Sender<bool>,
+    /// What suppresses the voice's noise, which it follows.
+    pub noise: watch::Sender<mic_media::audio::noise::NoiseSuppression>,
+    /// Where the others' voices play, if anywhere.
+    pub mixer: Option<mic_media::audio::Mixer>,
 }
 
 impl Room {
@@ -147,6 +161,7 @@ impl Room {
             joined.crypto,
             shared.invite.room,
             roster,
+            joined.mixer,
         ));
         let task = Task {
             publication: joined.publication,
@@ -157,6 +172,9 @@ impl Room {
             url: joined.url,
             origin: joined.origin,
             following,
+            voice: joined.voice,
+            muted: joined.muted,
+            noise: joined.noise,
             roster: followed,
             state,
             events,
@@ -264,6 +282,10 @@ struct Task {
     /// What the session publishes and subscribes to; a new connection takes it up as it was.
     origin: moq_net::origin::Producer,
     following: tokio::task::JoinHandle<()>,
+    /// Sends the voice, until the room is left.
+    voice: Option<tokio::task::JoinHandle<()>>,
+    muted: watch::Sender<bool>,
+    noise: watch::Sender<mic_media::audio::noise::NoiseSuppression>,
     roster: watch::Receiver<Roster>,
     state: watch::Sender<RoomState>,
     events: broadcast::Sender<Event>,
@@ -314,15 +336,32 @@ impl Task {
                 self.leave().await;
                 Ok(())
             }
-            Command::SetName { name } => {
-                let profile = Profile::new(&name);
-                let track = self.profile_track.as_mut().ok_or(Error::Left)?;
-                roster::write_profile(track, &profile)?;
-                self.profile = profile.clone();
-                self.state.send_modify(|state| state.me.profile = profile);
+            Command::SetName { name } => self.set_profile(Profile {
+                muted: self.profile.muted,
+                ..Profile::new(&name)
+            }),
+            Command::SetMuted { muted } => {
+                self.set_profile(Profile {
+                    muted,
+                    ..self.profile.clone()
+                })?;
+                self.muted.send_replace(muted);
+                Ok(())
+            }
+            Command::SetNoiseSuppression { mode } => {
+                self.noise.send_replace(mode);
                 Ok(())
             }
         }
+    }
+
+    /// `profile`, for everyone in the room, and in the state.
+    fn set_profile(&mut self, profile: Profile) -> Result<(), Error> {
+        let track = self.profile_track.as_mut().ok_or(Error::Left)?;
+        roster::write_profile(track, &profile)?;
+        self.profile = profile.clone();
+        self.state.send_modify(|state| state.me.profile = profile);
+        Ok(())
     }
 
     /// What the connection said into the state. A connection gives up after its redial window;
@@ -390,6 +429,9 @@ impl Task {
     /// that doesn't drain in time is closed all the same.
     async fn leave(&mut self) {
         self.following.abort();
+        if let Some(voice) = self.voice.take() {
+            voice.abort();
+        }
         let Some(connection) = self.connection.take() else {
             return;
         };
@@ -412,6 +454,9 @@ impl Task {
 impl Drop for Task {
     fn drop(&mut self) {
         self.following.abort();
+        if let Some(voice) = &self.voice {
+            voice.abort();
+        }
     }
 }
 

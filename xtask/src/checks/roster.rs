@@ -61,7 +61,7 @@ pub fn roster(checks: &mut Checks, the_box: &TestBox) -> Result<()> {
         Ok(())
     });
     checks.record("bob joins from his window", || {
-        type_into(the_box, "bob", "Bob", &invite)?;
+        super::window::type_join(the_box, "bob", "Bob", &invite)?;
         bob.wait_for_snapshot("in the room, shown", PATIENCE, shows_room)?;
         alice.wait_for("with Bob", PATIENCE, |state| names(state) == ["Bob"])?;
         Ok(())
@@ -141,54 +141,15 @@ fn keys(room: &RoomState) -> Vec<String> {
         .collect()
 }
 
-/// Types `name` and `invite` into `client`'s join screen, as a person would, and presses Enter:
-/// the window gets the keyboard (Xvnc has no window manager to give it), the name field has the
-/// focus when the screen shows, Tab moves to the invite's, and each is emptied first
-/// (crates/mic-slint/ui/app.slint, `JoinScreen`).
-fn type_into(the_box: &TestBox, client: &'static str, name: &str, invite: &Invite) -> Result<()> {
-    let invite = invite.to_mic_url();
-    // One xdotool for each `type`, which takes every argument after it as text.
-    let steps: [&[&str]; 5] = [
-        &[
-            "search",
-            "--sync",
-            "--name",
-            "^mic$",
-            "windowfocus",
-            "--sync",
-            "key",
-            "ctrl+a",
-        ],
-        &["type", "--delay", "10", name],
-        &["key", "Tab", "ctrl+a"],
-        &["type", "--delay", "2", &invite],
-        &["key", "Return"],
-    ];
-    for step in steps {
-        let command: Vec<&str> = ["env", "DISPLAY=:1", "xdotool"]
-            .into_iter()
-            .chain(step.iter().copied())
-            .collect();
-        let typed = the_box.exec(&view::container(client), &command)?;
-        if !typed.status.success() {
-            return Err(Error::Failed(format!(
-                "xdotool {step:?} in {client}: {}",
-                String::from_utf8_lossy(&typed.stderr).trim()
-            )));
-        }
-    }
-    Ok(())
-}
-
 /// The colours of a window's tiles: this participant's, and another's
 /// (crates/mic-slint/ui/app.slint, `NameTile`).
 const TILES: [[u8; 3]; 2] = [[0x2b, 0x4a, 0x6b], [0x3a, 0x3a, 0x44]];
 
-/// A screenshot of each client's display, kept in the record, shows both kinds of tile, within
+/// A screenshot of alice's and bob's displays, kept in the record, shows both kinds of tile, within
 /// the patience: the window draws a moment after its harness says what it shows.
 fn windows_drawn(the_box: &TestBox, directory: &Path) -> Result<()> {
     let tool = view::tool(the_box.repo(), "testbox-shot")?;
-    for client in crate::podman::CLIENTS {
+    for client in ["alice", "bob"] {
         let display = format!("{client}={}", the_box.view_socket(client).display());
         let path = directory.join(format!("roster-{client}.png"));
         let deadline = std::time::Instant::now() + PATIENCE;

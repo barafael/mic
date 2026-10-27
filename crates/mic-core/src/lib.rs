@@ -6,6 +6,7 @@
 #![deny(clippy::let_underscore_must_use, clippy::let_underscore_untyped)]
 
 pub mod app;
+pub mod audio;
 pub mod catalog;
 pub mod invite;
 pub mod keys;
@@ -22,7 +23,7 @@ pub use keys::{DeviceSecret, RoomKey};
 pub use room::{Command, Connection, Event, Room, RoomState};
 pub use roster::{Participant, ParticipantKey, Profile, Roster};
 pub use secrets::{SecretStore, device_secret};
-pub use session::{Client, Config, Trust};
+pub use session::{Client, Config, Media, Trust};
 
 /// `N` bytes from the operating system's random generator.
 pub(crate) fn random<const N: usize>() -> [u8; N] {

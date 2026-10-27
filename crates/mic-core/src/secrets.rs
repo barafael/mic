@@ -21,6 +21,12 @@ pub trait SecretStore: Send + Sync {
     /// The secret kept, if any.
     fn load(&self) -> Result<Option<DeviceSecret>, SecretError>;
     fn save(&self, secret: &DeviceSecret) -> Result<(), SecretError>;
+
+    /// A name other processes share for this store, if they share it: [`device_secret`] holds a
+    /// lock by it while it looks for a secret and saves a new one.
+    fn shared_as(&self) -> Option<&str> {
+        None
+    }
 }
 
 #[derive(Debug, Display, Error)]
@@ -35,14 +41,41 @@ pub enum SecretError {
     Malformed,
 }
 
-/// The device's secret from `store`, made and kept there if it has none yet.
+/// The device's secret from `store`, made and kept there if it has none yet. Two processes that
+/// start for the first time at once get the same one: for a store they share, the look and the
+/// save happen under a lock of the user's, so the second finds what the first saved.
 pub fn device_secret(store: &dyn SecretStore) -> Result<DeviceSecret, SecretError> {
+    let _locked = store.shared_as().and_then(lock);
     if let Some(secret) = store.load()? {
         return Ok(secret);
     }
     let secret = DeviceSecret::random();
     store.save(&secret)?;
     Ok(secret)
+}
+
+/// A lock file of the user's for the store `name`, held until the file is dropped; none if it
+/// can't be had, and then the store is used as it is. In the user's runtime directory on Linux
+/// and the BSDs, the user's temporary directory elsewhere (both the user's own). It's advisory
+/// and blocks: another process holds it only for a keyring call or two.
+fn lock(name: &str) -> Option<std::fs::File> {
+    let directory = std::env::var_os("XDG_RUNTIME_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir);
+    let path = directory.join(format!("{name}.device-secret.lock"));
+    let locked = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&path)
+        .and_then(|file| file.lock().map(|()| file));
+    match locked {
+        Ok(file) => Some(file),
+        Err(error) => {
+            tracing::warn!(%error, path = %path.display(), "the device secret's lock");
+            None
+        }
+    }
 }
 
 /// The system keyring, under a service name: `mic` for the app's own secret.
@@ -81,6 +114,10 @@ impl Keyring {
 }
 
 impl SecretStore for Keyring {
+    fn shared_as(&self) -> Option<&str> {
+        Some(&self.service)
+    }
+
     fn load(&self) -> Result<Option<DeviceSecret>, SecretError> {
         match self.entry()?.get_secret() {
             Ok(mut bytes) => {
@@ -183,5 +220,40 @@ mod tests {
         assert_eq!(device_secret(&keyring).unwrap(), made);
         keyring.forget().unwrap();
         assert_eq!(keyring.load().unwrap(), None);
+    }
+
+    /// A store shared by name whose look and save are slow, as a keyring's D-Bus calls can be.
+    struct Slow<'a>(&'a InMemory, &'a str);
+
+    impl SecretStore for Slow<'_> {
+        fn load(&self) -> Result<Option<DeviceSecret>, SecretError> {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            self.0.load()
+        }
+
+        fn save(&self, secret: &DeviceSecret) -> Result<(), SecretError> {
+            self.0.save(secret)
+        }
+
+        fn shared_as(&self) -> Option<&str> {
+            Some(self.1)
+        }
+    }
+
+    #[test]
+    fn two_first_starts_at_once_get_one_secret() {
+        let store = InMemory::default();
+        let name = format!("mic-test-{}", crate::invite::RoomId::random());
+        let secrets: Vec<DeviceSecret> = std::thread::scope(|scope| {
+            let starts: Vec<_> = (0..4)
+                .map(|_| scope.spawn(|| device_secret(&Slow(&store, &name)).unwrap()))
+                .collect();
+            starts
+                .into_iter()
+                .map(|start| start.join().unwrap())
+                .collect()
+        });
+        assert!(secrets.windows(2).all(|pair| pair[0] == pair[1]));
+        assert_eq!(store.load().unwrap().as_ref(), Some(&secrets[0]));
     }
 }

@@ -9,7 +9,7 @@ use tokio::sync::{Mutex, watch};
 use crate::Invite;
 use crate::room::{Command, Room};
 use crate::roster::Profile;
-use crate::session::{Client, Error};
+use crate::session::{Client, Error, Media};
 
 /// A client, and the room it's in. Cheap to clone; every clone is the same.
 #[derive(Clone)]
@@ -17,8 +17,12 @@ pub struct App {
     inner: Arc<Inner>,
 }
 
+/// What each join sends and plays: a fresh capture each time, since a capture is one stream.
+pub type MediaFactory = Box<dyn Fn() -> Media + Send + Sync>;
+
 struct Inner {
     client: Client,
+    media: Option<MediaFactory>,
     room: watch::Sender<Option<Room>>,
     /// Held through a join or a leave, so two never interleave: a leave can't miss the room a
     /// join is about to put in place.
@@ -26,11 +30,22 @@ struct Inner {
 }
 
 impl App {
-    /// `client`, in no room yet.
+    /// `client`, in no room yet, sending and playing no audio.
     pub fn new(client: Client) -> Self {
+        Self::build(client, None)
+    }
+
+    /// `client`, in no room yet, joining each room with what `media` makes: its voice, and
+    /// where the others' play.
+    pub fn with_media(client: Client, media: impl Fn() -> Media + Send + Sync + 'static) -> Self {
+        Self::build(client, Some(Box::new(media)))
+    }
+
+    fn build(client: Client, media: Option<MediaFactory>) -> Self {
         Self {
             inner: Arc::new(Inner {
                 client,
+                media,
                 room: watch::channel(None).0,
                 changing: Mutex::new(()),
             }),
@@ -56,7 +71,13 @@ impl App {
     pub async fn join(&self, invite: Invite, profile: Profile) -> Result<Room, Error> {
         let _changing = self.inner.changing.lock().await;
         self.leave_now().await;
-        let room = self.inner.client.join(invite, profile).await?;
+        let media = self
+            .inner
+            .media
+            .as_ref()
+            .map(|media| media())
+            .unwrap_or_default();
+        let room = self.inner.client.join_with(invite, profile, media).await?;
         self.inner.room.send_replace(Some(room.clone()));
         Ok(room)
     }

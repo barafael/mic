@@ -27,9 +27,9 @@ jobs:
       # rustup on the runners installs the toolchain rust-toolchain.toml pins, with its components.
       - run: rustup show active-toolchain
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      # What mic's Slint window links against on Linux.
+      # What mic links against on Linux: Slint's window, and cpal's ALSA.
       - if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev libxkbcommon-dev
+        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev libxkbcommon-dev libasound2-dev
       - run: cargo fmt --all -- --check
       # Every feature: the window's harness too.
       - run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
@@ -65,7 +65,7 @@ jobs:
         with:
           persist-credentials: false
       - if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev libxkbcommon-dev
+        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev libxkbcommon-dev libasound2-dev
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - run: cargo build --release --locked -p mic-slint
       # Git Bash on Windows finds mic.exe by this name too.

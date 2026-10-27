@@ -180,3 +180,29 @@ async fn a_room_the_frontend_joins_is_the_harnesss_too() {
     .await
     .unwrap();
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_socket_is_the_owners_only_and_replaces_a_former_one() {
+    use std::os::unix::fs::PermissionsExt;
+    let relay = TestRelay::start().await.unwrap();
+    let directory = std::env::temp_dir().join(format!("mic-harness-mode-{}", std::process::id()));
+    std::fs::create_dir_all(&directory).unwrap();
+    // A socket file left from a former run.
+    let former = std::os::unix::net::UnixListener::bind(directory.join("erin"));
+    drop(former);
+    let (socket, _) = serve(&relay, "erin", &directory);
+    tokio::task::spawn_blocking(move || {
+        let mut client = connect(&socket);
+        let _pong: Pong = client.call(Call::Ping).unwrap();
+        let mode = std::fs::metadata(&socket).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600, "{mode:o}");
+        let left: Vec<_> = std::fs::read_dir(socket.parent().unwrap())
+            .unwrap()
+            .flatten()
+            .filter(|entry| entry.file_name().to_string_lossy().ends_with(".binding"))
+            .collect();
+        assert!(left.is_empty(), "{left:?}");
+    })
+    .await
+    .unwrap();
+}

@@ -129,9 +129,17 @@ fn main() -> ExitCode {
     let repo = repo_root();
     let command = Cli::parse().command;
     // `up` brings up the box its flags say, and keeps them; the rest take the box as it was
-    // brought up.
+    // brought up. `down` plays nothing, so settings it can't read don't stop it: it takes the
+    // box down all the same.
     let the_box = match &command {
         Command::Up { no_gpu } => Ok(TestBox::with(&repo, settings::Settings { gpu: !no_gpu })),
+        Command::Down { .. } => Ok(TestBox::with(
+            &repo,
+            settings::Settings::saved(&repo).unwrap_or_else(|reason| {
+                eprintln!("testbox: {reason}; taking the box down all the same");
+                settings::Settings::default()
+            }),
+        )),
         _ => TestBox::new(&repo),
     };
     let the_box = match the_box {

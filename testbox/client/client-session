@@ -1,0 +1,32 @@
+#!/bin/sh
+# A participant's session, as on a desktop, then the command in this process (exec), so the stop
+# signals with-display hands on reach it:
+#
+# - a session bus, with GNOME Keyring's Secret Service on it, unlocked: the device secret comes
+#   from the keyring (D16). The keyring lives under $HOME, which outlives the container, so the
+#   secret, and the participant's key with it, survive a restart;
+# - PipeWire and WirePlumber, with the box's speaker and microphone (box-devices.conf), which mic
+#   reaches through ALSA, as cpal does.
+set -eu
+mkdir -p "$HOME"
+DBUS_SESSION_BUS_ADDRESS=$(dbus-daemon --session --fork --print-address=1 --nopidfile)
+export DBUS_SESSION_BUS_ADDRESS
+# Unlocked with a password the box doesn't keep secret, which makes the login keyring the first
+# time; the daemon forks, and prints what to export.
+eval "$(printf box | gnome-keyring-daemon --daemonize --unlock --components=secrets)"
+export GNOME_KEYRING_CONTROL
+# For the life of the container; their logs are in /tmp.
+pipewire >/tmp/pipewire.log 2>&1 &
+wireplumber >/tmp/wireplumber.log 2>&1 &
+# Until the devices are the defaults: a client that starts sooner would find none.
+tries=0
+until wpctl inspect @DEFAULT_AUDIO_SINK@ 2>/dev/null | grep -q 'node.name = "speaker"' \
+    && wpctl inspect @DEFAULT_AUDIO_SOURCE@ 2>/dev/null | grep -q 'node.name = "microphone"'; do
+    tries=$((tries + 1))
+    if [ "$tries" -gt 100 ]; then
+        echo "client-session: the box's audio devices aren't the defaults after 10 s" >&2
+        break
+    fi
+    sleep 0.1
+done
+exec "$@"

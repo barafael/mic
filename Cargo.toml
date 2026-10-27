@@ -4,6 +4,7 @@ members = [
     "crates/mic-core",
     "crates/mic-crowd",
     "crates/mic-harness",
+    "crates/mic-media",
     "crates/mic-slint",
     "crates/mic-testrelay",
     "testbox/forger",
