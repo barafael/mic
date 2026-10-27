@@ -223,6 +223,10 @@ impl Inner {
         // participant finds its name.
         let mut profile_track = publication.track(roster::PROFILE)?;
         roster::write_profile(&mut profile_track, &profile)?;
+        let saying = crate::chat::Saying::new(
+            publication.track(crate::chat::CHAT)?,
+            publication.track(crate::chat::REACTIONS)?,
+        );
         let (muted, follows) = tokio::sync::watch::channel(false);
         let (noise, noise_follows) = tokio::sync::watch::channel(media.noise);
         let voice = match media.capture {
@@ -257,6 +261,7 @@ impl Inner {
             publication,
             profile,
             profile_track,
+            saying,
             connection,
             moq: self.moq.clone(),
             url,

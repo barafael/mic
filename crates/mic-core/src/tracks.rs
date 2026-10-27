@@ -142,6 +142,9 @@ fn policy(semantic: &str) -> Option<(u8, std::time::Duration)> {
         crate::audio::AUDIO => Some((100, Duration::from_millis(500))),
         SIG => Some((90, Duration::from_secs(1))),
         crate::video::CAMERA => Some((50, Duration::from_secs(2))),
+        // Below the media; a message late is still worth having, a reaction isn't.
+        crate::chat::CHAT => Some((30, Duration::from_secs(30))),
+        crate::chat::REACTIONS => Some((30, Duration::from_secs(1))),
         _ => None,
     }
 }

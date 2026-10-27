@@ -17,6 +17,10 @@ use crate::tracks::{Peers, Publication, RoomCrypto};
 
 /// How many events a slow reader may fall behind by before it misses some.
 const EVENTS: usize = 256;
+/// How many messages the state keeps, the newest.
+pub const CHAT_KEPT: usize = 500;
+/// How many reactions the state keeps, the newest.
+pub const REACTIONS_KEPT: usize = 32;
 
 /// What a frontend shows of a room: plain data, no toolkit types.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -38,6 +42,32 @@ pub struct RoomState {
     /// The others speaking now.
     #[serde(default)]
     pub speaking: Vec<ParticipantKey>,
+    /// The chat since this participant joined, oldest first, its own messages among them: the
+    /// newest [`CHAT_KEPT`].
+    #[serde(default)]
+    pub chat: Vec<Message>,
+    /// The newest reactions, this participant's among them: the newest [`REACTIONS_KEPT`].
+    #[serde(default)]
+    pub reactions: Vec<Reacted>,
+}
+
+/// A chat message.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Message {
+    pub from: ParticipantKey,
+    /// Its sender's name when it came.
+    pub name: String,
+    pub text: String,
+}
+
+/// A reaction, as it came.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Reacted {
+    /// Counts the reactions this participant saw in the room, from 0: what tells two of the same
+    /// apart.
+    pub seq: u64,
+    pub from: ParticipantKey,
+    pub reaction: crate::chat::Reaction,
 }
 
 /// The room's session with the relay.
@@ -69,6 +99,13 @@ pub enum Command {
     SetNoiseSuppression {
         mode: mic_media::audio::noise::NoiseSuppression,
     },
+    /// Say `text` in the chat: trimmed, and cut to `chat::TEXT_LIMIT` characters; nothing is
+    /// said if nothing's left.
+    Say { text: String },
+    /// React, for everyone in the room.
+    React { reaction: crate::chat::Reaction },
+    /// Raise a hand, or lower it; everyone's tile of this participant says which.
+    SetHand { raised: bool },
     /// Show the cameras of these participants only, as a frontend's visible tiles do; every
     /// camera with none (as at the start). Only those are subscribed to and decoded (§5.8).
     Watch {
@@ -86,6 +123,10 @@ pub enum Event {
     Departed { participant: Participant },
     /// A broadcast in the room didn't stand, and nothing of it is shown.
     Rejected { rejected: Rejected },
+    /// A message in the chat, this participant's own among them.
+    Said { message: Message },
+    /// A reaction, this participant's own among them.
+    Reacted { reacted: Reacted },
 }
 
 /// A room joined. Cheap to clone; every clone is the same room.
@@ -129,6 +170,7 @@ pub(crate) struct Joined {
     pub publication: Publication,
     pub profile: Profile,
     pub profile_track: crate::sig::SignedTrack,
+    pub saying: crate::chat::Saying,
     pub connection: moq_tokio::Connection,
     /// What the room dials again with, once a connection gives up.
     pub moq: moq_tokio::Client,
@@ -168,6 +210,8 @@ impl Room {
             connection: Connection::Connected,
             speaker: None,
             speaking: Vec::new(),
+            chat: Vec::new(),
+            reactions: Vec::new(),
         });
         let (events, _) = broadcast::channel(EVENTS);
         let weak_events = events.downgrade();
@@ -187,6 +231,7 @@ impl Room {
         let voices = crate::speaker::Voices::default();
         let (watching, watched_cameras) = watch::channel(None);
         let (speaker, followed_speaker) = watch::channel(None);
+        let (heard, hearing) = mpsc::unbounded_channel();
         let following = joined.runtime.spawn(roster::follow(
             peers,
             joined.crypto,
@@ -199,12 +244,17 @@ impl Room {
                 voices: voices.clone(),
                 watching: watched_cameras,
                 speaker: followed_speaker,
+                heard,
             },
         ));
         let task = Task {
             publication: joined.publication,
             profile: joined.profile,
             profile_track: Some(joined.profile_track),
+            saying: Some(joined.saying),
+            hearing,
+            heard_last: std::collections::HashMap::new(),
+            reactions_seen: 0,
             connection: Some(joined.connection),
             moq: joined.moq,
             url: joined.url,
@@ -329,6 +379,15 @@ struct Task {
     profile: Profile,
     /// Until the room is left.
     profile_track: Option<crate::sig::SignedTrack>,
+    /// The chat and reactions tracks, until the room is left.
+    saying: Option<crate::chat::Saying>,
+    /// What the others say.
+    hearing: mpsc::UnboundedReceiver<crate::chat::Heard>,
+    /// By broadcast and track, the count of the last thing heard on it: what's heard again is
+    /// shown once.
+    heard_last: std::collections::HashMap<(String, bool), u64>,
+    /// How many reactions were seen.
+    reactions_seen: u64,
     /// Until the room is left.
     connection: Option<moq_tokio::Connection>,
     moq: moq_tokio::Client,
@@ -392,8 +451,63 @@ impl Task {
                 }
                 status = status(&mut self.connection) => self.status(status),
                 _ = looking.tick() => self.look_at_speakers(),
+                Some(heard) = self.hearing.recv() => self.heard(heard),
             }
         }
+    }
+
+    /// What someone said into the state and the events, unless it was heard before.
+    fn heard(&mut self, heard: crate::chat::Heard) {
+        use crate::chat::Said;
+        let key = (heard.path, matches!(heard.said, Said::Message { .. }));
+        if self
+            .heard_last
+            .get(&key)
+            .is_some_and(|last| heard.n <= *last)
+        {
+            return;
+        }
+        self.heard_last.insert(key, heard.n);
+        self.said(heard.from, heard.said);
+    }
+
+    /// `said` by `from`, into the state and the events.
+    fn said(&mut self, from: ParticipantKey, said: crate::chat::Said) {
+        use crate::chat::Said;
+        let event = match said {
+            Said::Message { text } => {
+                let name = {
+                    let state = self.state.borrow();
+                    std::iter::once(&state.me)
+                        .chain(&state.participants)
+                        .find(|participant| participant.key == from)
+                        .map(|participant| participant.profile.name.clone())
+                        .unwrap_or_default()
+                };
+                let message = Message { from, name, text };
+                self.state.send_modify(|state| {
+                    state.chat.push(message.clone());
+                    let over = state.chat.len().saturating_sub(CHAT_KEPT);
+                    state.chat.drain(..over);
+                });
+                Event::Said { message }
+            }
+            Said::Reaction { reaction } => {
+                let reacted = Reacted {
+                    seq: self.reactions_seen,
+                    from,
+                    reaction,
+                };
+                self.reactions_seen += 1;
+                self.state.send_modify(|state| {
+                    state.reactions.push(reacted.clone());
+                    let over = state.reactions.len().saturating_sub(REACTIONS_KEPT);
+                    state.reactions.drain(..over);
+                });
+                Event::Reacted { reacted }
+            }
+        };
+        let _unheard: Result<usize, _> = self.events.send(event);
     }
 
     /// Who speaks now, and who the active speaker is, into the state.
@@ -427,8 +541,20 @@ impl Task {
                 Ok(())
             }
             Command::SetName { name } => self.set_profile(Profile {
-                muted: self.profile.muted,
-                ..Profile::new(&name)
+                name: Profile::new(&name).name,
+                ..self.profile.clone()
+            }),
+            Command::Say { text } => {
+                let text = crate::chat::trimmed(&text);
+                if text.is_empty() {
+                    return Ok(());
+                }
+                self.say(crate::chat::Said::Message { text })
+            }
+            Command::React { reaction } => self.say(crate::chat::Said::Reaction { reaction }),
+            Command::SetHand { raised } => self.set_profile(Profile {
+                hand: raised,
+                ..self.profile.clone()
             }),
             Command::SetMuted { muted } => {
                 self.set_profile(Profile {
@@ -459,6 +585,14 @@ impl Task {
                 Ok(())
             }
         }
+    }
+
+    /// `said`, for everyone in the room, and in the state as anyone's is.
+    fn say(&mut self, said: crate::chat::Said) -> Result<(), Error> {
+        self.saying.as_mut().ok_or(Error::Left)?.say(said.clone())?;
+        let me = self.state.borrow().me.key;
+        self.said(me, said);
+        Ok(())
     }
 
     /// `profile`, for everyone in the room, and in the state.
@@ -548,6 +682,9 @@ impl Task {
             && let Err(error) = track.finish()
         {
             tracing::debug!(%error, "finishing the profile track");
+        }
+        if let Some(saying) = self.saying.take() {
+            saying.finish();
         }
         self.publication.close();
         if let Err(error) = connection.close().await {

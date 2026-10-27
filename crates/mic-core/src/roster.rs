@@ -91,6 +91,9 @@ pub struct Profile {
     /// Whether its camera is off, by its own word: its tile shows its name, not its last picture.
     #[serde(default)]
     pub camera_off: bool,
+    /// Whether its hand is raised (§5.6).
+    #[serde(default)]
+    pub hand: bool,
 }
 
 impl Profile {
@@ -100,6 +103,7 @@ impl Profile {
             name: name.trim().chars().take(NAME_LIMIT).collect(),
             muted: false,
             camera_off: false,
+            hand: false,
         }
     }
 }
@@ -114,6 +118,9 @@ struct ProfileFrame {
     /// Likewise: the camera on.
     #[serde(default)]
     camera_off: bool,
+    /// Likewise: no hand raised.
+    #[serde(default)]
+    hand: bool,
 }
 
 impl ProfileFrame {
@@ -122,6 +129,7 @@ impl ProfileFrame {
             name: profile.name.clone(),
             muted: profile.muted,
             camera_off: profile.camera_off,
+            hand: profile.hand,
         };
         serde_json::to_vec(&frame).expect("a profile serializes")
     }
@@ -132,6 +140,7 @@ impl ProfileFrame {
         Some(Profile {
             muted: frame.muted,
             camera_off: frame.camera_off,
+            hand: frame.hand,
             ..Profile::new(&frame.name)
         })
     }
@@ -207,6 +216,8 @@ pub(crate) struct Playing {
     pub watching: watch::Receiver<Option<Vec<ParticipantKey>>>,
     /// The active speaker, whose camera is raised above the others'.
     pub speaker: watch::Receiver<Option<ParticipantKey>>,
+    /// Where what's said in chat and reactions goes.
+    pub heard: mpsc::UnboundedSender<crate::chat::Heard>,
 }
 
 impl Playing {
@@ -376,6 +387,7 @@ async fn read_peer(
     // Its voice, played once a catalog names it, and its camera, while it's shown, until the
     // broadcast goes or is rejected.
     let mut _voice: Option<Task> = None;
+    let mut _chat: Vec<Task> = Vec::new();
     let mut camera: Option<Camera> = None;
     // Whose camera the catalog names, in a codec this participant decodes.
     let mut decodable: Option<ParticipantKey> = None;
@@ -483,6 +495,21 @@ async fn read_peer(
                     playing.voices.clone(),
                 )
                 .await;
+            }
+            if _chat.is_empty()
+                && let Some(checked) = &verification
+            {
+                for track in [crate::chat::CHAT, crate::chat::REACTIONS] {
+                    if catalog.tracks.iter().any(|named| named == track) {
+                        _chat.push(Task(tokio::spawn(crate::chat::read(
+                            peer.clone(),
+                            track,
+                            checked.clone(),
+                            catalog.participant,
+                            playing.heard.clone(),
+                        ))));
+                    }
+                }
             }
             if catalog.renditions.iter().any(|rendition| {
                 rendition.track == crate::video::CAMERA

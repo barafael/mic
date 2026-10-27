@@ -8,6 +8,7 @@
 pub mod app;
 pub mod audio;
 pub mod catalog;
+pub mod chat;
 pub mod invite;
 pub mod keys;
 pub mod local;

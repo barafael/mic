@@ -129,6 +129,8 @@ mod tests {
             connection: Connection::Connected,
             speaker: None,
             speaking: Vec::new(),
+            chat: Vec::new(),
+            reactions: Vec::new(),
         }
     }
 
