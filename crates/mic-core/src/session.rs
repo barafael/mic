@@ -262,13 +262,8 @@ impl Inner {
             publication.track(crate::chat::CHAT)?,
             publication.track(crate::chat::REACTIONS)?,
         );
-        // What a recording takes this participant's voice and camera from.
+        // What a recording takes this participant's voice from, and the others'.
         let tap = crate::recording::Tap::default();
-        let tapping = |kind| crate::recording::Tapping {
-            tap: tap.clone(),
-            whose: participant,
-            kind,
-        };
         let (muted, follows) = tokio::sync::watch::channel(false);
         let (noise, noise_follows) = tokio::sync::watch::channel(media.noise);
         let voice = match media.capture {
@@ -277,7 +272,7 @@ impl Inner {
                 publication.track(crate::audio::AUDIO)?,
                 follows,
                 noise_follows,
-                tapping(crate::recording::Kind::Voice),
+                (tap.clone(), participant),
             ))),
             None => None,
         };
@@ -298,7 +293,6 @@ impl Inner {
                 camera,
                 publication.video_track(crate::video::CAMERA, codec)?,
                 camera_follows,
-                tapping(crate::recording::Kind::Camera),
             ))),
             _ => None,
         };
