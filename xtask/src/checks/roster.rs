@@ -82,6 +82,35 @@ pub fn roster(checks: &mut Checks, the_box: &TestBox) -> Result<()> {
             Ok(())
         },
     );
+    checks.record(
+        "bob leaves with his window's keys, is told so, and rejoins",
+        || {
+            bob.join(&invite, "Bob")?;
+            alice.wait_for("with Bob", PATIENCE, |state| names(state) == ["Bob"])?;
+            super::window::press(the_box, "bob", "ctrl+shift+h")?;
+            bob.wait_for_snapshot("told he left, Rejoin offered", PATIENCE, |snapshot| {
+                snapshot.ui.as_ref().is_some_and(|ui| {
+                    ui.screen == "join"
+                        && ui.join_note.as_deref() == Some("You left the room.")
+                        && ui.name == "Bob"
+                })
+            })?;
+            alice.wait_for("alone", PATIENCE, |state| state.participants.is_empty())?;
+            // The invite still filled in: Enter rejoins.
+            super::window::press(the_box, "bob", "Return")?;
+            bob.wait_for_snapshot("in the room again, the note gone", PATIENCE, |snapshot| {
+                shows_room(snapshot)
+                    && snapshot
+                        .ui
+                        .as_ref()
+                        .is_some_and(|ui| ui.join_note.is_none())
+            })?;
+            alice.wait_for("with Bob again", PATIENCE, |state| names(state) == ["Bob"])?;
+            bob.reset()?;
+            alice.wait_for("alone", PATIENCE, |state| state.participants.is_empty())?;
+            Ok(())
+        },
+    );
     checks.record("bob joins from his window", || {
         super::window::type_join(the_box, "bob", "Bob", &invite)?;
         bob.wait_for_snapshot("in the room, shown", PATIENCE, shows_room)?;

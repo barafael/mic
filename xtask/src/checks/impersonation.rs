@@ -40,20 +40,42 @@ pub fn impersonation(checks: &mut Checks, the_box: &TestBox) -> Result<()> {
         bob.wait_for("with Alice", PATIENCE, |state| names(state) == ["Alice"])?;
         Ok(key)
     })?;
-    checks.record("a forger at alice's path stands for no one", || {
-        forge(the_box, &invite, &["at-path", &alice_key.to_string()])?;
-        bob.wait_for("rejecting the forgery", PATIENCE, |state| {
-            state
-                .rejected
-                .iter()
-                .any(|rejected| rejected.reason.contains("whose path this isn't"))
-        })?;
-        bob.wait_for("with Alice, once", Duration::ZERO, |state| {
-            state.participants.len() == 1 && state.participants[0].key == alice_key
-        })?;
-        bob.wait_to_hear(alices, &[FORGED], PATIENCE)?;
-        Ok(())
-    });
+    checks.record(
+        "a forger at alice's path stands for no one, and bob is told who",
+        || {
+            forge(the_box, &invite, &["at-path", &alice_key.to_string()])?;
+            bob.wait_for(
+                "rejecting the forgery, as posing as alice",
+                PATIENCE,
+                |state| {
+                    state.rejected.iter().any(|rejected| {
+                        rejected.reason.contains("whose path this isn't")
+                            && rejected.posing_as == Some(alice_key)
+                    })
+                },
+            )?;
+            // The banner names her, and says what to do (PLAN.md, commit 57).
+            bob.wait_for_snapshot(
+                "warning that someone is posing as Alice",
+                PATIENCE,
+                |snapshot| {
+                    snapshot
+                        .ui
+                        .as_ref()
+                        .and_then(|ui| ui.warning.as_deref())
+                        .is_some_and(|warning| {
+                            warning.starts_with("Someone is posing as Alice.")
+                                && warning.to_lowercase().contains("new room")
+                        })
+                },
+            )?;
+            bob.wait_for("with Alice, once", Duration::ZERO, |state| {
+                state.participants.len() == 1 && state.participants[0].key == alice_key
+            })?;
+            bob.wait_to_hear(alices, &[FORGED], PATIENCE)?;
+            Ok(())
+        },
+    );
     checks.record(
         "frames no signed checkpoint covers are rejected within the grace",
         || {

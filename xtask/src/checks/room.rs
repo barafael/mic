@@ -193,16 +193,21 @@ pub fn room(checks: &mut Checks, the_box: &TestBox) -> Result<()> {
         },
     );
     checks.record(
-        "a message typed into alice's chat reaches every window's",
+        "a message typed into alice's chat reaches every window's, with its time",
         || {
             super::window::type_message(the_box, "alice", "hello, room")?;
             for window in &mut windows {
-                window.wait_for_snapshot("showing alice's message", PATIENCE, |snapshot| {
-                    snapshot
-                        .ui
-                        .as_ref()
-                        .is_some_and(|ui| ui.chat == ["Alice: hello, room"])
-                })?;
+                window.wait_for_snapshot(
+                    "showing alice's message, and when",
+                    PATIENCE,
+                    |snapshot| {
+                        snapshot.ui.as_ref().is_some_and(|ui| {
+                            ui.chat == ["Alice: hello, room"]
+                                && ui.chat_times.len() == 1
+                                && ui.chat_times.iter().all(|time| is_clock_time(time))
+                        })
+                    },
+                )?;
             }
             Ok(())
         },
@@ -286,4 +291,14 @@ fn capitalized(name: &str) -> String {
         .next()
         .map(|first| first.to_uppercase().chain(chars).collect())
         .unwrap_or_default()
+}
+
+/// Whether `time` is a time of day as the chat shows it, `HH:MM`.
+fn is_clock_time(time: &str) -> bool {
+    time.split_once(':').is_some_and(|(hours, minutes)| {
+        hours.len() == 2
+            && minutes.len() == 2
+            && hours.parse::<u8>().is_ok_and(|hours| hours < 24)
+            && minutes.parse::<u8>().is_ok_and(|minutes| minutes < 60)
+    })
 }
