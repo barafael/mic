@@ -4,6 +4,32 @@ What turned up while building `mic` that the plan didn't expect: surprises, upst
 measurements, and things to revisit. Newest first within each milestone. Each says whether it's
 **open**, **settled** (and where), or **upstream** (to report or follow).
 
+## M11: After the review
+
+- **femtovg's wgpu renderer rebuilds its pipelines every frame** (upstream, to report). This is
+  what the window's cost since M6 was (docs/review-0.1.0.md). femtovg 0.27.0's `flush` ends by
+  dropping every cached pipeline that flush didn't use
+  (`pipeline_cache.retain(|_, p| replace(&mut p.accessed, false))`). Slint flushes more than once
+  a frame, a layer each, so each flush throws away what the others need, and every frame builds
+  them again: naga validates and writes SPIR-V, then Vulkan compiles. Same box, same call of
+  two, the same tree: alice's mic took **41 %** of a core stock, **10 %** with the pipelines
+  kept. Found with `cargo testbox drive alice profile`: nearly all the main thread's samples were
+  in naga, under `create_render_pipeline`.
+- **perf works in a rootless pod, from a container of its own** (settled). The host's
+  `perf_event_paranoid` is 2: user space only, `--user-callchains`, or the callchain's kernel
+  part is refused. Podman's seccomp lets `perf_event_open` through with CAP_PERFMON, and
+  attaching takes CAP_SYS_PTRACE (Yama at 1). Not in the window's container: gnome-keyring-daemon
+  finds those capabilities, fails to drop them (libcap-ng's -5, the supplementary groups), and
+  aborts, and with it the client. So the `profiler` sidecar shares the pod's PID namespace.
+  DWARF callchains are shallow: two or three frames, sometimes enough.
+- **`cargo testbox down` leaves the builder pod** (observed). Another tree's builder kept
+  building that tree into its own target/testbox-bin, while this tree's clients ran an older
+  binary from theirs. `podman pod rm -f mic-testbox-builder`, then `up`.
+- **The load average can't tell a busy host from a busy box** (settled). Room-40 loads the host
+  itself, so `Checks::measured` counts what others used: /proc/stat's busy time less the box's
+  pods' cgroups. A pod's cgroup, not a container's, since a restarted container's starts from
+  nothing.
+
 ## M10: Release
 
 - **0.1.0 reviewed as a product** (open): a full-scenario run of the box and exploratory sessions

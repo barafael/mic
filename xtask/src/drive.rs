@@ -108,8 +108,9 @@ pub fn drive(the_box: &TestBox, client: &str, action: Action) -> Result<()> {
     Ok(())
 }
 
-/// Where `client`'s mic spent `seconds`, by thread, then by function: perf in its container,
-/// attached to the running process (CAP_PERFMON and CAP_SYS_PTRACE, testbox/pods/client.yaml),
+/// Where `client`'s mic spent `seconds`, by thread, by function, and by what's on the stack
+/// (its callchains are shallow, but often deep enough to say who asked): perf
+/// attached to the running process from the pod's profiler (testbox/pods/client.yaml),
 /// user space only, as the host's perf_event_paranoid of 2 allows; DWARF callchains, as release
 /// builds keep no frame pointers.
 fn profile(the_box: &TestBox, client: &'static str, seconds: u32) -> Result<String> {
@@ -123,13 +124,13 @@ fn profile(the_box: &TestBox, client: &'static str, seconds: u32) -> Result<Stri
          echo; echo '## by function, the threads together'; \
          perf report -i $data --stdio --no-children --sort dso,sym -g none --percent-limit 0.5 \
            2>/dev/null | grep -v '^#' | grep .; \
-         echo; echo '## the main thread, with who called'; \
-         perf report -i $data --stdio --no-children --comms mic --sort sym \
-           -g caller,0.5,callee,function,percent --percent-limit 2 2>/dev/null \
-           | grep -v '^#' | grep . | head -200; \
+         echo; echo '## in how many samples, as a frame or a caller'; \
+         perf script -i $data -F ip,sym 2>/dev/null | sed -n 's/^[[:space:]]*[0-9a-f][0-9a-f]* //p' \
+           | grep -vF '[unknown]' | sort | uniq -c | sort -rn | head -60; \
          rm -f $data"
     );
-    let ran = the_box.exec(&view::container(client), &["sh", "-c", &script])?;
+    let profiler = crate::podman::Pod::Client(client).container("profiler");
+    let ran = the_box.exec(&profiler, &["sh", "-c", &script])?;
     if !ran.status.success() {
         return Err(Error::Failed(format!(
             "perf in {client}: {}",
