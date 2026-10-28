@@ -9,6 +9,8 @@ mod builder;
 #[cfg(unix)]
 mod checks;
 #[cfg(unix)]
+mod drive;
+#[cfg(unix)]
 mod error;
 #[cfg(unix)]
 mod harness;
@@ -121,6 +123,13 @@ enum Command {
         #[arg(long)]
         wipe: bool,
     },
+    /// Drives a window by hand, a step an invocation, as a check would: join, act, snapshot,
+    /// type into it, take its display, profile it.
+    Drive {
+        client: String,
+        #[command(subcommand)]
+        action: drive::Action,
+    },
     /// Prints logs: of a container (`<pod>-<container>`), or of every container of a pod.
     Logs { names: Vec<String> },
 }
@@ -182,6 +191,7 @@ fn main() -> ExitCode {
         Command::Images { prune } => the_box.list_images(prune),
         Command::Down { wipe } => the_box.down(wipe),
         Command::Logs { names } => the_box.logs(&names),
+        Command::Drive { client, action } => drive::drive(&the_box, &client, action),
     };
     match outcome {
         Ok(()) => ExitCode::SUCCESS,

@@ -44,7 +44,14 @@
           # 2 fps (spikes/video-tiles). Mesa presents in mailbox mode instead.
           { name: "MESA_VK_WSI_PRESENT_MODE", value: "mailbox" },
         ],
-        securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: ["ALL"] } },
+        # perf attaching to the window's mic (`cargo testbox drive <client> profile`): Podman's
+        # seccomp lets perf_event_open through with CAP_PERFMON, and attaching to a process it
+        # didn't start takes CAP_SYS_PTRACE, with the host's Yama at 1. Both in the pod's user
+        # namespace only; the host's perf_event_paranoid still keeps it to user space.
+        securityContext: {
+          allowPrivilegeEscalation: false,
+          capabilities: { drop: ["ALL"], add: ["PERFMON", "SYS_PTRACE"] },
+        },
         volumeMounts: [
           { name: "bin", mountPath: "/opt/mic", readOnly: true },
           { name: "keys", mountPath: "/keys", readOnly: true },

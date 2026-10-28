@@ -18,7 +18,7 @@ mod screenshare;
 mod testbox;
 mod version;
 mod video;
-mod window;
+pub mod window;
 
 use crate::error::{Error, Result};
 use crate::podman::TestBox;

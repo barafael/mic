@@ -69,6 +69,11 @@ pub fn press(the_box: &TestBox, client: &'static str, key: &str) -> Result<()> {
     xdotool(the_box, client, &[&["key", key]])
 }
 
+/// Types `text` where `client`'s window has its keyboard.
+pub fn type_text(the_box: &TestBox, client: &'static str, text: &str) -> Result<()> {
+    xdotool(the_box, client, &[&["type", "--delay", "10", text]])
+}
+
 /// Opens the chat with its shortcut, Ctrl+Alt+C, which gives its message field the keyboard,
 /// types `text` there, and sends it with Enter.
 pub fn type_message(the_box: &TestBox, client: &'static str, text: &str) -> Result<()> {
