@@ -46,6 +46,7 @@ cost only its widgets: no room logic, no media, no test changes.
 | `mic-harness` | The test protocol, and a server that takes a `mic-core` client. Any frontend embeds it in a few lines |
 | `mic-slint` | The Slint frontend. It builds the `mic` binary |
 | `mic-crowd` | Headless participants: one or many `mic-core` clients in one process, each with its own harness socket |
+| `mic-admit` | Who a relay lets in: the proof a client presents, and the auth server a self-hosted relay asks (§5.11) |
 | `mic-testrelay` | Dev-only: a relay inside the test process, for `cargo test` |
 | `xtask` | `cargo testbox` |
 
@@ -621,6 +622,20 @@ the recording's, performance and the box (**C**). New `RoomState` fields, `Comma
     (the two with tones) and six of the crowd, cameras, voices and a chat message a minute;
     each five minutes still heard and seen, the windows' CPU and memory recorded; at the end,
     what each window holds grown by 64 MiB at most, for leaks.
+
+### M12: Who the relay lets in
+
+68. `mic-admit, mic-core, mic-testrelay: admission` (P6, §5.11): `mic-admit`, with the proof a client
+    puts in its URL (`?admit=`) and an auth server a self-hosted `moq-relay` asks (`--auth-url`),
+    which grants subscribing to the room and publishing under the participant's own path.
+    `mic-core` presents the proof (`Config::admission`); `mic-testrelay` can ask a server
+    (`TestRelay::start_asking`). *Done:* in `cargo test` (`mic-core/tests/admission.rs`): members
+    join and see each other; a client without a proof, a stranger with a proof of a room key of
+    her own, and a member announcing at another's path are none of them heard of, which they all
+    are on an open relay; a session outlasts its grant. Not in the box yet: **`admission`**, a
+    phase with `moq-relay` and `mic-admit` as binaries, and the window saying a refusal.
+69. `mic-admit: moq.pro` (to do): a front end that checks the same proof and signs the JWT moq.pro
+    takes, once there's a project key and somewhere to run it.
 
 ### After v1
 

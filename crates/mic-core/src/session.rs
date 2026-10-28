@@ -33,6 +33,10 @@ pub struct Config {
     /// The video codecs it says it decodes: every one it has, unless told fewer (the box's
     /// `--decoders`, to see a codec go unsupported).
     pub decoders: Vec<mic_media::video::Codec>,
+    /// Whether to present the proof that it holds the invite, in the query of the relay's URL
+    /// (`crate::admission`). On: a relay that doesn't ask for it ignores it, and one that does
+    /// lets nobody in without. Off, for a test of a relay that refuses a client without.
+    pub admission: bool,
     /// Whether a WebSocket over TCP races QUIC, for networks that block UDP (D9): on unless
     /// opted out of, QUIC only then.
     pub websocket: bool,
@@ -58,6 +62,7 @@ impl Config {
             trust: Trust::System,
             connect_timeout: CONNECT_TIMEOUT,
             decoders: mic_media::video::Codec::ALL.to_vec(),
+            admission: true,
             websocket: true,
             recordings: default_recordings(),
         }
@@ -226,6 +231,11 @@ impl Inner {
             .map_err(|()| moq("the relay's URL can't have a path"))?
             .pop_if_empty()
             .push(crypto.prefix().as_str());
+        if self.config.admission {
+            let proof = crate::admission::proof(&invite, &crypto, &key)?;
+            url.query_pairs_mut()
+                .append_pair(mic_admit::PARAM, &proof.encode());
+        }
         let origin = moq_tokio::origin::spawn();
         let (path, generation) = crypto.publisher(key.public().as_bytes())?;
         let broadcast = origin.create_broadcast(&path).map_err(moq)?;

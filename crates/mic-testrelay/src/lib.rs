@@ -20,6 +20,8 @@ pub use moq_tokio;
 pub struct TestRelay {
     identity: Identity,
     quic: SocketAddr,
+    /// The auth server it asks about each session; none, and anyone may publish and subscribe.
+    auth: Option<url::Url>,
     running: Option<Running>,
 }
 
@@ -33,11 +35,22 @@ impl TestRelay {
     /// A relay on an ephemeral loopback port, anyone allowed to publish and subscribe, serving
     /// once this returns.
     pub async fn start() -> anyhow::Result<Self> {
+        Self::start_with(None).await
+    }
+
+    /// A relay that asks the auth server at `auth` (`http://` on loopback) what each session
+    /// may do, as a self-hosted one run with `--auth-url` does.
+    pub async fn start_asking(auth: url::Url) -> anyhow::Result<Self> {
+        Self::start_with(Some(auth)).await
+    }
+
+    async fn start_with(auth: Option<url::Url>) -> anyhow::Result<Self> {
         let identity = Identity::generate(["localhost"])?;
-        let (quic, running) = serve(&identity, "127.0.0.1:0".parse()?).await?;
+        let (quic, running) = serve(&identity, "127.0.0.1:0".parse()?, auth.as_ref()).await?;
         Ok(Self {
             identity,
             quic,
+            auth,
             running: Some(running),
         })
     }
@@ -75,7 +88,7 @@ impl TestRelay {
     /// Stops it, then starts it again on the same port with the same certificate.
     pub async fn restart(&mut self) -> anyhow::Result<()> {
         self.stop().await?;
-        let (_, running) = serve(&self.identity, self.quic).await?;
+        let (_, running) = serve(&self.identity, self.quic, self.auth.as_ref()).await?;
         self.running = Some(running);
         Ok(())
     }
@@ -90,12 +103,19 @@ impl Drop for TestRelay {
 }
 
 /// A relay with `identity` on `bind`, serving: where it bound, and the way to stop it.
-async fn serve(identity: &Identity, bind: SocketAddr) -> anyhow::Result<(SocketAddr, Running)> {
+async fn serve(
+    identity: &Identity,
+    bind: SocketAddr,
+    auth: Option<&url::Url>,
+) -> anyhow::Result<(SocketAddr, Running)> {
     let mut config = moq_relay::Config::default();
     config.drain_timeout = std::time::Duration::ZERO;
     config.listen.bind = Some(bind.to_string().parse()?);
     config.listen.tls.identity = Some(identity.clone());
-    config.auth.public = vec![moq_auth::Pattern::all()];
+    match auth {
+        Some(url) => config.auth.url = Some(url.clone()),
+        None => config.auth.public = vec![moq_auth::Pattern::all()],
+    }
     let relay = moq_relay::Relay::load(config).await?;
     let quic = relay.quic_addr()?;
     let ready = relay.ready();
