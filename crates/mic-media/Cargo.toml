@@ -33,6 +33,9 @@ vpx-sys = { package = "libvpx-native-sys", version = "5.0.17", optional = true }
 # The portal's registry, so that a share's asking names mic (the same ashpd, and so the same
 # D-Bus connection, as moq-video's).
 [target.'cfg(target_os = "linux")'.dependencies]
+# PipeWire's own devices, each by name, where PipeWire runs (cpal's default host then), rather than
+# ALSA's few; ALSA where it doesn't.
+cpal = { version = "0.18.2", optional = true, features = ["pipewire"] }
 ashpd = { version = "0.13.13", default-features = false, features = ["tokio"], optional = true }
 
 [dev-dependencies]

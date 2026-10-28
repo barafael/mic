@@ -17,6 +17,9 @@ harness = ["dep:mic-harness"]
 [dependencies]
 clap = { version = "4.6.7", features = ["derive", "env"] }
 mic-core = { version = "0.1.0", path = "../mic-core" }
+# The settings file (settings.rs).
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
 mic-harness = { version = "0.1.0", path = "../mic-harness", optional = true }
 mic-media = { version = "0.1.0", path = "../mic-media", features = ["devices", "screen"] }
 mic-render = { version = "0.1.0", path = "../mic-render" }
