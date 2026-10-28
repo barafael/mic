@@ -99,6 +99,8 @@ impl Phase {
             Phase::Roster
                 | Phase::E2ee
                 | Phase::Impersonation
+                // It restarts frank.
+                | Phase::Version
                 | Phase::Audio
                 | Phase::AudioDevices
                 | Phase::Video

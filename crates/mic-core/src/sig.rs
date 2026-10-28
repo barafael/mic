@@ -364,17 +364,29 @@ pub(crate) async fn sign(
     mut track: moq_e2ee::track::Producer,
     key: RoomKey,
     base: Checkpoint,
+    mut stop: tokio::sync::oneshot::Receiver<()>,
 ) {
     let mut seq = base.seq;
     let mut since_sent = HEARTBEAT;
     let mut tick = tokio::time::interval(INTERVAL);
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
-        tick.tick().await;
+        // Stopped: what's left signed, then the track finished, so its subscribers see it end
+        // rather than drop, and the last frames sent stand.
+        let last = tokio::select! {
+            _ = tick.tick() => false,
+            _ = &mut stop => true,
+        };
         since_sent += INTERVAL;
         let (entries, changed) = ledger.take();
-        if entries.is_empty() || (!changed && since_sent < HEARTBEAT) {
+        if !last && (entries.is_empty() || (!changed && since_sent < HEARTBEAT)) {
             continue;
+        }
+        if last && !changed {
+            if let Err(error) = track.finish() {
+                tracing::debug!(%error, "finishing the checkpoints");
+            }
+            return;
         }
         seq += 1;
         let checkpoint = Checkpoint {
@@ -388,6 +400,12 @@ pub(crate) async fn sign(
         });
         if let Err(error) = written {
             tracing::debug!(%error, "a checkpoint wasn't written");
+            return;
+        }
+        if last {
+            if let Err(error) = track.finish() {
+                tracing::debug!(%error, "finishing the checkpoints");
+            }
             return;
         }
         since_sent = Duration::ZERO;

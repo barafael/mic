@@ -16,6 +16,10 @@ use crate::{process, ready, view};
 
 use super::Checks;
 
+/// What moq-net logs of a track dropped unfinished: a leave finishes its tracks (PLAN.md,
+/// commit 61).
+const UNFINISHED: &str = "dropped without finish()";
+
 /// How long a roster may take to show a change.
 const PATIENCE: Duration = Duration::from_secs(15);
 
@@ -51,19 +55,62 @@ pub fn roster(checks: &mut Checks, the_box: &TestBox) -> Result<()> {
         })?;
         Ok(())
     });
-    checks.record("alice sees bob go", || {
-        bob.reset()?;
-        alice.wait_for("alone", PATIENCE, |state| state.participants.is_empty())?;
-        alice.wait_for_snapshot(
-            "showing herself alone, the invite offered",
-            PATIENCE,
-            |snapshot| shows_room(snapshot) && snapshot.ui.as_ref().is_some_and(|ui| ui.alone),
-        )?;
-        bob.wait_for_snapshot("showing the join screen", PATIENCE, |snapshot| {
-            snapshot.ui.as_ref().is_some_and(|ui| ui.screen == "join")
-        })?;
-        Ok(())
-    });
+    checks.record(
+        "alice sees bob go, and his leave finishes what he sent",
+        || {
+            let bobs = Pod::Client("bob").container("client");
+            let unfinished = |log: &str| log.matches(UNFINISHED).count();
+            let before = unfinished(&the_box.log(&bobs)?);
+            bob.reset()?;
+            alice.wait_for("alone", PATIENCE, |state| state.participants.is_empty())?;
+            alice.wait_for_snapshot(
+                "showing herself alone, the invite offered",
+                PATIENCE,
+                |snapshot| shows_room(snapshot) && snapshot.ui.as_ref().is_some_and(|ui| ui.alone),
+            )?;
+            bob.wait_for_snapshot("showing the join screen", PATIENCE, |snapshot| {
+                snapshot.ui.as_ref().is_some_and(|ui| ui.screen == "join")
+            })?;
+            // A track dropped unfinished says so as it drops: by now, or never.
+            let after = unfinished(&the_box.log(&bobs)?);
+            if after > before {
+                return Err(Error::Failed(format!(
+                    "bob's leave logged \"{UNFINISHED}\" {} times",
+                    after - before
+                )));
+            }
+            Ok(())
+        },
+    );
+    checks.record(
+        "bob leaves with his window's keys, is told so, and rejoins",
+        || {
+            bob.join(&invite, "Bob")?;
+            alice.wait_for("with Bob", PATIENCE, |state| names(state) == ["Bob"])?;
+            super::window::press(the_box, "bob", "ctrl+shift+h")?;
+            bob.wait_for_snapshot("told he left, Rejoin offered", PATIENCE, |snapshot| {
+                snapshot.ui.as_ref().is_some_and(|ui| {
+                    ui.screen == "join"
+                        && ui.join_note.as_deref() == Some("You left the room.")
+                        && ui.name == "Bob"
+                })
+            })?;
+            alice.wait_for("alone", PATIENCE, |state| state.participants.is_empty())?;
+            // The invite still filled in: Enter rejoins.
+            super::window::press(the_box, "bob", "Return")?;
+            bob.wait_for_snapshot("in the room again, the note gone", PATIENCE, |snapshot| {
+                shows_room(snapshot)
+                    && snapshot
+                        .ui
+                        .as_ref()
+                        .is_some_and(|ui| ui.join_note.is_none())
+            })?;
+            alice.wait_for("with Bob again", PATIENCE, |state| names(state) == ["Bob"])?;
+            bob.reset()?;
+            alice.wait_for("alone", PATIENCE, |state| state.participants.is_empty())?;
+            Ok(())
+        },
+    );
     checks.record("bob joins from his window", || {
         super::window::type_join(the_box, "bob", "Bob", &invite)?;
         bob.wait_for_snapshot("in the room, shown", PATIENCE, shows_room)?;
@@ -71,29 +118,46 @@ pub fn roster(checks: &mut Checks, the_box: &TestBox) -> Result<()> {
         Ok(())
     });
     let moments = checks.moments();
-    checks.record("a restarted relay is rejoined", || {
-        bob.join(&invite, "Bob")?;
-        alice.wait_for("with Bob", PATIENCE, |state| names(state) == ["Bob"])?;
-        process::run(crate::podman::podman(&[
-            "restart",
-            "--time",
-            "1",
-            &Pod::Relay.container("relay"),
-        ]))?;
-        // Redialling, bob's tile kept, greyed.
-        moments.take("reconnecting");
-        ready::relay(the_box)?;
-        for participant in [&mut alice, &mut bob] {
-            participant.wait_for("connected again", PATIENCE, |state| {
-                state.connection == Connection::Connected
+    checks.record(
+        "a restarted relay is rejoined, bob's tile kept meanwhile",
+        || {
+            let bob_key = bob.join(&invite, "Bob")?.me.key.to_string();
+            alice.wait_for("with Bob", PATIENCE, |state| names(state) == ["Bob"])?;
+            let relay = Pod::Relay.container("relay");
+            process::run(crate::podman::podman(&["stop", "--time", "1", &relay]))?;
+            // Redialling, bob's tile kept, greyed, rather than gone as if he'd left.
+            let kept = alice.wait_for_snapshot(
+                "redialling, bob's tile kept, away",
+                PATIENCE,
+                |snapshot| {
+                    snapshot
+                        .ui
+                        .as_ref()
+                        .is_some_and(|ui| ui.tiles.contains(&bob_key) && ui.away.contains(&bob_key))
+                },
+            );
+            moments.take("reconnecting");
+            process::run(crate::podman::podman(&["start", &relay]))?;
+            kept?;
+            ready::relay(the_box)?;
+            for participant in [&mut alice, &mut bob] {
+                participant.wait_for("connected again", PATIENCE, |state| {
+                    state.connection == Connection::Connected
+                })?;
+            }
+            alice.wait_for("with Bob, once", PATIENCE, |state| names(state) == ["Bob"])?;
+            alice.wait_for_snapshot("bob's tile back, not away", PATIENCE, |snapshot| {
+                snapshot
+                    .ui
+                    .as_ref()
+                    .is_some_and(|ui| ui.tiles.contains(&bob_key) && ui.away.is_empty())
             })?;
-        }
-        alice.wait_for("with Bob, once", PATIENCE, |state| names(state) == ["Bob"])?;
-        bob.wait_for("with Alice B., once", PATIENCE, |state| {
-            names(state) == ["Alice B."]
-        })?;
-        Ok(())
-    });
+            bob.wait_for("with Alice B., once", PATIENCE, |state| {
+                names(state) == ["Alice B."]
+            })?;
+            Ok(())
+        },
+    );
     checks.record("a restarted client is the same participant", || {
         let before = alice
             .wait_for("in the room", Duration::ZERO, |_| true)?

@@ -6,6 +6,16 @@ measurements, and things to revisit. Newest first within each milestone. Each sa
 
 ## M11: After the review
 
+- **An hour's call grows each window by about half a MiB a minute** (open). The first full
+  `soak`: alice 253 → 290 MiB, bob 325 → 352 MiB between minutes 5 and 60, steadily, at 54 % of
+  a core throughout, every stretch heard and seen. Under the 64 MiB the check allows, but not
+  flat: the chat's 60 messages are a few KiB, so something else keeps what it's given. Worth a
+  heap profile over a longer soak (`MIC_SOAK_MINUTES=180`).
+- **Commit 61's clean leave left two tracks unfinished** (settled, mic-core `tracks`): the
+  catalog's, and the checkpoints', whose signing task was aborted with the publication. The
+  `roster` check of the log found them, two "dropped without finish()" a leave. Closing now
+  finishes the catalog, and has the signer sign what's left, so the last frames sent stand,
+  then finish its track, for up to a second.
 - **On PipeWire, every microphone came at half its voice** (settled, mic-media `device`): -6 dB
   since commit 52 put cpal on its PipeWire host. That host offers every input as two channels:
   the defaults hardcode it, and a node without `audio.channels` gets it. A mono microphone then
