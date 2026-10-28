@@ -101,6 +101,8 @@ export component AppWindow inherits Window {
     in-out property <bool> settings-open;
     in property <[string]> microphones;
     in property <[string]> speakers;
+    in property <[string]> cameras;
+    in-out property <int> camera;
     in-out property <int> microphone;
     in-out property <int> speaker;
     in-out property <int> noise;
@@ -109,6 +111,7 @@ export component AppWindow inherits Window {
     callback open-settings();
     callback choose-microphone(int);
     callback choose-speaker(int);
+    callback choose-camera(int);
     callback choose-noise(int);
     callback settings-closed();
     // What the name field holds, as it's edited, for the harness.
@@ -307,6 +310,8 @@ export component AppWindow inherits Window {
         name <=> root.name;
         microphones: root.microphones;
         speakers: root.speakers;
+        cameras: root.cameras;
+        camera <=> root.camera;
         microphone <=> root.microphone;
         speaker <=> root.speaker;
         noise <=> root.noise;
@@ -317,6 +322,9 @@ export component AppWindow inherits Window {
         }
         choose-speaker(index) => {
             root.choose-speaker(index);
+        }
+        choose-camera(index) => {
+            root.choose-camera(index);
         }
         choose-noise(index) => {
             root.choose-noise(index);
