@@ -7,7 +7,9 @@
 //!   first, over a socket in the user's runtime directory, and exits: the room opens in the
 //!   window already there.
 
+#[cfg(unix)]
 use std::io::{BufRead, BufReader, Read, Write};
+#[cfg(unix)]
 use std::path::PathBuf;
 
 /// The longest link a hand-over reads.
