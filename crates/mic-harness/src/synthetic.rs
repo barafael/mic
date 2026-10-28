@@ -139,6 +139,7 @@ impl Synthetic {
                 noise: Default::default(),
                 camera: camera.clone(),
                 screen: screen.clone(),
+                camera_on: None,
             }
         }
     }

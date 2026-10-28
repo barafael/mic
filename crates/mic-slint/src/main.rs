@@ -531,7 +531,6 @@ fn run(cli: Cli) -> Result<(), String> {
         let app = app.clone();
         let window = window.as_weak();
         let runtime = runtime.handle().clone();
-        let devices = devices.clone();
         move || {
             let Some(room) = app.current() else {
                 return;
@@ -539,10 +538,6 @@ fn run(cli: Cli) -> Result<(), String> {
             let off = window
                 .upgrade()
                 .is_some_and(|window| window.get_camera_off());
-            // Off, the camera isn't filming; on, it films again.
-            if let Some(devices) = &devices {
-                devices.set_camera_on(off);
-            }
             runtime.spawn(async move {
                 if let Err(error) = room.command(Command::SetCamera { on: off }).await {
                     tracing::warn!(%error, "the camera");
@@ -900,7 +895,13 @@ fn settings_panel(
     preferences: &settings::Preferences,
     tell: &Rc<Tell>,
 ) {
-    type Offered = Rc<std::cell::RefCell<(Vec<devices::Device>, Vec<devices::Device>)>>;
+    type Offered = Rc<
+        std::cell::RefCell<(
+            Vec<devices::Device>,
+            Vec<devices::Device>,
+            Vec<devices::Device>,
+        )>,
+    >;
     let offered: Offered = Rc::default();
     let meter = Rc::new(slint::Timer::default());
     window.set_has_devices(devices.is_some());
@@ -917,13 +918,14 @@ fn settings_panel(
                 return;
             };
             let kept = preferences.get();
-            let (microphones, speakers) = if devices.is_some() {
+            let (microphones, speakers, cameras) = if devices.is_some() {
                 (
                     devices::Devices::microphones(),
                     devices::Devices::speakers(),
+                    devices::Devices::cameras(),
                 )
             } else {
-                (Vec::new(), Vec::new())
+                (Vec::new(), Vec::new(), Vec::new())
             };
             let index = |offered: &[devices::Device], id: &Option<String>| {
                 id.as_ref()
@@ -943,6 +945,8 @@ fn settings_panel(
             shown.set_speakers(names(&speakers));
             shown.set_microphone(index(&microphones, &kept.microphone));
             shown.set_speaker(index(&speakers, &kept.speaker));
+            shown.set_cameras(names(&cameras));
+            shown.set_camera(index(&cameras, &kept.camera));
             let noise = kept.noise.unwrap_or(devices::NOISE_SUPPRESSION);
             shown.set_noise(
                 NOISES
@@ -951,7 +955,7 @@ fn settings_panel(
                     .and_then(|index| i32::try_from(index).ok())
                     .unwrap_or(1),
             );
-            *offered.borrow_mut() = (microphones, speakers);
+            *offered.borrow_mut() = (microphones, speakers, cameras);
             shown.set_settings_open(true);
             if let Some(devices) = devices.clone() {
                 let window = window.clone();
@@ -987,6 +991,27 @@ fn settings_panel(
                 devices.switch_speaker(id.clone());
             }
             preferences.update(|settings| settings.speaker = id);
+        }
+    });
+    // A camera list has no system default: each is chosen by its id.
+    window.on_choose_camera({
+        let (offered, devices, preferences) =
+            (offered.clone(), devices.clone(), preferences.clone());
+        move |index| {
+            let id = usize::try_from(index).ok().and_then(|index| {
+                offered
+                    .borrow()
+                    .2
+                    .get(index)
+                    .map(|camera| camera.id.clone())
+            });
+            let Some(id) = id else {
+                return;
+            };
+            if let Some(devices) = &devices {
+                devices.switch_camera(Some(id.clone()));
+            }
+            preferences.update(|settings| settings.camera = Some(id));
         }
     });
     window.on_choose_noise({

@@ -15,15 +15,16 @@ doesn't yet.
   only the invite carries. Each participant signs what it sends with a key of its own in the
   room, derived from a device secret in the system's keyring: one posing as another is caught,
   and the window says so.
-- **Voice and video:** Opus with echo cancellation and noise suppression; VP9 cameras, up to
-  nine tiles, the active speaker and those who spoke last first.
+- **Voice and video:** Opus with echo cancellation and noise suppression; your webcam in VP9,
+  up to nine tiles, the active speaker and those who spoke last first. The settings keep your
+  name, microphone, speaker, camera and noise suppression between starts.
 - **Chat, reactions, a raised hand,** encrypted and signed like the rest.
 - **Screen sharing:** a display or a window, on X11 and Wayland, macOS and Windows.
 - **Recording** to WebM, as the call went: a shared screen, else the speaker, else a grid, with
   every voice. Everyone in the room sees who records.
 
 The keys: **Ctrl+D** the microphone, **Ctrl+E** the camera, **Ctrl+Alt+C** the chat,
-**Ctrl+Alt+H** a hand.
+**Ctrl+Alt+H** a hand, **Ctrl+Shift+H** leaves.
 
 ## Install
 
@@ -54,7 +55,11 @@ mic --relay https://relay.example/
 Type your name, then **New room**, or paste an invite and **Join**. `mic --help` lists the rest:
 where recordings go (`--recordings`, else `Videos/mic` in your home), QUIC only
 (`--no-websocket`, where the WebSocket fallback over TCP mustn't be used), and the version check
-(`--version-url`).
+(`--version-url`). `mic --devices` lists the microphones, speakers and cameras it finds.
+
+A relay of your own can let only a room's members in, each publishing only at its own path:
+run `mic-admit` beside it, and point `moq-relay --auth-url` at it. mic always shows its proof;
+an open relay ignores it.
 
 ## Build
 
@@ -67,6 +72,10 @@ pkg-config finds (`VPX_STATIC=1` links it statically):
 - **macOS:** `brew install libvpx pkg-config`.
 - **Windows:** libvpx from vcpkg (`libvpx:x64-windows-static-md`), as
   [CI](.github/workflows/ci.yml) sets it up.
+
+Two dependencies come from forks until upstream releases what mic needs ([Cargo.toml](Cargo.toml),
+`[patch.crates-io]`): the moq crates, for screen capture through the portal, and femtovg, whose
+0.28 keeps the window's render pipelines, which 0.27, as Slint takes it, rebuilt every frame.
 
 ```sh
 cargo build --release -p mic-slint     # target/release/mic

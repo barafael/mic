@@ -39,6 +39,9 @@ export component SettingsPanel inherits Rectangle {
     // The devices, by name, the system's default first; and which is chosen.
     in property <[string]> microphones;
     in property <[string]> speakers;
+    // The cameras, by name; none if there's none to film with.
+    in property <[string]> cameras;
+    in-out property <int> camera;
     in-out property <int> microphone;
     in-out property <int> speaker;
     // Off, RNNoise, Sonora, as `choose-noise` numbers them.
@@ -49,6 +52,7 @@ export component SettingsPanel inherits Rectangle {
     in property <bool> has-devices: true;
     callback choose-microphone(int);
     callback choose-speaker(int);
+    callback choose-camera(int);
     callback choose-noise(int);
     callback close();
     background: #000000a8;
@@ -119,6 +123,17 @@ export component SettingsPanel inherits Rectangle {
                     }
                 }
                 Field {
+                    label: "Camera";
+                    ComboBox {
+                        enabled: root.has-devices && root.cameras.length > 0;
+                        model: root.cameras.length > 0 ? root.cameras : ["No camera"];
+                        current-index <=> root.camera;
+                        selected => {
+                            root.choose-camera(self.current-index);
+                        }
+                    }
+                }
+                Field {
                     label: "Background noise";
                     ComboBox {
                         model: ["Let it through", "Suppress it (RNNoise)", "Suppress more (Sonora)"];
@@ -161,6 +176,7 @@ export component SettingsPreview inherits Rectangle {
         name: "Ann Example";
         microphones: ["System default", "USB microphone", "Webcam"];
         speakers: ["System default", "Headphones"];
+        cameras: ["Integrated webcam", "USB camera"];
         noise: 1;
         level: 0.08;
     }
