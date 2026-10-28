@@ -563,6 +563,63 @@ from; the git pins move to releases as they land.
     how to install, use and build it, and how it's tested; TESTPLAN.md what a person checks on
     each platform that the box can't; CHANGELOG.md what 0.1.0 is, and its known limits.
 
+### M11: What the review found
+
+Every finding of [docs/review-0.1.0.md](docs/review-0.1.0.md), split between the two sessions
+working in this repo: the window's side (**W**, the session on `ui-polish-*`) and the core's,
+the recording's, performance and the box (**C**). New `RoomState` fields, `Command`s and harness
+`Ui` fields land first, in small commits on main, for the window to build on.
+
+**For people using it**
+
+52. `mic-media, mic-core: devices` (C): the microphones and speakers there are, by name, and a
+    room's voice switched to another without leaving; noise suppression chosen per room
+    already. **`audio-devices`**: carol switches to a second PipeWire microphone and is heard.
+53. `mic-slint: settings` (C for the file, W for the panel): a settings file in the user's
+    config directory (the name, the devices, noise suppression), read at start, written on
+    change; a settings panel with a level meter. **`settings`**: a window restarted keeps its
+    name and devices.
+54. `mic-slint: participants` (W, C for `Shown`): a participants panel (names, hands, muted, who
+    records), the "+N" naming who's in it, and a raised hand counting as a speaker for which
+    tiles show. **`room`**: a hand raised off-screen comes into view and is in the panel.
+55. `mic-slint: chat, alone, leaving` (W): the chat opens on its newest, with times and a
+    sender's run grouped; "You're the only one here" with the invite and a small self-view;
+    "You left" with **Rejoin**. **`room`**, **`roster`**.
+56. `mic-core, mic-slint: a reconnect keeps the room` (C, W): the roster kept, greyed, while
+    the room redials, for up to its redial window. **`roster`**: tiles stay through a relay
+    restart.
+57. `mic-core, mic-slint: what's said when something's wrong` (C, W): `Rejected` names who was
+    posed as, and the banner says what to do, with **New room**; an unreachable relay said in a
+    few words, details behind them; the version notice a link that can be dismissed.
+    **`impersonation`**, **`version`**.
+58. `mic-core, mic-slint: the transport said` (C, W): `RoomState` says QUIC or WebSocket, and the
+    window says when it's the fallback. **`network`**.
+59. `mic-core, mic-slint: room names` (C, W): an optional name in the invite, which v1 clients
+    without it ignore, shown in the room, the link prompt and a recording's file name.
+    **`links`**.
+60. `mic-core: names in recordings` (C): the grid's tiles named, and a mark that it's a
+    recording. **`recording`**.
+
+**Quality**
+
+61. `mic-core: a clean leave` (C): a leave finishes its tracks, and logs no "dropped without
+    finish()". **`roster`**: no such line in a client's log after a leave.
+62. `mic-slint: quieter logs` (C): moq-sock's buffer warning at most once, as info.
+63. `mic-slint: the window's cost` (C, with W for anything in the window's layout): profiled in
+    the box (62's perf), on a real desktop by W; a frame only when something changed.
+    **`video`**: nine tiles back toward M6's 29 % of a core.
+
+**The box**
+
+64. `testbox: measurements know the host` (C): each measuring phase records the host's load
+    before and after, and says a measurement under load is unreliable rather than failing it.
+65. `testbox: shots and snapshots` (C): a check can take a shot at the moment it matters;
+    `--screenshots` keeps passing checks' snapshots; `run --screenshots`.
+66. `testbox: perf and drive` (C): perf in the client image; `cargo testbox drive <client>
+    join|say|shot|…`, what the review's sessions did by hand.
+67. `testbox: soak` (C): a phase of an hour, only when named: a room of six windows and the crowd,
+    CPU and memory each minute, for leaks.
+
 ### After v1
 
 These are tracked in §8.2 and get a plan of their own when they start:

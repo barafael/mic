@@ -22,11 +22,15 @@ pub const CHAT_KEPT: usize = 500;
 /// How many reactions the state keeps, the newest.
 pub const REACTIONS_KEPT: usize = 32;
 
-/// What a frontend shows of a room: plain data, no toolkit types.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// What a frontend shows of a room: plain data, no toolkit types. The default is an empty room, as
+/// a test's state starts from.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RoomState {
     /// The room's id, as an invite names it.
     pub room: String,
+    /// What its invite calls it, if anything.
+    #[serde(default)]
+    pub name: Option<String>,
     /// This participant.
     pub me: Participant,
     /// The others, in the order they joined.
@@ -35,6 +39,9 @@ pub struct RoomState {
     /// can't sign, as when they pose as someone else. A frontend warns of them.
     pub rejected: Vec<Rejected>,
     pub connection: Connection,
+    /// How the session reaches the relay, while it does.
+    #[serde(default)]
+    pub transport: Option<Transport>,
     /// The active speaker among the others (`crate::speaker`), once someone has spoken: kept
     /// after they stop, until someone else speaks.
     #[serde(default)]
@@ -73,10 +80,21 @@ pub struct Reacted {
     pub reaction: crate::chat::Reaction,
 }
 
-/// The room's session with the relay.
+/// How a session reaches the relay.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub enum Transport {
+    Quic,
+    /// The fallback over TCP, where UDP doesn't get through (D9): a frontend says so, as it
+    /// carries less (the relay's stream limit, docs/observations.md).
+    WebSocket,
+}
+
+/// The room's session with the relay.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Connection {
+    #[default]
     Connected,
     /// The session dropped, and the room is dialing the relay again, with backoff, for as long
     /// as it takes or until it's left. Its broadcast comes back as it was.
@@ -218,6 +236,7 @@ impl Room {
     /// The room of a session just joined, its task started on the session's runtime.
     pub(crate) fn start(joined: Joined) -> Self {
         let me = Participant {
+            away: false,
             key: joined.participant,
             profile: joined.profile.clone(),
             decoders: joined.decoders.clone(),
@@ -229,6 +248,8 @@ impl Room {
             participants: Vec::new(),
             rejected: Vec::new(),
             connection: Connection::Connected,
+            transport: transport(&joined.connection),
+            name: None,
             speaker: None,
             speaking: Vec::new(),
             chat: Vec::new(),
@@ -791,9 +812,14 @@ impl Task {
                 Connection::Reconnecting
             }
         };
+        let transport = match connection {
+            Connection::Connected => self.connection.as_ref().and_then(transport),
+            _ => None,
+        };
         self.state.send_if_modified(|state| {
-            let changed = state.connection != connection;
+            let changed = state.connection != connection || state.transport != transport;
             state.connection = connection;
+            state.transport = transport;
             changed
         });
     }
@@ -1023,6 +1049,17 @@ impl Drop for Screen {
             sending.abort();
         }
     }
+}
+
+/// How `connection` reaches the relay, while it's connected: QUIC counts datagrams, which a
+/// WebSocket over TCP has none of (moq-tokio says no more).
+fn transport(connection: &moq_tokio::Connection) -> Option<Transport> {
+    let stats = connection.monitor().stats()?;
+    Some(if stats.packets_sent.is_some() {
+        Transport::Quic
+    } else {
+        Transport::WebSocket
+    })
 }
 
 /// The next change of `connection`'s status; never, once there's no connection.

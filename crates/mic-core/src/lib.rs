@@ -26,7 +26,7 @@ pub mod video;
 pub use app::App;
 pub use invite::{Invite, RoomId, RoomSecret};
 pub use keys::{DeviceSecret, RoomKey};
-pub use room::{Command, Connection, Event, Room, RoomState};
+pub use room::{Command, Connection, Event, Room, RoomState, Transport};
 pub use roster::{Participant, ParticipantKey, Profile, Roster};
 pub use secrets::{SecretStore, device_secret};
 pub use session::{Client, Config, Media, Trust};

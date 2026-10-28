@@ -20,8 +20,9 @@ pub const PROFILE: &str = "profile";
 /// How long a display name may be, in characters.
 pub const NAME_LIMIT: usize = 64;
 
-/// A participant's key in the room: what others know it by.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+/// A participant's key in the room: what others know it by. The default, all zeros, is no one's:
+/// what a test's state starts from.
+#[derive(Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ParticipantKey([u8; 32]);
 
 impl ParticipantKey {
@@ -81,7 +82,7 @@ impl fmt::Debug for ParticipantKey {
 }
 
 /// What a participant says about itself.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Profile {
     /// Self-asserted (D5): trimmed, at most [`NAME_LIMIT`] characters.
     pub name: String,
@@ -173,10 +174,14 @@ pub(crate) fn write_profile(track: &mut SignedTrack, profile: &Profile) -> Resul
 }
 
 /// Someone in the room.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Participant {
     pub key: ParticipantKey,
     pub profile: Profile,
+    /// Gone while the room redials the relay, and kept, for as long as the redial takes: a frontend
+    /// greys its tile rather than drop it (`crate::room`). Back once its broadcast is.
+    #[serde(default)]
+    pub away: bool,
     /// The video codecs it decodes, by name, as its catalog says.
     #[serde(default)]
     pub decoders: Vec<String>,
@@ -201,6 +206,10 @@ pub struct Rejected {
     /// Its path under the room's prefix.
     pub path: String,
     pub reason: String,
+    /// Who it claims to be, when its catalog names someone it can't stand for: a participant
+    /// someone with the room's invite poses as.
+    #[serde(default)]
+    pub posing_as: Option<ParticipantKey>,
 }
 
 /// What a peer's readers find.
@@ -316,7 +325,11 @@ pub(crate) async fn follow(
                         if let Some(reader) = readers.remove(&path) {
                             reader.abort();
                         }
-                        rejected.push(Rejected { path, reason });
+                        rejected.push(Rejected {
+                            path,
+                            reason,
+                            posing_as: None,
+                        });
                     }
                 }
             }
@@ -347,6 +360,7 @@ fn participants(known: &HashMap<String, Known>) -> Vec<Participant> {
             Some((
                 epoch(path),
                 Participant {
+                    away: false,
                     key: known.key?,
                     profile: known.profile.clone()?,
                     decoders: known.decoders.clone(),
