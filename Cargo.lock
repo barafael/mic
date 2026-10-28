@@ -4361,6 +4361,7 @@ dependencies = [
  "hang",
  "hkdf",
  "keyring-core",
+ "libc",
  "mic-media",
  "mic-testrelay",
  "moq-audio",

@@ -6,6 +6,14 @@ measurements, and things to revisit. Newest first within each milestone. Each sa
 
 ## M11: After the review
 
+- **Each recording kept tens of MiB, freed but not given back** (settled, mic-core
+  `recording`). The box's bob, who records in `recording`, held 686 MiB after a run of phases,
+  against alice's 287. Each of his recordings left 16 to 77 MiB, with nothing live: a counting
+  allocator in a test of 15 recordings stayed at 178 KiB, while the process held 141 MB. The
+  memory was libvpx's 720p buffers, made on whichever thread encodes, and glibc kept what each
+  thread freed in that thread's arena (`MALLOC_ARENA_MAX=2` slowed it, but didn't stop it). mic
+  calls `malloc_trim` when a recording stops: the test now holds 31 MB, and bob 151 → 170 MiB
+  over six recordings, where four had taken him to 463. Not femtovg's.
 - **An hour's call grew each window by about half a MiB a minute** (settled, mic-core `sig`).
   The first full `soak`: alice 253 → 290 MiB, bob 325 → 352 MiB between minutes 5 and 60,
   steadily. A subscriber's verification kept every frame's link of every group it ever read,

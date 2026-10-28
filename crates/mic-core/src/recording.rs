@@ -180,6 +180,20 @@ impl Recording {
                 tracing::warn!(%error, "a recording's task stopped");
             }
         }
+        give_back();
+    }
+}
+
+/// Gives the memory a recording freed back to the system. Its encoder's buffers, libvpx's at
+/// 720p, are allocated on whichever thread encodes, and glibc keeps what's freed in that thread's
+/// arena: each recording left tens of MiB, the box's bob holding twice alice's after a few
+/// phases' recordings, though nothing was live. Trimmed, 15 recordings in a test held 31 MB
+/// rather than 141 (docs/observations.md).
+fn give_back() {
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    // SAFETY: malloc_trim takes no pointers, and may be called from any thread at any time.
+    unsafe {
+        libc::malloc_trim(0);
     }
 }
 
