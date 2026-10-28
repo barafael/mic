@@ -224,6 +224,12 @@ pub struct Ui {
     /// Whether it shows itself alone in the room: the invite offered, its own tile small.
     #[serde(default)]
     pub alone: bool,
+    /// Everyone its participants panel lists, by key, itself first.
+    #[serde(default)]
+    pub people: Vec<String>,
+    /// Those the panel shows with a hand raised, by key, whether they have a tile or not.
+    #[serde(default)]
+    pub people_hands: Vec<String>,
 }
 
 /// What drawing a frontend's video tiles costs, over the last second: the others' cameras, not

@@ -1,0 +1,137 @@
+import { ListView, Palette } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { Person } from "../types.slint";
+import { Icon } from "../widgets/icon.slint";
+
+// A line of the panel: someone's initials, name, and what they're doing.
+export component PersonRow inherits Rectangle {
+    in property <Person> person;
+    height: 44px;
+    accessible-role: text;
+    accessible-label: root.person.me ? root.person.name + " (you)" : root.person.name;
+    HorizontalLayout {
+        spacing: 10px;
+        alignment: stretch;
+        Rectangle {
+            width: 30px;
+            height: 30px;
+            y: (parent.height - self.height) / 2;
+            border-radius: 15px;
+            background: root.person.tint;
+            Text {
+                text: root.person.initials;
+                color: white;
+                font-size: 12px;
+                font-weight: 600;
+            }
+        }
+        Text {
+            text: root.person.me ? root.person.name + " (you)" : root.person.name;
+            color: Theme.text;
+            font-size: 13px;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        HorizontalLayout {
+            horizontal-stretch: 0;
+            spacing: 6px;
+            alignment: end;
+            if root.person.hand: Icon {
+                kind: "hand";
+                tint: Theme.warn;
+                width: 18px;
+                height: 18px;
+                y: (parent.height - self.height) / 2;
+            }
+            if root.person.sharing: Icon {
+                kind: "screen";
+                tint: Theme.accent-hover;
+                width: 18px;
+                height: 18px;
+                y: (parent.height - self.height) / 2;
+            }
+            if root.person.recording: Icon {
+                kind: "record";
+                tint: Theme.danger-hover;
+                width: 18px;
+                height: 18px;
+                y: (parent.height - self.height) / 2;
+            }
+            if root.person.muted: Icon {
+                kind: "mic-off";
+                tint: Theme.danger-hover;
+                width: 18px;
+                height: 18px;
+                y: (parent.height - self.height) / 2;
+            }
+        }
+    }
+}
+
+// Everyone in the room, those behind the "+N" among them, and what they're doing: a raised hand,
+// a share, a recording, a muted microphone.
+export component PeoplePanel inherits Rectangle {
+    in property <[Person]> people;
+    property <bool> born;
+    // Set after the first frame: one set in `init` comes before it, and isn't animated.
+    Timer {
+        interval: 16ms;
+        running: !root.born;
+        triggered => {
+            root.born = true;
+        }
+    }
+    background: Theme.surface;
+    border-radius: 12px;
+    opacity: self.born ? 1 : 0;
+    animate opacity { duration: 180ms; }
+    clip: true;
+    // It slides in from the right.
+    Rectangle {
+        x: root.born ? 0px : 24px;
+        animate x {
+            duration: 200ms;
+            easing: ease-out;
+        }
+        width: root.width;
+        height: root.height;
+        VerticalLayout {
+            padding: 12px;
+            spacing: 4px;
+            Text {
+                text: "People (" + root.people.length + ")";
+                color: Theme.text;
+                font-size: 15px;
+                font-weight: 600;
+            }
+            ListView {
+                vertical-stretch: 1;
+                for person in root.people: PersonRow {
+                    person: person;
+                }
+            }
+        }
+    }
+}
+
+export component PeoplePreview inherits Rectangle {
+    // Dark, as the window sets it (app.slint).
+    init => {
+        Palette.color-scheme = ColorScheme.dark;
+    }
+    width: 320px;
+    height: 360px;
+    background: Theme.canvas;
+    PeoplePanel {
+        x: 10px;
+        y: 10px;
+        width: 300px;
+        height: 340px;
+        people: [
+            { key: "a", name: "Ann Example", me: true, shown: true, initials: "AE", tint: #2a8ca8 },
+            { key: "b", name: "Ben", shown: true, hand: true, initials: "B", tint: #8a5cd0 },
+            { key: "c", name: "Cat", shown: true, sharing: true, recording: true, initials: "C", tint: #c0584a },
+            { key: "d", name: "Dan", muted: true, initials: "D", tint: #3f8f5a },
+        ];
+    }
+}

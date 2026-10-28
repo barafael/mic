@@ -48,6 +48,21 @@ pub struct Tile {
     pub reaction: Option<(mic_core::chat::Reaction, u64)>,
 }
 
+/// Someone in the room, as the participants panel lists them: everyone, shown or not.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Person {
+    /// The participant's key, hex.
+    pub key: String,
+    pub name: String,
+    pub me: bool,
+    pub muted: bool,
+    pub hand: bool,
+    pub recording: bool,
+    pub sharing: bool,
+    /// Whether it has a tile; those without are behind the "+N".
+    pub shown: bool,
+}
+
 /// A chat message, as the panel shows it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Line {
@@ -94,6 +109,8 @@ pub struct View {
     pub recording_self: bool,
     /// Whether a share of its screen is opening: the desktop may be asking which.
     pub share_opening: bool,
+    /// Everyone in the room, this participant first, then the others in the order they joined.
+    pub people: Vec<Person>,
 }
 
 /// Which of the others have a tile, when there are more than fit: the active speaker, and those
@@ -159,6 +176,7 @@ pub fn view(room: Option<(&RoomState, String)>) -> View {
             recording_notice: String::new(),
             recording_self: false,
             share_opening: false,
+            people: Vec::new(),
         };
     };
     let first = Shown::default().choose(state);
@@ -251,6 +269,19 @@ pub fn view_of(state: &RoomState, invite: String, shown: &[ParticipantKey]) -> V
         recording_notice: recording_notice(state),
         recording_self: state.me.profile.recording,
         share_opening: state.screen_opening,
+        people: std::iter::once((&state.me, true))
+            .chain(state.participants.iter().map(|them| (them, false)))
+            .map(|(them, me)| Person {
+                key: them.key.to_string(),
+                name: them.profile.name.clone(),
+                me,
+                muted: them.profile.muted,
+                hand: them.profile.hand,
+                recording: them.profile.recording,
+                sharing: them.profile.sharing,
+                shown: me || shown.contains(&them.key),
+            })
+            .collect(),
     }
 }
 
@@ -454,6 +485,32 @@ mod tests {
         let shown = view(Some((&state, String::new())));
         assert!(shown.status.contains("Reconnecting"));
         assert!(shown.warning.starts_with("2 broadcasts"));
+    }
+
+    #[test]
+    fn the_panel_lists_everyone_those_behind_the_overflow_among_them() {
+        let mut state = state();
+        state.participants = (2..=13)
+            .map(|byte| participant(byte, &format!("P{byte}")))
+            .collect();
+        state.participants[11].profile.hand = true;
+        let first = Shown::default().choose(&state);
+        let view = view_of(&state, String::new(), &first);
+        assert_eq!(view.people.len(), 13);
+        assert!(view.people[0].me && view.people[0].shown);
+        let hidden: Vec<&str> = view
+            .people
+            .iter()
+            .filter(|person| !person.shown)
+            .map(|person| person.name.as_str())
+            .collect();
+        assert_eq!(hidden.len(), view.overflow);
+        // A hand raised behind the "+N" is in the panel all the same.
+        assert!(
+            view.people
+                .iter()
+                .any(|person| person.name == "P13" && person.hand)
+        );
     }
 
     #[test]

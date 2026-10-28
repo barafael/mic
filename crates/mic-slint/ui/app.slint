@@ -6,13 +6,13 @@
 
 import { AboutSlint, Palette } from "std-widgets.slint";
 import { Theme } from "theme.slint";
-import { ChatLine, Tile } from "types.slint";
+import { ChatLine, Person, Tile } from "types.slint";
 import { JoinScreen } from "pages/join.slint";
 import { RoomScreen } from "pages/room.slint";
 import { SharePicker } from "overlays/share-picker.slint";
 import { LinkQuestion } from "overlays/link-question.slint";
 
-export { ChatLine, Theme, Tile }
+export { ChatLine, Person, Theme, Tile }
 
 export component AppWindow inherits Window {
     title: "mic";
@@ -28,8 +28,11 @@ export component AppWindow inherits Window {
     in property <bool> joining;
     in property <string> error;
     in property <[Tile]> tiles;
-    // Participants not shown, beyond the tiles.
+    // Participants not shown, beyond the tiles, and their names.
     in property <int> overflow;
+    in property <string> overflow-names;
+    // Everyone in the room, for the participants panel.
+    in property <[Person]> people;
     in property <string> room-invite;
     in property <string> status;
     in property <string> warning;
@@ -139,6 +142,8 @@ export component AppWindow inherits Window {
             vertical-stretch: 1;
             tiles: root.tiles;
             overflow: root.overflow;
+            overflow-names: root.overflow-names;
+            people: root.people;
             invite: root.room-invite;
             status: root.status;
             warning: root.warning;

@@ -36,7 +36,7 @@ mod ui {
     slint::include_modules!();
 }
 
-use ui::{AppWindow, ChatLine, Tile};
+use ui::{AppWindow, ChatLine, Person, Tile};
 
 #[derive(Parser)]
 #[command(name = "mic", version, about)]
@@ -841,6 +841,35 @@ fn apply(
     window.set_camera_off(view.camera_off);
     window.set_has_camera(view.camera);
     window.set_overflow(i32::try_from(view.overflow).unwrap_or(i32::MAX));
+    let hidden: Vec<&str> = view
+        .people
+        .iter()
+        .filter(|person| !person.shown)
+        .map(|person| person.name.as_str())
+        .collect();
+    window.set_overflow_names(hidden.join(", ").into());
+    if last.as_ref().is_none_or(|last| last.people != view.people) {
+        let people: Vec<Person> = view
+            .people
+            .iter()
+            .map(|person| {
+                let (red, green, blue) = view::tint(&person.key);
+                Person {
+                    key: person.key.as_str().into(),
+                    name: person.name.as_str().into(),
+                    me: person.me,
+                    muted: person.muted,
+                    hand: person.hand,
+                    recording: person.recording,
+                    sharing: person.sharing,
+                    shown: person.shown,
+                    initials: view::initials(&person.name).into(),
+                    tint: slint::Color::from_rgb_u8(red, green, blue),
+                }
+            })
+            .collect();
+        window.set_people(ModelRc::new(VecModel::from(people)));
+    }
     window.set_hand(view.hand);
     window.set_sharing(view.sharing);
     window.set_recording(view.recording_notice.as_str().into());
@@ -1183,6 +1212,17 @@ mod harness {
                 alone: view.screen == crate::view::Screen::Room
                     && view.tiles.len() <= 1
                     && view.screens.is_empty(),
+                people: view
+                    .people
+                    .iter()
+                    .map(|person| person.key.clone())
+                    .collect(),
+                people_hands: view
+                    .people
+                    .iter()
+                    .filter(|person| person.hand)
+                    .map(|person| person.key.clone())
+                    .collect(),
                 ..Ui::default()
             };
             drop(ui);
