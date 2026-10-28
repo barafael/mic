@@ -153,7 +153,11 @@ fn main() -> ExitCode {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+                // moq-sock's warning that the host's UDP buffers are smaller than it asks for is
+                // the host's business, not a user's: said only past RUST_LOG.
+                .unwrap_or_else(|_| {
+                    tracing_subscriber::EnvFilter::new("info,moq_sock::bind=error")
+                }),
         )
         .init();
     // A link opened while mic runs: the mic already there opens it (links.rs). The link comes

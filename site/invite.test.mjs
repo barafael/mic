@@ -15,10 +15,17 @@ test("a landing page's fragment opens mic:// with the same invite", () => {
     });
 });
 
+test("a room's name goes along", () => {
+    // "Standup", as mic-core writes it.
+    assert.deepEqual(micLink(`#1/${ROOM}/${SECRET}/U3RhbmR1cA`), {
+        link: `mic://join/1/${ROOM}#${SECRET}/U3RhbmR1cA`,
+    });
+});
+
 test("what isn't an invite says so", () => {
     assert.ok("error" in micLink(""));
     assert.ok("error" in micLink(`#2/${ROOM}/${SECRET}`));
     assert.ok("error" in micLink(`#1/${ROOM}/short`));
     assert.ok("error" in micLink(`#1/${ROOM.slice(1)}!/${SECRET}`));
-    assert.ok("error" in micLink(`#1/${ROOM}/${SECRET}/more`));
+    assert.ok("error" in micLink(`#1/${ROOM}/${SECRET}/not a name`));
 });
