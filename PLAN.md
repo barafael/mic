@@ -637,6 +637,33 @@ the recording's, performance and the box (**C**). New `RoomState` fields, `Comma
 69. `mic-admit: moq.pro` (to do): a front end that checks the same proof and signs the JWT moq.pro
     takes, once there's a project key and somewhere to run it.
 
+### M13: 0.1.0 out
+
+What 0.1.0 still lacks to leave this machine, then its release. Nothing has run off this host:
+there's no remote, so CI has never run, and three of the plan's assumptions wait for it; Windows
+and macOS have never been built; and a person's camera isn't one mic can send. W and C as in
+M11; pushing, and publishing the release, are the user's.
+
+70. `mic-media, mic-slint: a camera` (C, W for the panel): the system's cameras, through
+    moq-video's capture (PipeWire and V4L2 on Linux, AVFoundation on macOS, Media Foundation on
+    Windows), offered in the settings panel and kept there; the camera on at a join when one
+    is there, the box's pattern camera still where it's asked for. **`video`**: carol's
+    PipeWire has a camera (`videotestsrc`, with the Camera role, in box-devices.conf), and its
+    pictures reach alice, moving.
+71. `ci: the first run` (C): the repository on GitHub (the user creates it and pushes), and CI
+    green on Linux, Windows and macOS, settling the unverified assumptions: the keyring on the
+    runners, libvpx on Windows and macOS, lavapipe on Linux. What breaks is fixed here.
+72. `docs: 0.1.0 as it is` (C): CHANGELOG.md and README.md with M11, M12 and 70 (the settings,
+    the participants, the camera, the recording's names, admission, what the review fixed), the
+    known limits as they stand, and the femtovg and moq forks said where they're used.
+73. `release: a draft` (C): a tag `v0.1.0` runs the release workflow; the draft's packages are
+    downloaded and started: the AppImage and the tarball in a clean container, the dmg and the
+    zip on CI's runners where a start can be checked. What doesn't start is fixed, and tagged
+    again.
+74. `testplan: 0.1.0 by hand` (W on this host's desktop, the user on macOS and Windows):
+    TESTPLAN.md's steps with the draft's packages, the results in its table; what doesn't hold
+    is fixed or goes into the changelog's known limits. Then the user publishes the release.
+
 ### After v1
 
 These are tracked in §8.2 and get a plan of their own when they start:
