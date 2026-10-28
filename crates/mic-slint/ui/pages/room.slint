@@ -50,6 +50,7 @@ export component RoomScreen inherits FocusScope {
     callback toggle-recording();
     // Leaves for a new room, as when the invite reached someone it shouldn't.
     callback new-room();
+    callback open-settings();
     callback leave();
     callback toggle-mute();
     callback toggle-camera();
@@ -375,6 +376,9 @@ export component RoomScreen inherits FocusScope {
                 toggle-people => {
                     root.people-open = !root.people-open;
                 }
+                open-settings => {
+                    root.open-settings();
+                }
                 open-menu(menu, x) => {
                     root.open-menu(menu, x);
                 }
@@ -468,6 +472,10 @@ export component RoomScreen inherits FocusScope {
         toggle-people => {
             root.menu = "";
             root.people-open = !root.people-open;
+        }
+        open-settings => {
+            root.menu = "";
+            root.open-settings();
         }
         pick-reaction => {
             root.menu = "react";

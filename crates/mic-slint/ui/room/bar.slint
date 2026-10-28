@@ -34,6 +34,7 @@ export component Bar inherits HorizontalLayout {
     callback toggle-recording();
     callback toggle-chat();
     callback toggle-people();
+    callback open-settings();
     callback leave();
     // Opens `menu` over the button it came from, whose middle is at `x` across the window.
     callback open-menu(string, length);
@@ -217,8 +218,20 @@ export component Bar inherits HorizontalLayout {
             }
         }
     }
+    // Settings at the right end, as the invite is at the left.
     Rectangle {
         horizontal-stretch: 1;
+        if !root.compact: RoundButton {
+            x: parent.width - self.width;
+            y: (parent.height - self.height) / 2;
+            size: 40px;
+            icon: "settings";
+            tip-end: true;
+            label: "Settings";
+            clicked => {
+                root.open-settings();
+            }
+        }
     }
 }
 

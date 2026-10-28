@@ -52,6 +52,7 @@ export component MoreMenu inherits MenuPanel {
     callback toggle-share();
     callback toggle-recording();
     callback toggle-people();
+    callback open-settings();
     // React was picked: the reactions take its place.
     callback pick-reaction();
     width: 240px;
@@ -96,6 +97,13 @@ export component MoreMenu inherits MenuPanel {
             text: "People";
             clicked => {
                 root.toggle-people();
+            }
+        }
+        MenuRow {
+            icon: "settings";
+            text: "Settings";
+            clicked => {
+                root.open-settings();
             }
         }
         MenuRow {

@@ -242,6 +242,9 @@ pub struct Ui {
     /// The name of the room it asks about leaving for, while it asks, if the link names one.
     #[serde(default)]
     pub asking_name: Option<String>,
+    /// What the join screen's name field holds: the name it joins with next.
+    #[serde(default)]
+    pub name: String,
 }
 
 /// What drawing a frontend's video tiles costs, over the last second: the others' cameras, not

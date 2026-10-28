@@ -292,6 +292,8 @@ fn run(cli: Cli) -> Result<(), String> {
         Some(devices) => App::with_media(client, devices.media(screens.source())),
         None => App::new(client),
     };
+    // Shared with the settings panel, which switches them.
+    let devices = devices.map(Rc::new);
 
     let gpu = select_backend()?;
     // What the desktop knows mic by: its desktop file (links.rs) and the screen-share portal's
@@ -325,6 +327,7 @@ fn run(cli: Cli) -> Result<(), String> {
     let mut tell = Rc::new(Tell {
         view: Box::new(|_| {}),
         asking: Box::new(|_| {}),
+        named: Box::new(|_| {}),
     });
     #[cfg(all(unix, feature = "harness"))]
     if let Some(socket) = cli.harness {
@@ -479,6 +482,14 @@ fn run(cli: Cli) -> Result<(), String> {
             }
         }
     });
+    settings_panel(
+        &window,
+        &app,
+        &runtime,
+        devices.clone(),
+        &preferences,
+        &tell,
+    );
     window.on_open_link(|link| {
         if let Err(error) = webbrowser::open(&link) {
             tracing::warn!(%error, %link, "opening a link");
@@ -845,11 +856,189 @@ fn select_backend() -> Result<Option<videos::Gpu>, String> {
     }
 }
 
+/// The noise suppressors the panel offers, in its order.
+const NOISES: [mic_media::audio::noise::NoiseSuppression; 3] = [
+    mic_media::audio::noise::NoiseSuppression::Off,
+    mic_media::audio::noise::NoiseSuppression::Rnnoise,
+    mic_media::audio::noise::NoiseSuppression::Sonora,
+];
+
+/// A device the panel offers at `index` of `offered`: none for the first, the system's default,
+/// which follows the system as it changes.
+fn chosen(offered: &[devices::Device], index: i32) -> Option<String> {
+    let index = usize::try_from(index).ok().filter(|index| *index > 0)?;
+    offered.get(index).map(|device| device.id.clone())
+}
+
+/// The settings panel: as it opens, the devices there are and which are chosen; a choice
+/// switches the device, the call's included, and is remembered; the microphone's level for its
+/// meter while it's open; the name, remembered and told to the room, as it closes.
+fn settings_panel(
+    window: &AppWindow,
+    app: &App,
+    runtime: &tokio::runtime::Runtime,
+    devices: Option<Rc<devices::Devices>>,
+    preferences: &settings::Preferences,
+    tell: &Rc<Tell>,
+) {
+    type Offered = Rc<std::cell::RefCell<(Vec<devices::Device>, Vec<devices::Device>)>>;
+    let offered: Offered = Rc::default();
+    let meter = Rc::new(slint::Timer::default());
+    window.set_has_devices(devices.is_some());
+    window.on_open_settings({
+        let window = window.as_weak();
+        let (offered, meter, devices, preferences) = (
+            offered.clone(),
+            meter.clone(),
+            devices.clone(),
+            preferences.clone(),
+        );
+        move || {
+            let Some(shown) = window.upgrade() else {
+                return;
+            };
+            let kept = preferences.get();
+            let (microphones, speakers) = if devices.is_some() {
+                (
+                    devices::Devices::microphones(),
+                    devices::Devices::speakers(),
+                )
+            } else {
+                (Vec::new(), Vec::new())
+            };
+            let index = |offered: &[devices::Device], id: &Option<String>| {
+                id.as_ref()
+                    .and_then(|id| offered.iter().position(|device| &device.id == id))
+                    .and_then(|index| i32::try_from(index).ok())
+                    .unwrap_or(0)
+            };
+            let names = |offered: &[devices::Device]| {
+                ModelRc::new(VecModel::from(
+                    offered
+                        .iter()
+                        .map(|device| slint::SharedString::from(device.name.as_str()))
+                        .collect::<Vec<_>>(),
+                ))
+            };
+            shown.set_microphones(names(&microphones));
+            shown.set_speakers(names(&speakers));
+            shown.set_microphone(index(&microphones, &kept.microphone));
+            shown.set_speaker(index(&speakers, &kept.speaker));
+            let noise = kept.noise.unwrap_or(devices::NOISE_SUPPRESSION);
+            shown.set_noise(
+                NOISES
+                    .iter()
+                    .position(|offered| *offered == noise)
+                    .and_then(|index| i32::try_from(index).ok())
+                    .unwrap_or(1),
+            );
+            *offered.borrow_mut() = (microphones, speakers);
+            shown.set_settings_open(true);
+            if let Some(devices) = devices.clone() {
+                let window = window.clone();
+                meter.start(
+                    slint::TimerMode::Repeated,
+                    Duration::from_millis(50),
+                    move || {
+                        if let Some(shown) = window.upgrade() {
+                            shown.set_mic_level(devices.level());
+                        }
+                    },
+                );
+            }
+        }
+    });
+    window.on_choose_microphone({
+        let (offered, devices, preferences) =
+            (offered.clone(), devices.clone(), preferences.clone());
+        move |index| {
+            let id = chosen(&offered.borrow().0, index);
+            if let Some(devices) = &devices {
+                devices.switch_microphone(id.clone());
+            }
+            preferences.update(|settings| settings.microphone = id);
+        }
+    });
+    window.on_choose_speaker({
+        let (offered, devices, preferences) =
+            (offered.clone(), devices.clone(), preferences.clone());
+        move |index| {
+            let id = chosen(&offered.borrow().1, index);
+            if let Some(devices) = &devices {
+                devices.switch_speaker(id.clone());
+            }
+            preferences.update(|settings| settings.speaker = id);
+        }
+    });
+    window.on_choose_noise({
+        let (app, runtime, devices, preferences) = (
+            app.clone(),
+            runtime.handle().clone(),
+            devices.clone(),
+            preferences.clone(),
+        );
+        move |index| {
+            let Some(mode) = usize::try_from(index)
+                .ok()
+                .and_then(|index| NOISES.get(index))
+                .copied()
+            else {
+                return;
+            };
+            if let Some(devices) = &devices {
+                devices.set_noise_suppression(mode);
+            }
+            preferences.update(|settings| settings.noise = Some(mode));
+            // The call's microphone too, if it's in one.
+            if let Some(room) = app.current() {
+                runtime.spawn(async move {
+                    if let Err(error) = room.command(Command::SetNoiseSuppression { mode }).await {
+                        tracing::warn!(%error, "noise suppression");
+                    }
+                });
+            }
+        }
+    });
+    window.on_settings_closed({
+        let window = window.as_weak();
+        let (app, runtime, preferences) =
+            (app.clone(), runtime.handle().clone(), preferences.clone());
+        move || {
+            meter.stop();
+            let Some(shown) = window.upgrade() else {
+                return;
+            };
+            let name = shown.get_name().trim().to_owned();
+            if name.is_empty() {
+                return;
+            }
+            preferences.update(|settings| settings.name = name.clone());
+            // Renamed in a call: everyone there sees the new name.
+            if let Some(room) = app.current()
+                && room.state().borrow().me.profile.name != name
+            {
+                runtime.spawn(async move {
+                    if let Err(error) = room.command(Command::SetName { name }).await {
+                        tracing::warn!(%error, "the name");
+                    }
+                });
+            }
+        }
+    });
+    window.on_name_edited({
+        let tell = tell.clone();
+        move |name| (tell.named)(name.to_string())
+    });
+    (tell.named)(window.get_name().to_string());
+}
+
 /// What the window tells the harness, with its feature: each view it shows, and the link it asks
 /// about while it asks.
 struct Tell {
     view: Box<dyn Fn(&View)>,
     asking: Box<dyn Fn(Option<String>)>,
+    /// What the join screen's name field holds, as it's edited.
+    named: Box<dyn Fn(String)>,
 }
 
 /// Joins `invite` as `profile`, on `runtime`, and says on `window` if it couldn't.
@@ -1254,10 +1443,12 @@ mod harness {
             });
         });
         let (asked, told) = (ui.clone(), harness.clone());
+        let (named_ui, named_told) = (ui.clone(), harness.clone());
         let view = Box::new(move |view: &View| {
             let mut ui = ui.lock().unwrap_or_else(PoisonError::into_inner);
             let asking = ui.asking.take();
             let asking_name = ui.asking_name.take();
+            let name = std::mem::take(&mut ui.name);
             let keys = |shows: fn(&crate::view::Tile) -> bool| {
                 view.tiles
                     .iter()
@@ -1272,6 +1463,7 @@ mod harness {
                 cant_decode: keys(|tile| tile.cant_decode.is_some()),
                 asking,
                 asking_name,
+                name,
                 room_name: (!view.room_name.is_empty()).then(|| view.room_name.clone()),
                 overflow: view.overflow,
                 speaking: keys(|tile| tile.speaking),
@@ -1329,6 +1521,14 @@ mod harness {
             drop(asked);
             told.ui_changed();
         });
-        std::rc::Rc::new(Tell { view, asking })
+        let named = Box::new(move |name: String| {
+            named_ui.lock().unwrap_or_else(PoisonError::into_inner).name = name;
+            named_told.ui_changed();
+        });
+        std::rc::Rc::new(Tell {
+            view,
+            asking,
+            named,
+        })
     }
 }
