@@ -173,6 +173,17 @@ async fn a_room_reconnects_after_the_relay_restarts() {
     relay.stop().await.unwrap();
     connection_is(&alice, Connection::Reconnecting).await;
     connection_is(&bob, Connection::Reconnecting).await;
+    // Bob kept, away, while Alice's room redials.
+    {
+        let state = alice.state().borrow().clone();
+        assert!(
+            state.participants.len() == 1
+                && state.participants[0].key == bob.participant()
+                && state.participants[0].away,
+            "{:?}",
+            state.participants
+        );
+    }
     // Longer than a connection's redial window (the connect timeout), so the room dials anew.
     tokio::time::sleep(Duration::from_secs(3)).await;
     relay.restart().await.unwrap();
@@ -183,7 +194,9 @@ async fn a_room_reconnects_after_the_relay_restarts() {
     let back = tokio::time::timeout(
         PATIENCE,
         state.wait_for(|state| {
-            state.participants.len() == 1 && state.participants[0].key == bob.participant()
+            state.participants.len() == 1
+                && state.participants[0].key == bob.participant()
+                && !state.participants[0].away
         }),
     )
     .await;
