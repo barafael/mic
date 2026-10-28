@@ -5,8 +5,10 @@ use std::time::Duration;
 
 use mic_media::audio::{AnalyzingSink, Mixer, Sink, Source, ToneSource, capture};
 
-/// Plays each tone's capture into a stream of its own for `duration`; returns what was heard.
-async fn play(tones: &[f64], duration: Duration) -> mic_media::audio::Analyzer {
+/// Plays each tone's capture into a stream of its own for `duration`, and has `heard` look at
+/// what was heard while they still play: once they stop, the sink plays on, and silence fills
+/// its window (on a slow machine, CI's macOS runner, half of it).
+async fn play(tones: &[f64], duration: Duration, heard: impl FnOnce(&mic_media::audio::Analyzer)) {
     let mixer = Mixer::new();
     let (sink, analyzer) = AnalyzingSink::new();
     let _playing = Box::new(sink).start(mixer.clone()).unwrap();
@@ -23,32 +25,36 @@ async fn play(tones: &[f64], duration: Duration) -> mic_media::audio::Analyzer {
         }));
     }
     tokio::time::sleep(duration).await;
+    heard(&analyzer);
     drop(sources);
     for forwarding in forwarding {
         forwarding.await.unwrap();
     }
-    analyzer
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn each_tone_is_heard_and_nothing_else() {
-    let heard = play(&[440.0, 660.0], Duration::from_millis(1500)).await;
-    for frequency in [440.0, 660.0] {
-        // A tone of amplitude 0.5, give or take the jitter buffer's start and the end.
-        let level = heard.level(frequency);
-        assert!(level > 0.35, "{frequency} Hz at {level}");
-    }
-    let level = heard.level(550.0);
-    assert!(level < 0.05, "550 Hz at {level}");
-    assert!(
-        heard.played() >= 48_000,
-        "{} samples played",
-        heard.played()
-    );
+    play(&[440.0, 660.0], Duration::from_millis(1500), |heard| {
+        for frequency in [440.0, 660.0] {
+            // A tone of amplitude 0.5, give or take the jitter buffer's start.
+            let level = heard.level(frequency);
+            assert!(level > 0.35, "{frequency} Hz at {level}");
+        }
+        let level = heard.level(550.0);
+        assert!(level < 0.05, "550 Hz at {level}");
+        assert!(
+            heard.played() >= 48_000,
+            "{} samples played",
+            heard.played()
+        );
+    })
+    .await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn no_tone_is_silence() {
-    let heard = play(&[], Duration::from_millis(300)).await;
-    assert_eq!(heard.rms(), 0.0);
+    play(&[], Duration::from_millis(300), |heard| {
+        assert_eq!(heard.rms(), 0.0);
+    })
+    .await;
 }
