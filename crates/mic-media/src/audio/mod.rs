@@ -26,7 +26,7 @@ use derive_more::{Display, Error};
 
 pub use analyze::{Analyzer, AnalyzingSink, level};
 #[cfg(feature = "devices")]
-pub use device::{Microphone, Speaker};
+pub use device::{Device, Level, Microphone, SharedWriter, Speaker, microphones, speakers};
 #[cfg(feature = "devices")]
 pub use echo::EchoCanceller;
 pub use mixer::{Mixer, Playout};

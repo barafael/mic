@@ -12,6 +12,7 @@
 mod devices;
 mod links;
 mod screens;
+mod settings;
 mod videos;
 mod view;
 
@@ -42,13 +43,17 @@ use ui::{AppWindow, ChatLine, Tile};
 #[command(name = "mic", version, about)]
 struct Cli {
     /// The relay, `https://…`.
-    #[arg(long, env = "MIC_RELAY", required_unless_present = "register")]
+    #[arg(long, env = "MIC_RELAY", required_unless_present_any = ["register", "devices"])]
     relay: Option<url::Url>,
     /// Makes this binary what opens `mic://` links, for this user (Linux, Windows), and exits. The
     /// `--relay`, `--ca`, `--version-url` and `--no-websocket` given with it are what a link
     /// starts mic with.
     #[arg(long)]
     register: bool,
+    /// Lists the microphones and speakers there are, with the ids the settings file keeps, and
+    /// exits.
+    #[arg(long)]
+    devices: bool,
     /// A CA's certificate (PEM) that the relay's is trusted by; the system's roots otherwise.
     #[arg(long, conflicts_with = "fingerprint")]
     ca: Option<PathBuf>,
@@ -165,6 +170,18 @@ fn main() -> ExitCode {
         return ExitCode::SUCCESS;
     }
     let cli = Cli::parse();
+    if cli.devices {
+        for (kind, listed) in [
+            ("Microphones", devices::Devices::microphones()),
+            ("Speakers", devices::Devices::speakers()),
+        ] {
+            println!("{kind} (the default first):");
+            for device in listed {
+                println!("  {}  [{}]", device.name, device.id);
+            }
+        }
+        return ExitCode::SUCCESS;
+    }
     if cli.register {
         // What this mic was started with, so that a link opened when none runs starts one on
         // the same relay.
@@ -238,10 +255,28 @@ fn run(cli: Cli) -> Result<(), String> {
         .map_err(|error| format!("the synthetic media: {error}"))?;
     // What a share captures: the picker's choice.
     let screens = screens::Screens::default();
+    // What the window remembers, kept in the config directory; only in memory with a device
+    // secret only in memory.
     #[cfg(all(unix, feature = "harness"))]
-    let devices = synthetic.is_none().then(devices::Devices::new);
+    let kept = (!cli.ephemeral)
+        .then(settings::Preferences::default_path)
+        .flatten();
     #[cfg(not(all(unix, feature = "harness")))]
-    let devices = Some(devices::Devices::new());
+    let kept = settings::Preferences::default_path();
+    let preferences = settings::Preferences::load(kept);
+    let remembered = preferences.get();
+    let opened = || {
+        let devices =
+            devices::Devices::new(remembered.microphone.clone(), remembered.speaker.clone());
+        if let Some(noise) = remembered.noise {
+            devices.set_noise_suppression(noise);
+        }
+        devices
+    };
+    #[cfg(all(unix, feature = "harness"))]
+    let devices = synthetic.is_none().then(opened);
+    #[cfg(not(all(unix, feature = "harness")))]
+    let devices = Some(opened());
     #[cfg(all(unix, feature = "harness"))]
     let app = match (&synthetic, &devices) {
         (Some(synthetic), _) => App::with_media(client, synthetic.media()),
@@ -301,9 +336,14 @@ fn run(cli: Cli) -> Result<(), String> {
         );
     }
 
+    // The name last joined with, filled in.
+    if !remembered.name.is_empty() {
+        window.set_name(remembered.name.as_str().into());
+    }
     window.on_join({
         let window = window.as_weak();
         let app = app.clone();
+        let preferences = preferences.clone();
         let runtime = runtime.handle().clone();
         move |name, invite| {
             let Some(shown) = window.upgrade() else {
@@ -319,6 +359,7 @@ fn run(cli: Cli) -> Result<(), String> {
             };
             shown.set_error("".into());
             shown.set_joining(true);
+            preferences.update(|settings| settings.name = name.trim().to_owned());
             join(&runtime, &app, window.clone(), invite, Profile::new(&name));
         }
     });
