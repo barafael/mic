@@ -35,6 +35,8 @@ async fn the_state_says_who_and_where_and_commands_change_it() {
     assert_eq!(state.me.key, alice.participant());
     assert_eq!(state.me.profile.name, "Alice");
     assert_eq!(state.connection, Connection::Connected);
+    // mic-testrelay serves QUIC only.
+    assert_eq!(state.transport, Some(mic_core::Transport::Quic));
     assert!(state.participants.is_empty());
 
     alice

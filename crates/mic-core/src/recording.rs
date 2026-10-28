@@ -609,8 +609,7 @@ mod tests {
         crate::Participant {
             key: ParticipantKey::from_bytes([byte; 32]),
             profile: crate::Profile::new("someone"),
-            decoders: Vec::new(),
-            renditions: Vec::new(),
+            ..Default::default()
         }
     }
 
@@ -619,13 +618,7 @@ mod tests {
             room: "room".to_owned(),
             me: participant(0),
             participants: (1..=others).map(participant).collect(),
-            rejected: Vec::new(),
-            connection: crate::Connection::Connected,
-            speaker: None,
-            speaking: Vec::new(),
-            chat: Vec::new(),
-            reactions: Vec::new(),
-            screen_opening: false,
+            ..Default::default()
         }
     }
 

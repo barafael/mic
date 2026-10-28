@@ -341,7 +341,7 @@ mod tests {
             key: ParticipantKey::from_bytes([byte; 32]),
             profile: Profile::new(name),
             decoders: vec!["vp9".to_owned()],
-            renditions: Vec::new(),
+            ..Default::default()
         }
     }
 
@@ -350,13 +350,7 @@ mod tests {
             room: "room".to_owned(),
             me: participant(1, "Alice"),
             participants: vec![participant(2, "Bob"), participant(3, "Carol")],
-            rejected: Vec::new(),
-            connection: Connection::Connected,
-            speaker: None,
-            speaking: Vec::new(),
-            chat: Vec::new(),
-            reactions: Vec::new(),
-            screen_opening: false,
+            ..Default::default()
         }
     }
 
@@ -450,6 +444,7 @@ mod tests {
             Rejected {
                 path: "a".to_owned(),
                 reason: "forged".to_owned(),
+                posing_as: None,
             };
             2
         ];
