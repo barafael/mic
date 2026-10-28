@@ -233,6 +233,8 @@ pub(crate) struct Joined {
     pub tap: crate::recording::Tap,
     /// Where recordings go.
     pub recordings: std::path::PathBuf,
+    /// Told when the room is left, so the senders finish their tracks.
+    pub leaving: watch::Sender<bool>,
     /// What suppresses the voice's noise, which it follows.
     pub noise: watch::Sender<mic_media::audio::noise::NoiseSuppression>,
     /// Where the others' voices play, if anywhere.
@@ -320,7 +322,10 @@ impl Room {
             camera: joined.camera,
             muted: joined.muted,
             camera_on: joined.camera_on,
-            screen: joined.screen.map(Screen::new),
+            screen: joined
+                .screen
+                .map(|source| Screen::new(source, joined.leaving.subscribe())),
+            leaving: joined.leaving,
             tap: joined.tap,
             recordings: joined.recordings,
             recording: None,
@@ -489,6 +494,8 @@ struct Task {
     camera_on: watch::Sender<bool>,
     /// The screenshare, if it can share one.
     screen: Option<Screen>,
+    /// Told when the room is left.
+    leaving: watch::Sender<bool>,
     tap: crate::recording::Tap,
     recordings: std::path::PathBuf,
     /// The recording under way, if any.
@@ -976,11 +983,33 @@ impl Task {
     /// that doesn't drain in time is closed all the same.
     async fn leave(&mut self) {
         self.following.abort();
-        for sending in [self.voice.take(), self.camera.take()]
+        // The senders finish their tracks, so the others see them end, not drop; for up to a
+        // second, then they're stopped all the same.
+        self.leaving.send_replace(true);
+        let sending: Vec<tokio::task::JoinHandle<()>> = [self.voice.take(), self.camera.take()]
             .into_iter()
             .flatten()
-        {
-            sending.abort();
+            .chain(
+                self.screen
+                    .as_mut()
+                    .and_then(|screen| screen.sending.take()),
+            )
+            .collect();
+        let aborts: Vec<_> = sending
+            .iter()
+            .map(tokio::task::JoinHandle::abort_handle)
+            .collect();
+        let finished = tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            for task in sending {
+                let _over: Result<(), _> = task.await;
+            }
+        })
+        .await;
+        if finished.is_err() {
+            tracing::debug!("a sender didn't finish within a second");
+            for abort in aborts {
+                abort.abort();
+            }
         }
         self.screen = None;
         if let Some(recording) = self.recording.take() {
@@ -1037,6 +1066,8 @@ struct Screen {
     ends: mpsc::UnboundedReceiver<u64>,
     /// A capture being opened, and who asked for it.
     opening: Option<Opening>,
+    /// Told when the room is left: the track's sender finishes it.
+    leaving: watch::Receiver<bool>,
 }
 
 /// A screen's capture being opened, on a blocking thread: the desktop may ask which screen, and
@@ -1049,9 +1080,10 @@ struct Opening {
 }
 
 impl Screen {
-    fn new(source: crate::video::ScreenSource) -> Self {
+    fn new(source: crate::video::ScreenSource, leaving: watch::Receiver<bool>) -> Self {
         let (ended, ends) = mpsc::unbounded_channel();
         Self {
+            leaving,
             source,
             pictures: watch::channel(None).0,
             on: watch::channel(false).0,
@@ -1111,6 +1143,7 @@ impl Screen {
                 self.pictures.subscribe(),
                 track,
                 self.on.subscribe(),
+                self.leaving.clone(),
             )));
         }
         self.on.send_replace(true);

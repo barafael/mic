@@ -105,11 +105,21 @@ impl Recorded {
 /// Sends `camera` onto `track`, a group a second, each starting with a keyframe, until the
 /// camera or the track end. While `on` says it's off, nothing is sent, and the next picture
 /// after it's on again starts a group.
-pub(crate) async fn publish(camera: Camera, track: SignedTrack, on: watch::Receiver<bool>) {
+pub(crate) async fn publish(
+    camera: Camera,
+    track: SignedTrack,
+    on: watch::Receiver<bool>,
+    leaving: watch::Receiver<bool>,
+) {
     let sending = Sending::new(track, CAMERA_SETTINGS.fps);
-    match camera {
-        Camera::Live(pictures) => publish_live(pictures, sending, on, CAMERA_SETTINGS).await,
-        Camera::Recorded(recorded) => publish_recorded(recorded, sending, on).await,
+    let sending = match camera {
+        Camera::Live(pictures) => {
+            publish_live(pictures, sending, on, CAMERA_SETTINGS, leaving).await
+        }
+        Camera::Recorded(recorded) => publish_recorded(recorded, sending, on, leaving).await,
+    };
+    if let Some(sending) = sending {
+        sending.finish();
     }
 }
 
@@ -119,9 +129,12 @@ pub(crate) async fn publish_screen(
     pictures: Pictures,
     track: SignedTrack,
     on: watch::Receiver<bool>,
+    leaving: watch::Receiver<bool>,
 ) {
     let sending = Sending::new(track, SCREEN_SETTINGS.fps);
-    publish_live(pictures, sending, on, SCREEN_SETTINGS).await;
+    if let Some(sending) = publish_live(pictures, sending, on, SCREEN_SETTINGS, leaving).await {
+        sending.finish();
+    }
 }
 
 async fn publish_live(
@@ -129,15 +142,24 @@ async fn publish_live(
     mut sending: Sending,
     on: watch::Receiver<bool>,
     settings: Settings,
-) {
+    mut leaving: watch::Receiver<bool>,
+) -> Option<Sending> {
     let mut encoder = match Vp9Encoder::new(settings) {
         Ok(encoder) => Some(encoder),
         Err(error) => {
             tracing::warn!(%error, "no VP9 encoder: the camera isn't sent");
-            return;
+            return None;
         }
     };
-    while pictures.changed().await.is_ok() {
+    loop {
+        // Until the room is left: then the track is finished, not dropped.
+        let changed = tokio::select! {
+            changed = pictures.changed() => changed.is_ok(),
+            _ = leaving.wait_for(|left| *left) => return Some(sending),
+        };
+        if !changed {
+            return Some(sending);
+        }
         let Some(picture) = pictures.borrow_and_update().clone() else {
             continue;
         };
@@ -154,9 +176,7 @@ async fn publish_live(
             continue;
         }
         let keyframe = sending.keyframe_next();
-        let Some(mut working) = encoder.take() else {
-            return;
-        };
+        let mut working = encoder.take()?;
         let encoded = tokio::task::spawn_blocking(move || {
             let packets = working.encode(&picture, keyframe);
             (working, packets)
@@ -169,14 +189,14 @@ async fn publish_live(
             }
             Err(error) => {
                 tracing::warn!(%error, "the camera's encoder stopped");
-                return;
+                return None;
             }
         };
         match packets {
             Ok(packets) => {
                 let data: Vec<Vec<u8>> = packets.into_iter().map(|packet| packet.data).collect();
                 if !sending.send(&data) {
-                    return;
+                    return None;
                 }
             }
             Err(error) => tracing::warn!(%error, "encoding the camera"),
@@ -186,19 +206,27 @@ async fn publish_live(
 
 /// `recorded`, from its start, at the camera's rate, over and over. Paused, it starts again
 /// from its start, a keyframe.
-async fn publish_recorded(recorded: Recorded, mut sending: Sending, on: watch::Receiver<bool>) {
+async fn publish_recorded(
+    recorded: Recorded,
+    mut sending: Sending,
+    on: watch::Receiver<bool>,
+    mut leaving: watch::Receiver<bool>,
+) -> Option<Sending> {
     let mut ticks = tokio::time::interval(Duration::from_secs(1) / CAMERA_SETTINGS.fps);
     ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut next = 0;
     loop {
-        ticks.tick().await;
+        tokio::select! {
+            _ = ticks.tick() => {}
+            _ = leaving.wait_for(|left| *left) => return Some(sending),
+        }
         if !*on.borrow() {
             sending.pause();
             next = 0;
             continue;
         }
         if !sending.send(&recorded.pictures[next]) {
-            return;
+            return None;
         }
         next = (next + 1) % recorded.pictures.len();
     }
@@ -240,6 +268,18 @@ impl Sending {
 
     /// The next picture's packets, encoded as [`Self::keyframe_next`] said; false once the track
     /// is over.
+    /// The last group finished, and the track: the room is left.
+    fn finish(self) {
+        if let Some(group) = self.group
+            && let Err(error) = crate::sig::SignedGroup::finish(group)
+        {
+            tracing::debug!(%error, "finishing the last camera group");
+        }
+        if let Err(error) = self.track.finish() {
+            tracing::debug!(%error, "finishing the camera track");
+        }
+    }
+
     fn send(&mut self, packets: &[Vec<u8>]) -> bool {
         if self.keyframe_next() {
             if let Some(full) = self.group.take()
