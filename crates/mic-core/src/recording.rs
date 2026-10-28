@@ -17,6 +17,7 @@ use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use mic_media::video::compose::{Rect, grid};
+use mic_media::video::text::Label;
 use mic_media::video::vp9::{Content, Settings, Vp9Encoder};
 use mic_media::video::{Encoder as _, Picture};
 use tokio::io::AsyncWriteExt;
@@ -323,6 +324,7 @@ async fn compose(
     let mut speaker: Option<ParticipantKey> = None;
     let mut spoke: Option<Instant> = None;
     let mut sent: u64 = 0;
+    let mut labels = Labels::default();
     loop {
         tokio::select! {
             _ = ticks.tick() => {}
@@ -361,16 +363,27 @@ async fn compose(
             width: settings.width,
             height: settings.height,
         };
+        let name_of = |key: ParticipantKey| {
+            std::iter::once(&state.me)
+                .chain(&state.participants)
+                .find(|them| them.key == key)
+                .map(|them| them.profile.name.clone())
+                .unwrap_or_default()
+        };
         match &shown {
             Shown::Screen(whose) => {
                 if let Some(screen) = sources.screens.pictures(*whose).borrow().clone() {
                     canvas.draw(&screen, whole);
                 }
+                labels.name(&mut canvas, &format!("{}'s screen", name_of(*whose)), whole);
             }
-            Shown::Speaker(whose) => match picture_of(*whose) {
-                Some(camera) => canvas.draw(&camera, whole),
-                None => canvas.fill(whole, card(*whose)),
-            },
+            Shown::Speaker(whose) => {
+                match picture_of(*whose) {
+                    Some(camera) => canvas.draw(&camera, whole),
+                    None => canvas.fill(whole, card(*whose)),
+                }
+                labels.name(&mut canvas, &name_of(*whose), whole);
+            }
             Shown::Grid(keys) => {
                 for (key, cell) in
                     keys.iter()
@@ -380,9 +393,11 @@ async fn compose(
                         Some(camera) => canvas.draw(&camera, cell),
                         None => canvas.fill(cell, card(*key)),
                     }
+                    labels.name(&mut canvas, &name_of(*key), cell);
                 }
             }
         }
+        labels.mark(&mut canvas);
         let keyframe = sent.is_multiple_of(u64::from(settings.fps));
         let Some(mut working) = encoder.take() else {
             break;
@@ -427,6 +442,73 @@ async fn compose(
 }
 
 /// What stands for `whose` without a picture: its colour, as Y, U and V.
+/// The recording's names and mark, each made once, as Slint's tiles have them: a name at the
+/// bottom left of its tile, white on a darkened band; a red dot and "Recording" at the bottom
+/// right, so that the file says what it is wherever it's played. Not along the top, where the
+/// box's pattern cameras say whose they are (mic-media's `read_pattern`).
+#[derive(Default)]
+struct Labels {
+    made: HashMap<(String, u32, u32), Label>,
+    mark: Option<(Label, Label)>,
+}
+
+/// Limited range white, and red (BT.601).
+const WHITE: (u8, u8, u8) = (235, 128, 128);
+const RED: (u8, u8, u8) = (81, 90, 240);
+
+impl Labels {
+    /// `name` at the bottom left of `rect`: its text a fifteenth of the picture's height, or of
+    /// the tile's if that's taller, a band behind it.
+    fn name(&mut self, canvas: &mut Picture, name: &str, rect: Rect) {
+        if name.is_empty() {
+            return;
+        }
+        let height = (canvas.height / 30).max(rect.height / 15).clamp(12, 40) & !1;
+        let pad = (height / 3) & !1;
+        let max_width = rect.width.saturating_sub(4 * pad);
+        let label = self
+            .made
+            .entry((name.to_owned(), height, max_width))
+            .or_insert_with(|| Label::text(name, height, max_width));
+        let (x, y) = (rect.x + pad, rect.y + rect.height - height - 3 * pad);
+        canvas.darken(Rect {
+            x,
+            y,
+            width: (label.width + 2 * pad + 1) & !1,
+            height: height + 2 * pad,
+        });
+        canvas.paint(label, x + pad, y + pad, WHITE);
+        // Names come and go with the room: no more kept than a grid's worth, and some.
+        if self.made.len() > 4 * GRID {
+            self.made.clear();
+        }
+    }
+
+    fn mark(&mut self, canvas: &mut Picture) {
+        let height = ((canvas.height / 30).clamp(12, 32)) & !1;
+        let pad = (height / 3) & !1;
+        let (dot, text) = self.mark.get_or_insert_with(|| {
+            (
+                Label::dot(height * 2 / 3),
+                Label::text("Recording", height, canvas.width / 3),
+            )
+        });
+        let width = (dot.width + text.width + 4 * pad) & !1;
+        let (x, y) = (
+            canvas.width.saturating_sub(width + 2 * pad) & !1,
+            canvas.height.saturating_sub(height + 4 * pad) & !1,
+        );
+        canvas.darken(Rect {
+            x,
+            y,
+            width,
+            height: height + 2 * pad,
+        });
+        canvas.paint(dot, x + pad, y + pad + (height - dot.height) / 2, RED);
+        canvas.paint(text, x + 2 * pad + dot.width + pad / 2, y + pad, WHITE);
+    }
+}
+
 fn card(whose: ParticipantKey) -> (u8, u8, u8) {
     let (u, v) = mic_media::video::tint(whose.as_bytes()[0]);
     (60, u, v)
