@@ -28,8 +28,11 @@ Write down, for each step: the platform and its version, the package, and what h
    not itself; mute (Ctrl+D) is silence at the other end, and the tile says muted.
 3. **Devices.** With speakers, not headphones, talk: the other end hears no echo of itself.
    Typing or a fan near the microphone is quieter at the other end than in the room.
-4. **Camera.** There's no camera device in 0.1.0: the camera button is off, and the tile shows
-   initials. (When there is one: the other sees it.)
+4. **Camera.** With a webcam: the other sees it within a few seconds of the join, and your
+   self-view shows it mirrored. **Ctrl+E** turns it off: the other sees your name, and the
+   webcam's light goes out; again, and it's back. Choose another camera in the settings: it's
+   the one sent, and it's still chosen after a restart. Without one: the camera button is off,
+   and the tile shows initials.
 5. **Screen sharing.** Share a display, then a window: the other sees it on the stage within a
    few seconds, and it stops when you stop. On Linux, once on X11 and once on Wayland, where the
    desktop's portal asks what to share.

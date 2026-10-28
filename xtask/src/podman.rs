@@ -58,6 +58,10 @@ pub fn camera(client: &str) -> Option<u8> {
     }
 }
 
+/// The pattern the box's camera shows (testbox/camera), a PipeWire camera in carol's pod for
+/// the `video` phase's check of a real camera's path: apart from the synthetic cameras'.
+pub const BOX_CAMERA: u8 = 6;
+
 /// The crowd's participant `index`'s name (from 1).
 pub fn crowd_name(index: u32) -> String {
     format!("crowd-{index}")

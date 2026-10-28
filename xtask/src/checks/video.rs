@@ -14,7 +14,7 @@ use mic_core::{Command, Invite};
 
 use crate::error::{Error, Result};
 use crate::harness::{Participant, names};
-use crate::podman::{TestBox, camera};
+use crate::podman::{BOX_CAMERA, TestBox, camera};
 use crate::view;
 
 use super::Checks;
@@ -203,6 +203,21 @@ pub fn video(checks: &mut Checks, the_box: &TestBox) -> Result<()> {
         bob.wait_for_snapshot("showing alice's video again", PATIENCE, shows_her)?;
         Ok(())
     });
+    checks.record(
+        "carol's camera, a PipeWire one, reaches alice; turned off, it stops filming",
+        || {
+            let carol_key = carol.join(&invite, "Carol")?.me.key.to_string();
+            carol.reset()?;
+            let filmed = films(the_box, &mut alice, &mut carol, &invite, &carol_key);
+            // Gone again, for the phases after: carol has no camera of her own.
+            let stopped = the_box.exec(
+                &view::container("carol"),
+                &["sh", "-c", "pkill -x box-camera; true"],
+            );
+            carol.reset()?;
+            filmed.and(stopped.map(|_| ()))
+        },
+    );
     for participant in [&mut alice, &mut bob, &mut carol]
         .into_iter()
         .chain(crowd.iter_mut())
@@ -210,6 +225,92 @@ pub fn video(checks: &mut Checks, the_box: &TestBox) -> Result<()> {
         participant.reset()?;
     }
     Ok(())
+}
+
+/// The box's camera started in carol's pod, and carol joined with it: alice decodes its pattern,
+/// moving; Ctrl+E in carol's window turns it off for alice, and its PipeWire node stops running,
+/// as a webcam's light goes out (PLAN.md, commit 70).
+fn films(
+    the_box: &TestBox,
+    alice: &mut Participant,
+    carol: &mut Participant,
+    invite: &Invite,
+    carol_key: &str,
+) -> Result<()> {
+    let started = the_box.exec(
+        &view::container("carol"),
+        &[
+            "sh",
+            "-c",
+            &format!("/opt/mic/box-camera --sender {BOX_CAMERA} >/tmp/box-camera.log 2>&1 &"),
+        ],
+    )?;
+    if !started.status.success() {
+        return Err(Error::Failed(
+            "box-camera didn't start in carol's pod".to_owned(),
+        ));
+    }
+    // Listed once PipeWire has it; a join opens the camera there is.
+    let deadline = Instant::now() + PATIENCE;
+    while camera_node(the_box)?.is_none() {
+        if Instant::now() > deadline {
+            return Err(Error::Failed(
+                "no box camera in carol's PipeWire".to_owned(),
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    carol.join(invite, "Carol")?;
+    sees(alice, carol_key, BOX_CAMERA)?;
+    let frame = |alice: &mut Participant| -> Result<Option<u16>> {
+        Ok(alice
+            .seen()?
+            .cameras
+            .into_iter()
+            .find(|camera| camera.key == carol_key)
+            .and_then(|camera| camera.frame))
+    };
+    let before = frame(alice)?;
+    std::thread::sleep(Duration::from_secs(1));
+    let after = frame(alice)?;
+    if before == after {
+        return Err(Error::Failed(format!(
+            "carol's camera stood still at frame {before:?}"
+        )));
+    }
+    super::window::press(the_box, "carol", "ctrl+e")?;
+    alice.wait_for("carol's camera off", PATIENCE, |state| {
+        state
+            .participants
+            .iter()
+            .any(|them| them.key.to_string() == carol_key && them.profile.camera_off)
+    })?;
+    let deadline = Instant::now() + PATIENCE;
+    loop {
+        let state = camera_node(the_box)?;
+        if state.as_deref() != Some("running") {
+            return Ok(());
+        }
+        if Instant::now() > deadline {
+            return Err(Error::Failed(
+                "carol's camera still filming with her camera off".to_owned(),
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+}
+
+/// The box camera's PipeWire node's state in carol's pod (`running`, `idle`, `suspended`), if
+/// it's there.
+fn camera_node(the_box: &TestBox) -> Result<Option<String>> {
+    let dumped = the_box.exec(&view::container("carol"), &["pw-dump"])?;
+    let nodes: serde_json::Value = serde_json::from_slice(&dumped.stdout).unwrap_or_default();
+    Ok(nodes.as_array().and_then(|objects| {
+        objects
+            .iter()
+            .find(|object| object["info"]["props"]["node.name"] == "box-camera")
+            .and_then(|node| node["info"]["state"].as_str().map(str::to_owned))
+    }))
 }
 
 /// How many pixels of a sender's colour a tile showing its camera has, at least, on a display:

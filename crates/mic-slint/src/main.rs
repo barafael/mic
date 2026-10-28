@@ -178,6 +178,7 @@ fn main() -> ExitCode {
         for (kind, listed) in [
             ("Microphones", devices::Devices::microphones()),
             ("Speakers", devices::Devices::speakers()),
+            ("Cameras", devices::Devices::cameras()),
         ] {
             println!("{kind} (the default first):");
             for device in listed {
@@ -270,8 +271,11 @@ fn run(cli: Cli) -> Result<(), String> {
     let preferences = settings::Preferences::load(kept);
     let remembered = preferences.get();
     let opened = || {
-        let devices =
-            devices::Devices::new(remembered.microphone.clone(), remembered.speaker.clone());
+        let devices = devices::Devices::new(
+            remembered.microphone.clone(),
+            remembered.speaker.clone(),
+            remembered.camera.clone(),
+        );
         if let Some(noise) = remembered.noise {
             devices.set_noise_suppression(noise);
         }
@@ -527,6 +531,7 @@ fn run(cli: Cli) -> Result<(), String> {
         let app = app.clone();
         let window = window.as_weak();
         let runtime = runtime.handle().clone();
+        let devices = devices.clone();
         move || {
             let Some(room) = app.current() else {
                 return;
@@ -534,6 +539,10 @@ fn run(cli: Cli) -> Result<(), String> {
             let off = window
                 .upgrade()
                 .is_some_and(|window| window.get_camera_off());
+            // Off, the camera isn't filming; on, it films again.
+            if let Some(devices) = &devices {
+                devices.set_camera_on(off);
+            }
             runtime.spawn(async move {
                 if let Err(error) = room.command(Command::SetCamera { on: off }).await {
                     tracing::warn!(%error, "the camera");
