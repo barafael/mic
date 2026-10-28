@@ -2,11 +2,14 @@ name: Release
 
 # A tag v<version> makes a draft release of that version: Linux's AppImage and tarball, macOS's
 # dmg, Windows's zip (packaging/), each built and uploaded by its platform's job, and the
-# changelog's section for its notes. A person publishes the draft.
+# changelog's section for its notes. A person publishes the draft. Run by hand, it's a dry run:
+# the same packages, kept as the run's artifacts, and no release, so they're tried before a tag
+# that would have to move.
 
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions: {}
 
@@ -15,6 +18,7 @@ env:
 
 jobs:
   draft:
+    if: github.event_name == 'push'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -38,6 +42,8 @@ jobs:
 
   package:
     needs: draft
+    # A dry run has no draft to wait for.
+    if: always() && (needs.draft.result == 'success' || github.event_name == 'workflow_dispatch')
     strategy:
       fail-fast: false
       matrix:
@@ -81,9 +87,16 @@ jobs:
         shell: bash
         run: packaging/windows.sh dist
       - shell: bash
+        run: rm -rf dist/AppDir
+      - if: github.event_name == 'push'
+        shell: bash
         env:
           TAG: ${{ github.ref_name }}
           GH_TOKEN: ${{ github.token }}
-        run: |
-          rm -rf dist/AppDir
-          gh release upload "$TAG" dist/* --clobber
+        run: gh release upload "$TAG" dist/* --clobber
+      - if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mic-${{ matrix.os }}
+          path: dist/*
+          if-no-files-found: error
