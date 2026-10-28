@@ -131,6 +131,8 @@ fn cgroup_cpu(cgroup: &std::path::Path) -> Option<f64> {
 mod tests {
     use super::*;
 
+    /// Linux's /proc/stat, as the box is Linux's; xtask builds elsewhere too.
+    #[cfg(target_os = "linux")]
     #[test]
     fn the_host_is_busy_for_as_long_as_it_works() {
         let before = host_busy().expect("/proc/stat says how busy the host has been");
