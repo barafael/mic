@@ -53,3 +53,8 @@ moq-sock = { git = "https://github.com/barafael/moq", rev = "ceda4e39f4462b2f6b0
 moq-stats = { git = "https://github.com/barafael/moq", rev = "ceda4e39f4462b2f6b089598b526a9f03deb21dd" }
 moq-tokio = { git = "https://github.com/barafael/moq", rev = "ceda4e39f4462b2f6b089598b526a9f03deb21dd" }
 moq-video = { git = "https://github.com/barafael/moq", rev = "ceda4e39f4462b2f6b089598b526a9f03deb21dd" }
+# femtovg 0.27, which Slint 1.18's wgpu renderer takes, with 0.28's fix (#366) backported:
+# 0.27 drops every cached pipeline a flush didn't use, and Slint flushes once a layer, so every
+# frame rebuilt them (41 % of a core for a call of two, 12 % with it; docs/observations.md). Drop
+# once a Slint release takes femtovg 0.28.
+femtovg = { git = "https://github.com/barafael/femtovg", rev = "6d637124ca567a3365e89ca2629a03914a019e25" }
