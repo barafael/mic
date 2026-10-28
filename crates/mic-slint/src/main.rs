@@ -344,6 +344,8 @@ fn run(cli: Cli) -> Result<(), String> {
                 // The room it's in already.
                 Some(room) if link.parse::<Invite>().as_ref() == Ok(room.invite()) => {}
                 Some(_) => {
+                    let named = link.parse::<Invite>().ok().and_then(|invite| invite.name);
+                    window.set_asking_name(named.unwrap_or_default().into());
                     window.set_asking(link.as_str().into());
                     (tell.asking)(Some(link));
                 }
@@ -419,9 +421,18 @@ fn run(cli: Cli) -> Result<(), String> {
     // A new room is joined at once, as Join joins an invite: its invite is there to copy inside.
     window.on_new_room({
         let window = window.as_weak();
+        let app = app.clone();
         move || {
             if let Some(window) = window.upgrade() {
-                let invite: slint::SharedString = Invite::new_room().to_mic_url().into();
+                // From a room, as its banner's New room: a new one by the same name.
+                let named = app
+                    .current()
+                    .and_then(|room| room.state().borrow().name.clone());
+                let invite = match named {
+                    Some(name) => Invite::new_room().named(&name),
+                    None => Invite::new_room(),
+                };
+                let invite: slint::SharedString = invite.to_mic_url().into();
                 window.set_invite(invite.clone());
                 window.invoke_join(window.get_name(), invite);
             }
@@ -870,6 +881,7 @@ fn apply(
     window.set_has_camera(view.camera);
     window.set_overflow(i32::try_from(view.overflow).unwrap_or(i32::MAX));
     window.set_fallback(view.fallback);
+    window.set_room_name(view.room_name.as_str().into());
     let hidden: Vec<&str> = view
         .people
         .iter()
@@ -1204,6 +1216,7 @@ mod harness {
         let view = Box::new(move |view: &View| {
             let mut ui = ui.lock().unwrap_or_else(PoisonError::into_inner);
             let asking = ui.asking.take();
+            let asking_name = ui.asking_name.take();
             let keys = |shows: fn(&crate::view::Tile) -> bool| {
                 view.tiles
                     .iter()
@@ -1217,6 +1230,8 @@ mod harness {
                 muted: keys(|tile| tile.muted),
                 cant_decode: keys(|tile| tile.cant_decode.is_some()),
                 asking,
+                asking_name,
+                room_name: (!view.room_name.is_empty()).then(|| view.room_name.clone()),
                 overflow: view.overflow,
                 speaking: keys(|tile| tile.speaking),
                 hands: keys(|tile| tile.hand),
@@ -1264,7 +1279,13 @@ mod harness {
             harness.ui_changed();
         });
         let asking = Box::new(move |link: Option<String>| {
-            asked.lock().unwrap_or_else(PoisonError::into_inner).asking = link;
+            let mut asked = asked.lock().unwrap_or_else(PoisonError::into_inner);
+            asked.asking_name = link
+                .as_deref()
+                .and_then(|link| link.parse::<mic_core::Invite>().ok())
+                .and_then(|invite| invite.name);
+            asked.asking = link;
+            drop(asked);
             told.ui_changed();
         });
         std::rc::Rc::new(Tell { view, asking })

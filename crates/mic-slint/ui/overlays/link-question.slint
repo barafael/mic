@@ -4,8 +4,9 @@ import { PillButton } from "../widgets/buttons.slint";
 // Over everything while a link opened during a call asks whether to leave it: Enter leaves for the
 // link's room, Escape stays.
 export component LinkQuestion inherits Rectangle {
-    // The link.
+    // The link, and the room it names, if its invite says.
     in property <string> link;
+    in property <string> room-name;
     // True to leave for the link's room.
     callback answer(bool);
     property <bool> born;
@@ -47,7 +48,7 @@ export component LinkQuestion inherits Rectangle {
                 padding: 20px;
                 spacing: 10px;
                 Text {
-                    text: "Leave this call for the room the link names?";
+                    text: root.room-name != "" ? "Leave this call for “" + root.room-name + "”?" : "Leave this call for the room the link names?";
                     color: Theme.text;
                     font-size: 16px;
                     font-weight: 600;

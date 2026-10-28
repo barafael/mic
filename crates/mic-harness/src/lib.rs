@@ -236,6 +236,12 @@ pub struct Ui {
     /// Whether it says the call goes over the WebSocket fallback.
     #[serde(default)]
     pub fallback: bool,
+    /// The room's name it shows, if the room has one.
+    #[serde(default)]
+    pub room_name: Option<String>,
+    /// The name of the room it asks about leaving for, while it asks, if the link names one.
+    #[serde(default)]
+    pub asking_name: Option<String>,
 }
 
 /// What drawing a frontend's video tiles costs, over the last second: the others' cameras, not

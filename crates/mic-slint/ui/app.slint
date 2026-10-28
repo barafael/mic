@@ -15,7 +15,7 @@ import { LinkQuestion } from "overlays/link-question.slint";
 export { ChatLine, Person, Theme, Tile }
 
 export component AppWindow inherits Window {
-    title: "mic";
+    title: root.room-name != "" ? "mic: " + root.room-name : "mic";
     preferred-width: 960px;
     preferred-height: 600px;
     min-width: 360px;
@@ -72,6 +72,10 @@ export component AppWindow inherits Window {
     // A link opened during a call, while the window asks whether to leave the call for it; empty
     // otherwise. A link never takes the window to another room without a click (links.rs).
     in property <string> asking;
+    // The room the link names, if its invite names it.
+    in property <string> asking-name;
+    // The room's name, if its invite gives one: in the title.
+    in property <string> room-name;
     // Counts the links filled in on the join screen.
     in property <int> filled;
     // What the join screen says under its card, as that the room was left; nothing otherwise.
@@ -256,6 +260,7 @@ export component AppWindow inherits Window {
         width: root.width;
         height: root.height;
         link: root.asking;
+        room-name: root.asking-name;
         answer(leave) => {
             root.answer(leave);
         }

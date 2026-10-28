@@ -138,6 +138,8 @@ pub struct View {
     pub people: Vec<Person>,
     /// Whether the call goes over the WebSocket fallback, as where UDP doesn't get through.
     pub fallback: bool,
+    /// The room's name, as its invite gives it; empty for a room without one.
+    pub room_name: String,
 }
 
 /// Which of the others have a tile, when there are more than fit: the active speaker, those with a
@@ -215,6 +217,7 @@ pub fn view(room: Option<(&RoomState, String)>) -> View {
             share_opening: false,
             people: Vec::new(),
             fallback: false,
+            room_name: String::new(),
         };
     };
     let first = Shown::default().choose(state);
@@ -323,6 +326,7 @@ pub fn view_of(state: &RoomState, invite: String, shown: &[ParticipantKey]) -> V
             })
             .collect(),
         fallback: state.transport == Some(Transport::WebSocket),
+        room_name: state.name.clone().unwrap_or_default(),
     }
 }
 
