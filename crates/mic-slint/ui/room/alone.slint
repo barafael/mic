@@ -1,0 +1,68 @@
+import { Palette } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { Icon } from "../widgets/icon.slint";
+import { PillButton } from "../widgets/buttons.slint";
+
+// What a room shows while nobody else is in it: who to ask, and the invite to send them.
+export component AloneCard inherits Rectangle {
+    in property <string> invite;
+    in property <bool> copied;
+    callback copy-invite();
+    width: Math.min(420px, self.preferred-width);
+    height: column.preferred-height;
+    background: Theme.surface;
+    border-radius: 16px;
+    border-width: 1px;
+    border-color: Theme.line;
+    column := VerticalLayout {
+        padding: 24px;
+        spacing: 12px;
+        Text {
+            text: "You're the only one here";
+            color: Theme.text;
+            font-size: 18px;
+            font-weight: 600;
+            horizontal-alignment: center;
+        }
+        Text {
+            text: "Send the invite to whoever you're calling. It's the key to this room: anyone with it can join.";
+            color: Theme.text-dim;
+            font-size: 13px;
+            horizontal-alignment: center;
+            wrap: word-wrap;
+        }
+        Rectangle {
+            height: 36px;
+            border-radius: 8px;
+            background: Theme.raised;
+            Text {
+                x: 12px;
+                width: parent.width - 24px;
+                text: root.invite;
+                color: Theme.text-dim;
+                font-size: 12px;
+                overflow: elide;
+            }
+        }
+        PillButton {
+            text: root.copied ? "Copied" : "Copy invite";
+            primary: !root.copied;
+            clicked => {
+                root.copy-invite();
+            }
+        }
+    }
+}
+
+export component AlonePreview inherits Rectangle {
+    // Dark, as the window sets it (app.slint).
+    init => {
+        Palette.color-scheme = ColorScheme.dark;
+    }
+    width: 520px;
+    height: 320px;
+    background: Theme.canvas;
+    AloneCard {
+        invite: "mic://join/1/GqO4S2TxIXlT6PjtOwWfpw#o0PK4AzaUFo8xT1d0GqO4S2TxIXlT6Pjt";
+    }
+}

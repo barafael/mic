@@ -125,19 +125,26 @@ pub fn network(checks: &mut Checks, the_box: &TestBox) -> Result<()> {
         },
     );
     checks.record(
-        "UDP blocked: alice joins over the WebSocket fallback, and bob hears her",
+        "UDP blocked: alice joins over the WebSocket fallback, bob hears her, her window says so",
         || {
             alice.reset()?;
             shaper.block_udp()?;
-            let joined = (|| {
-                let started = Instant::now();
-                alice.join(&invite, "Alice")?;
-                report.push(format!(
-                    "alice's join with UDP blocked, over the WebSocket fallback: {:.1} s",
-                    started.elapsed().as_secs_f64()
-                ));
-                bob.wait_to_hear(alices, &[bobs], PATIENCE)
-            })();
+            let joined =
+                (|| {
+                    let started = Instant::now();
+                    alice.join(&invite, "Alice")?;
+                    report.push(format!(
+                        "alice's join with UDP blocked, over the WebSocket fallback: {:.1} s",
+                        started.elapsed().as_secs_f64()
+                    ));
+                    bob.wait_to_hear(alices, &[bobs], PATIENCE)?;
+                    // Her room says it's the fallback, and her window says so too.
+                    alice.wait_for_snapshot("saying it's the fallback", PATIENCE, |snapshot| {
+                        snapshot.room.as_ref().is_some_and(|room| {
+                            room.transport == Some(mic_core::Transport::WebSocket)
+                        }) && snapshot.ui.as_ref().is_some_and(|ui| ui.fallback)
+                    })
+                })();
             let cleared = shaper.clear();
             joined.and(cleared)
         },

@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 
-use mic_core::{Connection, ParticipantKey, RoomState};
+use mic_core::{Connection, ParticipantKey, RoomState, Transport};
 
 /// How many tiles show at most, this participant's among them: the rest are a "+N" tile, and
 /// their cameras aren't subscribed to (§5.8).
@@ -46,14 +46,56 @@ pub struct Tile {
     pub hand: bool,
     /// Its latest reaction, and which of the room's it was, which the tile shows a moment.
     pub reaction: Option<(mic_core::chat::Reaction, u64)>,
+    /// Kept while the room redials, or until it's back with them: shown greyed.
+    pub away: bool,
+}
+
+/// Someone in the room, as the participants panel lists them: everyone, shown or not.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Person {
+    /// The participant's key, hex.
+    pub key: String,
+    pub name: String,
+    pub me: bool,
+    pub muted: bool,
+    pub hand: bool,
+    pub recording: bool,
+    pub sharing: bool,
+    /// Whether it has a tile; those without are behind the "+N".
+    pub shown: bool,
+    /// Kept while the room redials: listed greyed.
+    pub away: bool,
 }
 
 /// A chat message, as the panel shows it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Line {
+    /// Who said it, by key, hex.
+    pub from: String,
     pub name: String,
     pub text: String,
     pub me: bool,
+    /// When it was heard, as the local clock says it, `HH:MM`.
+    pub time: String,
+    /// Whether it starts a run: another sender before it, or a while since their last. A run
+    /// shows its name and time once.
+    pub first: bool,
+}
+
+/// How long a sender may pause and still be one run.
+const RUN: u64 = 5 * 60 * 1000;
+
+/// `at` (unix ms) on the local clock, `HH:MM`; nothing if it can't be read.
+pub fn clock(at: u64) -> String {
+    i64::try_from(at)
+        .ok()
+        .and_then(|at| jiff::Timestamp::from_millisecond(at).ok())
+        .map(|at| {
+            at.to_zoned(jiff::tz::TimeZone::system())
+                .strftime("%H:%M")
+                .to_string()
+        })
+        .unwrap_or_default()
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -92,6 +134,12 @@ pub struct View {
     pub recording_self: bool,
     /// Whether a share of its screen is opening: the desktop may be asking which.
     pub share_opening: bool,
+    /// Everyone in the room, this participant first, then the others in the order they joined.
+    pub people: Vec<Person>,
+    /// Whether the call goes over the WebSocket fallback, as where UDP doesn't get through.
+    pub fallback: bool,
+    /// The room's name, as its invite gives it; empty for a room without one.
+    pub room_name: String,
 }
 
 /// Which of the others have a tile, when there are more than fit: the active speaker, those with a
@@ -167,6 +215,9 @@ pub fn view(room: Option<(&RoomState, String)>) -> View {
             recording_notice: String::new(),
             recording_self: false,
             share_opening: false,
+            people: Vec::new(),
+            fallback: false,
+            room_name: String::new(),
         };
     };
     let first = Shown::default().choose(state);
@@ -189,6 +240,7 @@ pub fn view_of(state: &RoomState, invite: String, shown: &[ParticipantKey]) -> V
             .rev()
             .find(|reacted| reacted.from == participant.key)
             .map(|reacted| (reacted.reaction, reacted.seq)),
+        away: participant.away,
         cant_decode: participant
             .renditions
             .iter()
@@ -207,10 +259,17 @@ pub fn view_of(state: &RoomState, invite: String, shown: &[ParticipantKey]) -> V
     let chat = state
         .chat
         .iter()
-        .map(|message| Line {
+        .enumerate()
+        .map(|(i, message)| Line {
+            from: message.from.to_string(),
             name: message.name.clone(),
             text: message.text.clone(),
             me: message.from == state.me.key,
+            time: clock(message.at),
+            first: i == 0 || {
+                let before = &state.chat[i - 1];
+                before.from != message.from || message.at.saturating_sub(before.at) > RUN
+            },
         })
         .collect();
     let status = match state.connection {
@@ -218,13 +277,7 @@ pub fn view_of(state: &RoomState, invite: String, shown: &[ParticipantKey]) -> V
         Connection::Reconnecting => "Reconnecting to the relay…",
         Connection::Left => "You left the room.",
     };
-    let warning = match state.rejected.len() {
-        0 => String::new(),
-        1 => "Someone in this room publishes what they can't sign. It isn't shown.".to_owned(),
-        n => format!(
-            "{n} broadcasts in this room aren't signed by who they claim. They aren't shown."
-        ),
-    };
+    let warning = warning(state);
     View {
         screen: Screen::Room,
         tiles,
@@ -258,7 +311,57 @@ pub fn view_of(state: &RoomState, invite: String, shown: &[ParticipantKey]) -> V
         recording_notice: recording_notice(state),
         recording_self: state.me.profile.recording,
         share_opening: state.screen_opening,
+        people: std::iter::once((&state.me, true))
+            .chain(state.participants.iter().map(|them| (them, false)))
+            .map(|(them, me)| Person {
+                key: them.key.to_string(),
+                name: them.profile.name.clone(),
+                me,
+                muted: them.profile.muted,
+                hand: them.profile.hand,
+                recording: them.profile.recording,
+                sharing: them.profile.sharing,
+                shown: me || shown.contains(&them.key),
+                away: them.away,
+            })
+            .collect(),
+        fallback: state.transport == Some(Transport::WebSocket),
+        room_name: state.name.clone().unwrap_or_default(),
     }
+}
+
+/// What the window says of broadcasts that didn't stand: who was posed as, if it's known, and
+/// what to do about it; nothing if all stand.
+fn warning(state: &RoomState) -> String {
+    let posed: Vec<String> = state
+        .rejected
+        .iter()
+        .filter_map(|rejected| rejected.posing_as)
+        .map(|key| {
+            if key == state.me.key {
+                "you".to_owned()
+            } else {
+                state
+                    .participants
+                    .iter()
+                    .find(|them| them.key == key)
+                    .map_or_else(
+                        || "someone who left".to_owned(),
+                        |them| them.profile.name.clone(),
+                    )
+            }
+        })
+        .collect();
+    let what = match (state.rejected.len(), posed.as_slice()) {
+        (0, _) => return String::new(),
+        (_, [one]) => format!("Someone is posing as {one}."),
+        (1, _) => "Someone here publishes what they can't sign.".to_owned(),
+        (n, _) => format!("{n} broadcasts here aren't signed by who they claim to be."),
+    };
+    format!(
+        "{what} It isn't shown. The invite may have reached someone it shouldn't: \
+         start a new room and send its invite only to who you mean."
+    )
 }
 
 /// Who records `state`'s room, as the window says it.
@@ -461,6 +564,81 @@ mod tests {
         let shown = view(Some((&state, String::new())));
         assert!(shown.status.contains("Reconnecting"));
         assert!(shown.warning.starts_with("2 broadcasts"));
+    }
+
+    #[test]
+    fn a_forger_is_named_by_whom_it_poses_as_and_a_new_room_advised() {
+        let mut state = state();
+        let bob = state.participants[0].key;
+        state.rejected = vec![Rejected {
+            path: "x".to_owned(),
+            reason: "forged".to_owned(),
+            posing_as: Some(bob),
+        }];
+        let name = state.participants[0].profile.name.clone();
+        let warning = view(Some((&state, String::new()))).warning;
+        assert!(
+            warning.starts_with(&format!("Someone is posing as {name}.")),
+            "{warning}"
+        );
+        assert!(warning.contains("new room"));
+        state.rejected[0].posing_as = Some(state.me.key);
+        let warning = view(Some((&state, String::new()))).warning;
+        assert!(
+            warning.starts_with("Someone is posing as you."),
+            "{warning}"
+        );
+    }
+
+    #[test]
+    fn a_senders_run_shows_its_name_once_till_someone_else_or_a_pause() {
+        let mut state = state();
+        let (me, them) = (state.me.key, state.participants[0].key);
+        let said = |from, at| mic_core::room::Message {
+            from,
+            at,
+            text: "hi".to_owned(),
+            ..Default::default()
+        };
+        state.chat = vec![
+            said(them, 1_000),
+            said(them, 2_000),
+            said(me, 3_000),
+            said(me, 3_000 + RUN + 1),
+        ];
+        let firsts: Vec<bool> = view(Some((&state, String::new())))
+            .chat
+            .iter()
+            .map(|line| line.first)
+            .collect();
+        assert_eq!(firsts, [true, false, true, true]);
+        assert_eq!(clock(0).len(), 5);
+    }
+
+    #[test]
+    fn the_panel_lists_everyone_those_behind_the_overflow_among_them() {
+        let mut state = state();
+        state.participants = (2..=13)
+            .map(|byte| participant(byte, &format!("P{byte}")))
+            .collect();
+        state.participants[11].profile.hand = true;
+        let first = Shown::default().choose(&state);
+        let view = view_of(&state, String::new(), &first);
+        assert_eq!(view.people.len(), 13);
+        assert!(view.people[0].me && view.people[0].shown);
+        let hidden: Vec<&str> = view
+            .people
+            .iter()
+            .filter(|person| !person.shown)
+            .map(|person| person.name.as_str())
+            .collect();
+        assert_eq!(hidden.len(), view.overflow);
+        // A hand raised behind the "+N" is in the panel all the same.
+        assert!(
+            view.people
+                .iter()
+                .any(|person| person.name == "P13" && person.hand)
+        );
     }
 
     #[test]

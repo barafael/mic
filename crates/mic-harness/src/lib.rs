@@ -221,6 +221,27 @@ pub struct Ui {
     /// Who it shows as recording, by key, itself among them if it does.
     #[serde(default)]
     pub recorders: Vec<String>,
+    /// Whether it shows itself alone in the room: the invite offered, its own tile small.
+    #[serde(default)]
+    pub alone: bool,
+    /// Everyone its participants panel lists, by key, itself first.
+    #[serde(default)]
+    pub people: Vec<String>,
+    /// Those the panel shows with a hand raised, by key, whether they have a tile or not.
+    #[serde(default)]
+    pub people_hands: Vec<String>,
+    /// The tiles shown greyed, away while the room redials, by key.
+    #[serde(default)]
+    pub away: Vec<String>,
+    /// Whether it says the call goes over the WebSocket fallback.
+    #[serde(default)]
+    pub fallback: bool,
+    /// The room's name it shows, if the room has one.
+    #[serde(default)]
+    pub room_name: Option<String>,
+    /// The name of the room it asks about leaving for, while it asks, if the link names one.
+    #[serde(default)]
+    pub asking_name: Option<String>,
 }
 
 /// What drawing a frontend's video tiles costs, over the last second: the others' cameras, not

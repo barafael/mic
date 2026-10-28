@@ -8,6 +8,9 @@ export component TileGrid inherits Rectangle {
     in property <[Tile]> tiles;
     // Participants not shown, as a last "+N" tile, when there are more than fit.
     in property <int> overflow;
+    // Their names, which the "+N" tile lists; a click on it asks for the people.
+    in property <string> overflow-names;
+    callback overflow-clicked();
     // How many columns fit `count` tiles best into a `width` by `height` grid (view.rs).
     pure callback columns-for(int, length, length) -> int;
     // Where the leftmost tile starts: what the bar's invite lines up with.
@@ -48,11 +51,35 @@ export component TileGrid inherits Rectangle {
         height: root.tile-height;
         border-radius: 12px;
         background: Theme.tile;
-        Text {
-            text: "+" + root.overflow;
-            color: Theme.text-dim;
-            font-size: 28px;
-            font-weight: 600;
+        accessible-role: button;
+        accessible-label: root.overflow + " more: " + root.overflow-names;
+        accessible-action-default => {
+            root.overflow-clicked();
+        }
+        VerticalLayout {
+            alignment: center;
+            padding: 8px;
+            spacing: 2px;
+            Text {
+                text: "+" + root.overflow;
+                color: more.has-hover ? Theme.text : Theme.text-dim;
+                font-size: Math.min(28px, parent.height * 0.3);
+                font-weight: 600;
+                horizontal-alignment: center;
+            }
+            Text {
+                text: root.overflow-names;
+                color: Theme.text-dim;
+                font-size: 11px;
+                horizontal-alignment: center;
+                overflow: elide;
+            }
+        }
+        more := TouchArea {
+            mouse-cursor: pointer;
+            clicked => {
+                root.overflow-clicked();
+            }
         }
     }
 }
