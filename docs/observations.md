@@ -4,6 +4,25 @@ What turned up while building `mic` that the plan didn't expect: surprises, upst
 measurements, and things to revisit. Newest first within each milestone. Each says whether it's
 **open**, **settled** (and where), or **upstream** (to report or follow).
 
+## M13: 0.1.0 out
+
+- **The leak fix took an honest sender for a forger on a slow machine** (settled, mic-core `sig`;
+  open, a stricter fix). CI's macOS runner, the first run off this host: a camera watched again
+  is read from a group's start, the relay handed back the camera's group 0, and the subscriber
+  had forgotten what checkpoints said of it six seconds after (leak-verification), while no
+  checkpoint lists a group done with: unconfirmed past the grace, so rejected. Here the new
+  subscription always started at the latest group. What's said of each track's newest 64 groups
+  is now kept, a few KiB a peer. Stricter, for later: on `resume`, skip the groups older than
+  the newest confirmed before `abandon`, so a camera watched again shows no stale frames and
+  nothing need be kept; it touches the reading of frames.
+- **macOS had never built** (settled, mic-media `screen`). ScreenCaptureKit's futures can't move
+  between threads, and mic spawned captures onto a multi-threaded runtime: each capture, and
+  each listing, now runs with `block_on` on a thread of its own, in that runtime. Windows built
+  but linted code only Unix uses; CI's clippy denies it.
+- **CI's first run settles three assumptions** (PLAN.md): GNOME Keyring on GitHub's Linux
+  runner and the Keychain on its macOS one, libvpx on Windows (vcpkg) and macOS (Homebrew), and
+  lavapipe for mic-render's offscreen test on Linux.
+
 ## M11: After the review
 
 - **Each recording kept tens of MiB, freed but not given back** (settled, mic-core
