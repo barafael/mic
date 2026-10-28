@@ -532,7 +532,6 @@ impl Verification {
 }
 
 impl VerificationState {
-    /// The group `key` as a checkpoint says it got: `frames` frames, the chain `hash` after them.
     /// Forgets the groups that are done with, as the publisher's ledger does: every frame read
     /// confirmed, not its track's latest, and nothing read of it for longer than [`RECENT`], so
     /// no checkpoint lists it again; and what checkpoints said of groups no longer kept. A
@@ -567,6 +566,7 @@ impl VerificationState {
         });
     }
 
+    /// The group `key` as a checkpoint says it got: `frames` frames, the chain `hash` after them.
     fn confirm(&mut self, key: &(String, u64), frames: u64, hash: &Link) {
         let Some(read) = self.read.get_mut(key) else {
             return;
