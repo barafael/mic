@@ -16,6 +16,7 @@ export component Bar inherits HorizontalLayout {
     in property <bool> share-opening;
     in property <bool> recording-self;
     in property <bool> chat-open;
+    in property <bool> people-open;
     // Messages came while the chat was closed.
     in property <bool> unread;
     // The menu open over it: "react", "more", or none.
@@ -32,6 +33,7 @@ export component Bar inherits HorizontalLayout {
     callback toggle-share();
     callback toggle-recording();
     callback toggle-chat();
+    callback toggle-people();
     callback leave();
     // Opens `menu` over the button it came from, whose middle is at `x` across the window.
     callback open-menu(string, length);
@@ -142,6 +144,14 @@ export component Bar inherits HorizontalLayout {
             label: root.menu == "react" ? "" : "React";
             clicked => {
                 root.open-menu("react", self.absolute-position.x + self.width / 2);
+            }
+        }
+        if !root.compact: RoundButton {
+            icon: "people";
+            lit: root.people-open;
+            label: root.people-open ? "Close the people" : "People";
+            clicked => {
+                root.toggle-people();
             }
         }
         RoundButton {

@@ -1,23 +1,30 @@
 import { Palette } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
-import { ChatLine, Tile } from "../types.slint";
+import { ChatLine, Person, Tile } from "../types.slint";
 import { Banner } from "../widgets/banner.slint";
 import { TileView } from "../room/tile.slint";
 import { TileGrid } from "../room/grid.slint";
 import { ChatPanel } from "../room/chat.slint";
 import { Bar } from "../room/bar.slint";
 import { MoreMenu, ReactionPicker } from "../room/menus.slint";
+import { AloneCard } from "../room/alone.slint";
+import { PeoplePanel } from "../room/people.slint";
 
 // The room: its tiles, a shared screen on the stage beside them, the chat, and a bar of its
 // controls. The keyboard stays with the room itself, so its shortcuts work whatever was clicked:
 // only the chat's field takes the focus, and the shortcuts are caught before it sees them.
 export component RoomScreen inherits FocusScope {
     in property <[Tile]> tiles;
-    // Participants not shown, as a last "+N" tile, when there are more than fit.
+    // Participants not shown, as a last "+N" tile, when there are more than fit, and their names.
     in property <int> overflow;
+    in property <string> overflow-names;
+    // Everyone in the room, for the participants panel.
+    in property <[Person]> people;
     in property <string> invite;
     in property <string> status;
     in property <string> warning;
+    // Whether the call goes over the WebSocket fallback.
+    in property <bool> fallback;
     // Something to say a moment, as a share that stopped; shown each time `notice-seq` changes.
     in property <string> notice;
     in property <int> notice-seq;
@@ -41,6 +48,8 @@ export component RoomScreen inherits FocusScope {
     in property <bool> share-opening;
     callback toggle-share();
     callback toggle-recording();
+    // Leaves for a new room, as when the invite reached someone it shouldn't.
+    callback new-room();
     callback leave();
     callback toggle-mute();
     callback toggle-camera();
@@ -50,6 +59,11 @@ export component RoomScreen inherits FocusScope {
     // How many columns fit `count` tiles best into a `width` by `height` grid (view.rs).
     pure callback columns-for(int, length, length) -> int;
     property <bool> chat-open;
+    // The participants panel, in the chat's place: one of them at a time.
+    property <bool> people-open;
+    property <bool> side-open: root.chat-open || root.people-open;
+    // Nobody else here: the invite to send, and this participant's own tile small in a corner.
+    property <bool> alone: root.tiles.length <= 1 && root.screens.length == 0;
     // A narrow window's chat, or one beside a shared screen, lies over the tiles instead.
     property <bool> chat-over;
     // A narrow window's bar: smaller buttons, and the rest in More.
@@ -58,7 +72,7 @@ export component RoomScreen inherits FocusScope {
     // back into it.
     property <int> screen-count: root.screens.length;
     function fit() {
-        self.compact = self.width < 600px;
+        self.compact = self.width < 660px;
         self.chat-over = self.width < 720px || (self.screen-count > 0 && self.width < 900px);
     }
     changed width => {
@@ -99,6 +113,7 @@ export component RoomScreen inherits FocusScope {
     property <bool> born;
     property <bool> copied;
     property <bool> noticing;
+    property <bool> fallback-seen;
     init => {
         self.fit();
         self.focus();
@@ -119,8 +134,16 @@ export component RoomScreen inherits FocusScope {
     // The shortcuts again, once the message field is gone; and no menu over the chat.
     changed chat-open => {
         self.menu = "";
-        if (!self.chat-open) {
+        if (self.chat-open) {
+            self.people-open = false;
+        } else {
             self.focus();
+        }
+    }
+    changed people-open => {
+        self.menu = "";
+        if (self.people-open) {
+            self.chat-open = false;
         }
     }
     changed compact => {
@@ -150,6 +173,10 @@ export component RoomScreen inherits FocusScope {
             }
             if (root.chat-open) {
                 root.chat-open = false;
+                return accept;
+            }
+            if (root.people-open) {
+                root.people-open = false;
                 return accept;
             }
             return reject;
@@ -219,6 +246,19 @@ export component RoomScreen inherits FocusScope {
             if root.warning != "": Banner {
                 text: root.warning;
                 tint: Theme.danger;
+                action: "New room";
+                acted => {
+                    root.new-room();
+                }
+            }
+            // Once read, it stays away for the call.
+            if root.fallback && !root.fallback-seen: Banner {
+                text: "UDP doesn't get through here: the call goes over the slower fallback (WebSocket), and may lag.";
+                tint: Theme.text-dim;
+                action: "OK";
+                acted => {
+                    root.fallback-seen = true;
+                }
             }
             // Whoever records, everyone sees it (D7).
             if root.recording != "": Banner {
@@ -266,9 +306,14 @@ export component RoomScreen inherits FocusScope {
                     min-width: root.screens.length > 0 ? 120px : 0;
                     max-width: root.screens.length > 0 ? 200px : 100000px;
                     preferred-width: 0;
+                    visible: !root.alone;
                     tiles: root.tiles;
                     overflow: root.overflow;
+                    overflow-names: root.overflow-names;
                     resizing: root.resizing;
+                    overflow-clicked => {
+                        root.people-open = true;
+                    }
                     columns-for(count, width, height) => {
                         return root.columns-for(count, width, height);
                     }
@@ -283,6 +328,10 @@ export component RoomScreen inherits FocusScope {
                         root.read = count;
                     }
                 }
+                if root.people-open && !root.chat-over: PeoplePanel {
+                    width: 300px;
+                    people: root.people;
+                }
             }
             Bar {
                 compact: root.compact;
@@ -294,12 +343,13 @@ export component RoomScreen inherits FocusScope {
                 share-opening: root.share-opening;
                 recording-self: root.recording-self;
                 chat-open: root.chat-open;
+                people-open: root.people-open;
                 unread: !root.chat-open && root.chat.length > root.read;
                 menu: root.menu;
                 copied: root.copied;
                 // Both rows start at the room's padding: the invite goes under the leftmost tile,
                 // or the stage's edge beside a shared screen.
-                copy-x: root.screens.length > 0 ? 0px : grid.x + grid.first-left;
+                copy-x: root.screens.length > 0 || root.alone ? 0px : grid.x + grid.first-left;
                 copy-follows: root.resizing;
                 copy-invite => {
                     root.copy-invite();
@@ -322,6 +372,9 @@ export component RoomScreen inherits FocusScope {
                 toggle-chat => {
                     root.chat-open = !root.chat-open;
                 }
+                toggle-people => {
+                    root.people-open = !root.people-open;
+                }
                 open-menu(menu, x) => {
                     root.open-menu(menu, x);
                 }
@@ -330,7 +383,27 @@ export component RoomScreen inherits FocusScope {
                 }
             }
         }
-        // A narrow window's chat, over the tiles.
+        if root.alone: Rectangle {
+            x: stage-row.x;
+            y: stage-row.y;
+            width: root.side-open && !root.chat-over ? stage-row.width - 310px : stage-row.width;
+            height: stage-row.height;
+            AloneCard {
+                invite: root.invite;
+                copied: root.copied;
+                copy-invite => {
+                    root.copy-invite();
+                }
+            }
+            if root.tiles.length > 0: TileView {
+                width: Math.min(240px, parent.width / 3);
+                height: self.width * 9 / 16;
+                x: parent.width - self.width;
+                y: parent.height - self.height;
+                tile: root.tiles[0];
+            }
+        }
+        // A narrow window's chat or people, over the tiles.
         if root.chat-open && root.chat-over: ChatPanel {
             x: stage-row.x;
             y: stage-row.y;
@@ -343,6 +416,13 @@ export component RoomScreen inherits FocusScope {
             seen(count) => {
                 root.read = count;
             }
+        }
+        if root.people-open && root.chat-over: PeoplePanel {
+            x: stage-row.x;
+            y: stage-row.y;
+            width: stage-row.width;
+            height: stage-row.height;
+            people: root.people;
         }
     }
     // A menu over the bar; a click anywhere else closes it.
@@ -385,6 +465,10 @@ export component RoomScreen inherits FocusScope {
             root.menu = "";
             root.toggle-recording();
         }
+        toggle-people => {
+            root.menu = "";
+            root.people-open = !root.people-open;
+        }
         pick-reaction => {
             root.menu = "react";
         }
@@ -411,7 +495,7 @@ export component RoomPreview inherits Rectangle {
         recording: "Cat is recording this call.";
         has-camera: true;
         reactions: ["👍", "👏", "😂", "😮", "❤️", "🎉"];
-        chat: [{ name: "Ben", text: "Here are the slides." }];
+        chat: [{ from: "b", name: "Ben", text: "Here are the slides." }];
         columns-for(count, width, height) => {
             return 1;
         }

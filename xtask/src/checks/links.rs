@@ -60,15 +60,19 @@ pub fn links(checks: &mut Checks, the_box: &TestBox) -> Result<()> {
     );
     let moments = checks.moments();
     checks.record(
-        "a link opened in a call asks first: Escape stays, Enter leaves for it, still muted",
+        "a link opened in a call asks first, naming its room: Escape stays, Enter leaves for it, still muted",
         || {
             let here = Invite::new_room();
             alice.join(&here, "Alice")?;
             alice.act(Command::SetMuted { muted: true })?;
-            let there = Invite::new_room();
+            // A named room: the window asks about it by name, and shows it once in it.
+            let there = Invite::new_room().named("Standup");
             let link = there.to_mic_url();
             let asks = |snapshot: &Snapshot| {
-                snapshot.ui.as_ref().and_then(|ui| ui.asking.as_deref()) == Some(link.as_str())
+                snapshot.ui.as_ref().is_some_and(|ui| {
+                    ui.asking.as_deref() == Some(link.as_str())
+                        && ui.asking_name.as_deref() == Some("Standup")
+                })
             };
             open(&there)?;
             alice.wait_for_snapshot("asking about the link", PATIENCE, asks)?;
@@ -88,6 +92,10 @@ pub fn links(checks: &mut Checks, the_box: &TestBox) -> Result<()> {
                 state.room == there.room.to_string()
                     && state.me.profile.name == "Alice"
                     && state.me.profile.muted
+                    && state.name.as_deref() == Some("Standup")
+            })?;
+            alice.wait_for_snapshot("its name shown", PATIENCE, |snapshot| {
+                snapshot.ui.as_ref().and_then(|ui| ui.room_name.as_deref()) == Some("Standup")
             })?;
             Ok(())
         },

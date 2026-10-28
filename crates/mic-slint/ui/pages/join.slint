@@ -9,6 +9,12 @@ export component JoinScreen inherits Rectangle {
     in-out property <string> invite;
     in property <bool> joining;
     in property <string> error;
+    // What happened, behind the few words of `error`: shown when asked.
+    in property <string> error-details;
+    property <bool> details-shown;
+    changed error => {
+        self.details-shown = false;
+    }
     // Said under the card in the hint's place, as that the room was left; nothing otherwise.
     in property <string> note;
     callback join(string, string);
@@ -107,7 +113,8 @@ export component JoinScreen inherits Rectangle {
                 }
             }
             PillButton {
-                text: root.joining ? "Joining…" : "Join";
+                // After leaving, the room's invite is still there: it joins it again.
+                text: root.joining ? "Joining…" : root.note != "" ? "Rejoin" : "Join";
                 primary: true;
                 busy: root.joining;
                 enabled: !root.joining && root.name != "" && root.invite != "";
@@ -157,6 +164,23 @@ export component JoinScreen inherits Rectangle {
                 font-size: 13px;
                 horizontal-alignment: center;
                 wrap: word-wrap;
+            }
+            if root.error != "" && root.error-details != "": Text {
+                text: root.details-shown ? root.error-details : "Details";
+                color: root.details-shown ? Theme.text-dim : (details.has-hover ? Theme.text : Theme.accent-hover);
+                font-size: 12px;
+                horizontal-alignment: center;
+                wrap: word-wrap;
+                accessible-role: button;
+                accessible-action-default => {
+                    root.details-shown = !root.details-shown;
+                }
+                details := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        root.details-shown = !root.details-shown;
+                    }
+                }
             }
         }
     }

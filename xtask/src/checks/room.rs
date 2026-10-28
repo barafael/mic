@@ -209,7 +209,7 @@ pub fn room(checks: &mut Checks, the_box: &TestBox) -> Result<()> {
     );
     let moments = checks.moments();
     checks.record(
-        "bob's clap and dave's hand reach everyone, and show on their tiles",
+        "bob's clap and dave's hand reach everyone, and show on their tiles and in the panel",
         || {
             let (bob_key, dave_key) = (key("bob"), key("dave"));
             for window in &mut windows {
@@ -230,13 +230,20 @@ pub fn room(checks: &mut Checks, the_box: &TestBox) -> Result<()> {
                     }) && everyone()
                         .any(|them| them.key.to_string() == dave_key && them.profile.hand)
                 })?;
-                // On their tiles, where they have one.
-                window.wait_for_snapshot("their tiles saying so", PATIENCE, |snapshot| {
-                    snapshot.ui.as_ref().is_some_and(|ui| {
-                        (!ui.tiles.contains(&bob_key) || ui.reactions.contains(&clap))
-                            && (!ui.tiles.contains(&dave_key) || ui.hands.contains(&dave_key))
-                    })
-                })?;
+                // On their tiles, where they have one; dave's hand in the participants panel,
+                // which lists all twelve, those behind the "+N" among them.
+                window.wait_for_snapshot(
+                    "their tiles and the panel saying so",
+                    PATIENCE,
+                    |snapshot| {
+                        snapshot.ui.as_ref().is_some_and(|ui| {
+                            (!ui.tiles.contains(&bob_key) || ui.reactions.contains(&clap))
+                                && (!ui.tiles.contains(&dave_key) || ui.hands.contains(&dave_key))
+                                && ui.people.len() == 12
+                                && ui.people_hands.contains(&dave_key)
+                        })
+                    },
+                )?;
             }
             // The clap's bubble is gone in a few seconds.
             moments.take("clap");

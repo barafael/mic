@@ -54,7 +54,11 @@ pub fn roster(checks: &mut Checks, the_box: &TestBox) -> Result<()> {
     checks.record("alice sees bob go", || {
         bob.reset()?;
         alice.wait_for("alone", PATIENCE, |state| state.participants.is_empty())?;
-        alice.wait_for_snapshot("showing herself alone", PATIENCE, shows_room)?;
+        alice.wait_for_snapshot(
+            "showing herself alone, the invite offered",
+            PATIENCE,
+            |snapshot| shows_room(snapshot) && snapshot.ui.as_ref().is_some_and(|ui| ui.alone),
+        )?;
         bob.wait_for_snapshot("showing the join screen", PATIENCE, |snapshot| {
             snapshot.ui.as_ref().is_some_and(|ui| ui.screen == "join")
         })?;

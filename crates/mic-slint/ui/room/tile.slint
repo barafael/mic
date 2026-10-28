@@ -26,7 +26,8 @@ export component TileView inherits Rectangle {
     }
     // A newcomer waits while the others make room for it, a move, so it doesn't land on them;
     // one leaving goes at once.
-    opacity: root.present ? 1 : 0;
+    // Greyed while away, as the room redials: kept, not gone.
+    opacity: root.present ? (root.tile.away ? 0.4 : 1) : 0;
     animate opacity {
         delay: root.tile.leaving ? 0ms : Theme.moving;
         duration: 220ms;

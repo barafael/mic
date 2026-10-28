@@ -51,6 +51,7 @@ export component MoreMenu inherits MenuPanel {
     callback toggle-hand();
     callback toggle-share();
     callback toggle-recording();
+    callback toggle-people();
     // React was picked: the reactions take its place.
     callback pick-reaction();
     width: 240px;
@@ -88,6 +89,13 @@ export component MoreMenu inherits MenuPanel {
             text: root.recording-self ? "Stop recording" : "Record the call";
             clicked => {
                 root.toggle-recording();
+            }
+        }
+        MenuRow {
+            icon: "people";
+            text: "People";
+            clicked => {
+                root.toggle-people();
             }
         }
         MenuRow {
