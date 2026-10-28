@@ -70,6 +70,7 @@ pub fn roster(checks: &mut Checks, the_box: &TestBox) -> Result<()> {
         alice.wait_for("with Bob", PATIENCE, |state| names(state) == ["Bob"])?;
         Ok(())
     });
+    let moments = checks.moments();
     checks.record("a restarted relay is rejoined", || {
         bob.join(&invite, "Bob")?;
         alice.wait_for("with Bob", PATIENCE, |state| names(state) == ["Bob"])?;
@@ -79,6 +80,8 @@ pub fn roster(checks: &mut Checks, the_box: &TestBox) -> Result<()> {
             "1",
             &Pod::Relay.container("relay"),
         ]))?;
+        // Redialling, bob's tile kept, greyed.
+        moments.take("reconnecting");
         ready::relay(the_box)?;
         for participant in [&mut alice, &mut bob] {
             participant.wait_for("connected again", PATIENCE, |state| {

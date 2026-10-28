@@ -97,8 +97,9 @@ flowchart LR
   a Unix socket only, in `target/testbox-view/<client>/` (the owner's only), with the viewer's
   input and the clipboard off. `cargo testbox vnc` shows the displays in a window, `cargo testbox
   web` as a page on loopback; `--interactive` lets keys and pointer through, where they race a
-  running check's. `test --screenshots` keeps each display after each check in the phase's
-  record. The probe pod's display shows the probe window, for the `box` phase. These tools are
+  running check's. `test --screenshots` (and `run --screenshots`) keeps each display after
+  each check in the phase's record, and in the midst of those whose moment passes (the link's
+  prompt, a clap, a relay redialled: `moment-<what>.png`). The probe pod's display shows the probe window, for the `box` phase. These tools are
   a workspace of their own in `testbox/view/`, Linux only, carried over from beep's testbox.
 - **Clients use the host's GPU**: each client pod gets the render node, `/dev/dri/renderD128`
   (rendering and video only, no mode setting), and the client image carries Mesa's userspace
@@ -133,11 +134,13 @@ the box says it's ready: the relay answers, the probe has drawn, and every clien
 on its harness. No fixed sleeps.
 
 Each check prints `check <what>: passed` or `failed: <why>` (or `skipped: <why>`, for a check
-that doesn't apply to this box); `test` fails if any failed. The last check of every phase is
+that doesn't apply to this box); `test` fails if any failed. A check that measures (a frame
+rate, CPU, a voice under loss) also says how many of the host's cores others used meanwhile, the
+box's own pods aside; when that's over a quarter, its failure is `unreliable` and not tallied. The last check of every phase is
 that no container crashed, or stopped. The phase's record is in `target/testbox-record/<phase>/`:
 every container's log, each line with its time, and all of them merged in time order in
 `timeline.log`; after a failed check, each client's harness snapshot (`<nn>-<check>-<client>.json`)
-and each display (`.png`), screenshots asked for or not. `cargo testbox down` stops the pods.
+and each display (`.png`), screenshots asked for or not; with `--screenshots`, after every check. `cargo testbox down` stops the pods.
 
 Phases don't need a fresh box: each check uses rooms and broadcasts of its own. So:
 
@@ -169,6 +172,7 @@ the crowd `up` was given.
 | `network` | alice's network shaped from her pod's `shaper` sidecar (NET_ADMIN over the pod's own network namespace): with 10 % of what she sends lost and 80±10 ms added, bob still hears her tone, ten times louder than any other frequency; with 30 % lost for three seconds, her camera at bob's end recovers once it stops; with UDP blocked (but DNS), she joins over the WebSocket fallback and bob hears her; and a QUIC-only join (`--no-websocket`) fails, saying the fallback is off. What's measured is in the record (`network.txt`). It disrupts alice's network, so it runs alone |
 | `recording` | alice, bob, carol and dave in a room, only alice unmuted; bob records for 16 seconds, every window saying so while he does (his own "You're recording"), none once he stops. Five seconds in, alice shares her screen; five later she stops and mutes. His recording, one WebM file in `/run/mic/recordings`, plays in his pod (ffprobe, ffmpeg): VP9 and Opus, alice's camera full-frame while she speaks, her screen while she shares, and a grid with each camera's colour once nobody speaks |
 | `room-40` | Forty in one room, the six windows and 34 of the crowd, after a baseline of alice alone: each window shows nine tiles and a "+31"; each of three minutes, alice's CPU and memory, the windows' and the crowd's CPU, the GPU's busy share and the relay's egress, against §5.8's budget (130 Mbit/s for 40, a core a window, 1 GiB). In the record, `room-40.txt`. It measures, so it runs alone, and only when named: `cargo testbox run room-40`, on a host that's otherwise idle, since the GPU is the desktop's too (the baseline shows a loaded one) |
+| `soak` | A long call: alice and bob in their windows and six of the crowd, cameras and tones, a chat message each minute, for an hour (`MIC_SOAK_MINUTES`). Each five minutes, each window still hears the other and decodes every camera; at the end, what each window's mic holds grew by 64 MiB at most since the first stretch. In the record, `soak.txt`. Runs alone, and only when named: `cargo testbox run soak` |
 | `audio-devices` | carol on PipeWire devices, alice on her tone: what carol's speaker plays (recorded from its monitor) holds alice's tone; a tone played into carol's microphone reaches alice; with carol's speaker linked into her microphone (pw-link), which a recording shows carries alice's tone, alice doesn't hear herself back: the echo is cancelled; with a speech-like voice over noise in carol's microphone, each noise suppressor is measured by what alice hears (in the record, `noise-suppression.txt`), and RNNoise must raise the voice over the noise by 8 dB and keep it. It measures, so it runs alone |
 | `audio` | alice and bob each send a tone of their own (alice 440 Hz, bob 660 Hz) and hear the other's, never their own, through their harnesses' analyzers; muted, alice is silence on bob's end and her tile in his window says so, and unmuted she's heard again; bob mutes and unmutes with his window's shortcut, Ctrl+D (xdotool), which does what its Mute button does; once bob leaves, alice hears him no more. It measures, so it runs alone |
 | `e2ee` | What a stranger on the relay sees (its HTTP interface: what's announced, a track's latest group): no room id, participant key or name, only ciphertext; a stranger who learned the room's prefix reads its profiles by their real names (the forger's `eavesdrop`): under the room's secret they open, under another every frame fails to authenticate |

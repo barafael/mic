@@ -4,6 +4,7 @@ mod audio;
 mod audio_devices;
 mod crashed;
 mod e2ee;
+mod host;
 mod impersonation;
 mod links;
 mod network;
@@ -14,10 +15,11 @@ mod room;
 mod room_40;
 mod roster;
 mod screenshare;
+mod soak;
 mod testbox;
 mod version;
 mod video;
-mod window;
+pub mod window;
 
 use crate::error::{Error, Result};
 use crate::podman::TestBox;
@@ -58,6 +60,9 @@ pub enum Phase {
     /// Forty in a room, measured each minute against the budget: not in a default round.
     #[value(name = "room-40")]
     Room40,
+    /// A long call, an hour: still heard and seen, and what each window holds doesn't grow:
+    /// not in a default round.
+    Soak,
 }
 
 impl Phase {
@@ -103,6 +108,7 @@ impl Phase {
                 | Phase::Network
                 | Phase::Recording
                 | Phase::Room40
+                | Phase::Soak
         )
     }
 
@@ -119,6 +125,7 @@ impl Phase {
                 | Phase::Video
                 | Phase::Network
                 | Phase::Room40
+                | Phase::Soak
         )
     }
 
@@ -139,6 +146,7 @@ impl Phase {
             Phase::Network => network::network(checks, the_box),
             Phase::Room40 => room_40::room_40(checks, the_box),
             Phase::Recording => recording::recording(checks, the_box),
+            Phase::Soak => soak::soak(checks, the_box),
         }
     }
 }
@@ -197,6 +205,34 @@ impl Checks<'_> {
     /// A check that doesn't apply to this box, and why: said, not tallied.
     pub fn skip(&mut self, name: &str, why: &str) {
         println!("{}check {name}: skipped: {why}", self.prefix);
+    }
+
+    /// What takes each display during a check, for what shows only for a moment
+    /// (`--screenshots`): taken before the checks, used in them.
+    pub fn moments(&self) -> record::Moments {
+        self.kept.moments()
+    }
+
+    /// A check that measures (a frame rate, CPU, a voice under loss), with what others did on
+    /// the host meanwhile: said, and if they loaded it, a failure is said to be unreliable and
+    /// isn't tallied.
+    pub fn measured(&mut self, name: &str, check: impl FnOnce() -> Result<()>) {
+        let host = host::Host::now(self.the_box);
+        let outcome = check();
+        let others = host.since();
+        println!("{}check {name}: {others}", self.prefix);
+        match outcome {
+            Err(reason) if others.busy() => {
+                self.kept.checked(self.the_box, name, true);
+                println!(
+                    "{}check {name}: unreliable, the host was busy: {reason}",
+                    self.prefix
+                );
+            }
+            outcome => {
+                self.report(name, outcome);
+            }
+        }
     }
 
     /// Where the phase's record is, for a check that keeps a file there.

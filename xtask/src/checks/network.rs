@@ -63,7 +63,7 @@ pub fn network(checks: &mut Checks, the_box: &TestBox) -> Result<()> {
         Ok(key)
     })?;
     let mut report = Vec::new();
-    checks.record(
+    checks.measured(
         "10% lost and 80 ms added: bob still hears alice's tone, dominant",
         || {
             shaper.set(&["netem", "loss", "10%", "delay", "80ms", "10ms"])?;
@@ -87,7 +87,7 @@ pub fn network(checks: &mut Checks, the_box: &TestBox) -> Result<()> {
             Ok(())
         },
     );
-    checks.record(
+    checks.measured(
         "30% lost for 3 s: alice's camera at bob's end recovers once it stops",
         || {
             super::video::sees(&mut bob, &alice_key, pattern)?;

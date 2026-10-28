@@ -20,6 +20,7 @@ screen = ["dep:moq-video", "moq-video/pipewire", "dep:ashpd", "tokio/rt-multi-th
 
 [dependencies]
 cpal = { version = "0.18.2", optional = true }
+ab_glyph = "0.2.32"
 derive_more = { version = "2.1.1", features = ["display", "error"] }
 moq-video = { version = "=0.1.16", default-features = false, features = ["capture"], optional = true }
 ringbuf = "0.5.1"

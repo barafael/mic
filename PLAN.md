@@ -617,8 +617,10 @@ the recording's, performance and the box (**C**). New `RoomState` fields, `Comma
     `--screenshots` keeps passing checks' snapshots; `run --screenshots`.
 66. `testbox: perf and drive` (C): perf in the client image; `cargo testbox drive <client>
     join|say|shot|…`, what the review's sessions did by hand.
-67. `testbox: soak` (C): a phase of an hour, only when named: a room of six windows and the crowd,
-    CPU and memory each minute, for leaks.
+67. `testbox: soak` (C): a phase of an hour, only when named: alice and bob in their windows
+    (the two with tones) and six of the crowd, cameras, voices and a chat message a minute;
+    each five minutes still heard and seen, the windows' CPU and memory recorded; at the end,
+    what each window holds grown by 64 MiB at most, for leaks.
 
 ### After v1
 

@@ -4413,6 +4413,7 @@ dependencies = [
 name = "mic-media"
 version = "0.1.0"
 dependencies = [
+ "ab_glyph",
  "ashpd",
  "cpal",
  "derive_more",

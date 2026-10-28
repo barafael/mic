@@ -9,6 +9,8 @@
   },
   spec: {
     restartPolicy: "Always",
+    # The profiler sees the window's processes.
+    shareProcessNamespace: true,
     containers: [
       # The window (crates/mic-slint) on a display of its own (testbox/view/with-display), served
       # on a socket in target/testbox-view/@NAME@ for `cargo testbox vnc` and `shot`, with the
@@ -67,6 +69,22 @@
           allowPrivilegeEscalation: false,
           capabilities: { drop: ["ALL"], add: ["NET_ADMIN"] },
         },
+      },
+      # perf, attaching to the window's mic (`cargo testbox drive <client> profile`), from a
+      # container of its own: the window's keyring daemon aborts with capabilities it can't drop.
+      # Podman's seccomp lets perf_event_open through with CAP_PERFMON, and attaching to a
+      # process it didn't start takes CAP_SYS_PTRACE, with the host's Yama at 1; both in the
+      # pod's user namespace only, and the host's perf_event_paranoid keeps perf to user space.
+      # The binaries mounted as the window has them, for perf's symbols. Idles otherwise.
+      {
+        name: "profiler",
+        image: "@IMAGE:client@",
+        args: ["bash", "-c", "trap 'exit 0' TERM; sleep infinity & wait"],
+        securityContext: {
+          allowPrivilegeEscalation: false,
+          capabilities: { drop: ["ALL"], add: ["PERFMON", "SYS_PTRACE"] },
+        },
+        volumeMounts: [{ name: "bin", mountPath: "/opt/mic", readOnly: true }],
       },
     ],
     volumes: [

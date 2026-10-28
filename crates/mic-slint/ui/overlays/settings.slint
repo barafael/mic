@@ -1,0 +1,167 @@
+import { ComboBox, LineEdit, Palette } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { PillButton } from "../widgets/buttons.slint";
+
+// A label over what it names.
+export component Field inherits VerticalLayout {
+    in property <string> label;
+    spacing: 4px;
+    Text {
+        text: root.label;
+        color: Theme.text-dim;
+        font-size: 12px;
+    }
+    @children
+}
+
+// The microphone's level, as it hears now: a bar that fills.
+export component LevelMeter inherits Rectangle {
+    // From 0 to 1.
+    in property <float> level;
+    height: 6px;
+    border-radius: 3px;
+    background: Theme.raised;
+    Rectangle {
+        x: 0;
+        // RMS is small for speech: scaled so a voice fills most of it.
+        width: parent.width * Math.min(1, Math.sqrt(root.level) * 1.6);
+        height: parent.height;
+        border-radius: parent.border-radius;
+        background: root.level > 0.4 ? Theme.warn : #5fd38d;
+        animate width { duration: 80ms; }
+    }
+}
+
+// What mic remembers: the name to join with, the microphone and speaker, and how much noise is
+// suppressed. Over the window while it's open: a click outside or Escape closes it.
+export component SettingsPanel inherits Rectangle {
+    in-out property <string> name;
+    // The devices, by name, the system's default first; and which is chosen.
+    in property <[string]> microphones;
+    in property <[string]> speakers;
+    in-out property <int> microphone;
+    in-out property <int> speaker;
+    // Off, RNNoise, Sonora, as `choose-noise` numbers them.
+    in-out property <int> noise;
+    // The microphone's level, for the meter.
+    in property <float> level;
+    // Without devices (the box's synthetic ones), there's nothing to choose.
+    in property <bool> has-devices: true;
+    callback choose-microphone(int);
+    callback choose-speaker(int);
+    callback choose-noise(int);
+    callback close();
+    background: #000000a8;
+    TouchArea {
+        clicked => {
+            root.close();
+        }
+    }
+    keys := FocusScope {
+        init => {
+            keys.focus();
+        }
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.close();
+                return accept;
+            }
+            reject
+        }
+        Rectangle {
+            width: Math.min(440px, root.width - 32px);
+            height: Math.min(column.preferred-height, root.height - 32px);
+            background: Theme.surface;
+            border-radius: 14px;
+            border-width: 1px;
+            border-color: Theme.line;
+            TouchArea { }
+            column := VerticalLayout {
+                padding: 20px;
+                spacing: 14px;
+                Text {
+                    text: "Settings";
+                    color: Theme.text;
+                    font-size: 16px;
+                    font-weight: 600;
+                }
+                Field {
+                    label: "Your name";
+                    LineEdit {
+                        text <=> root.name;
+                        placeholder-text: "Your name";
+                        accessible-label: "Your name";
+                    }
+                }
+                Field {
+                    label: "Microphone";
+                    ComboBox {
+                        enabled: root.has-devices;
+                        model: root.microphones;
+                        current-index <=> root.microphone;
+                        selected => {
+                            root.choose-microphone(self.current-index);
+                        }
+                    }
+                    LevelMeter {
+                        level: root.level;
+                    }
+                }
+                Field {
+                    label: "Speaker";
+                    ComboBox {
+                        enabled: root.has-devices;
+                        model: root.speakers;
+                        current-index <=> root.speaker;
+                        selected => {
+                            root.choose-speaker(self.current-index);
+                        }
+                    }
+                }
+                Field {
+                    label: "Background noise";
+                    ComboBox {
+                        model: ["Let it through", "Suppress it (RNNoise)", "Suppress more (Sonora)"];
+                        current-index <=> root.noise;
+                        selected => {
+                            root.choose-noise(self.current-index);
+                        }
+                    }
+                }
+                if !root.has-devices: Text {
+                    text: "This window uses synthetic media: there are no devices to choose.";
+                    color: Theme.text-dim;
+                    font-size: 12px;
+                    wrap: word-wrap;
+                }
+                HorizontalLayout {
+                    alignment: end;
+                    PillButton {
+                        text: "Done";
+                        primary: true;
+                        clicked => {
+                            root.close();
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component SettingsPreview inherits Rectangle {
+    // Dark, as the window sets it (app.slint).
+    init => {
+        Palette.color-scheme = ColorScheme.dark;
+    }
+    width: 600px;
+    height: 520px;
+    background: Theme.canvas;
+    SettingsPanel {
+        name: "Ann Example";
+        microphones: ["System default", "USB microphone", "Webcam"];
+        speakers: ["System default", "Headphones"];
+        noise: 1;
+        level: 0.08;
+    }
+}

@@ -9,6 +9,8 @@ mod builder;
 #[cfg(unix)]
 mod checks;
 #[cfg(unix)]
+mod drive;
+#[cfg(unix)]
 mod error;
 #[cfg(unix)]
 mod harness;
@@ -88,6 +90,10 @@ enum Command {
         /// Restarts every client before each round.
         #[arg(long)]
         fresh: bool,
+        /// As for `test`: each display after each check, and each client's snapshot, in each
+        /// phase's record.
+        #[arg(long)]
+        screenshots: bool,
     },
     /// The inner loop: the box up, what it runs built, the clients restarted if that changed,
     /// then the phase; the box stays up.
@@ -116,6 +122,13 @@ enum Command {
         /// Also removes their volumes.
         #[arg(long)]
         wipe: bool,
+    },
+    /// Drives a window by hand, a step an invocation, as a check would: join, act, snapshot,
+    /// type into it, take its display, profile it.
+    Drive {
+        client: String,
+        #[command(subcommand)]
+        action: drive::Action,
     },
     /// Prints logs: of a container (`<pod>-<container>`), or of every container of a pod.
     Logs { names: Vec<String> },
@@ -170,13 +183,15 @@ fn main() -> ExitCode {
             rounds,
             jobs,
             fresh,
-        } => run::run(&the_box, &phases, rounds, jobs, fresh),
+            screenshots,
+        } => run::run(&the_box, &phases, rounds, jobs, fresh, screenshots),
         Command::Dev { phase } => run::dev(&the_box, phase),
         Command::Vnc { interactive } => view::vnc(&the_box, interactive),
         Command::Web { interactive } => view::web(&the_box, interactive),
         Command::Images { prune } => the_box.list_images(prune),
         Command::Down { wipe } => the_box.down(wipe),
         Command::Logs { names } => the_box.logs(&names),
+        Command::Drive { client, action } => drive::drive(&the_box, &client, action),
     };
     match outcome {
         Ok(()) => ExitCode::SUCCESS,

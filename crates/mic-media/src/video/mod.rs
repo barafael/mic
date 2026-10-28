@@ -11,6 +11,7 @@ pub mod compose;
 mod pattern;
 #[cfg(feature = "screen")]
 pub mod screen;
+pub mod text;
 #[cfg(feature = "vp9")]
 pub mod vp9;
 
