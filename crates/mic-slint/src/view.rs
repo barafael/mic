@@ -517,6 +517,7 @@ mod tests {
             from: state.me.key,
             name: "Alice".to_owned(),
             text: "hi".to_owned(),
+            ..Default::default()
         }];
         let shown = view(Some((&state, String::new())));
         let bobs = &shown.tiles[1];

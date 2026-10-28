@@ -67,12 +67,16 @@ pub struct RoomState {
 }
 
 /// A chat message.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Message {
     pub from: ParticipantKey,
     /// Its sender's name when it came.
     pub name: String,
     pub text: String,
+    /// When this client heard it, or said it: Unix time in milliseconds, by this client's clock,
+    /// which a sender's can't be trusted to agree with.
+    #[serde(default)]
+    pub at: u64,
 }
 
 /// A reaction, as it came.
@@ -592,7 +596,15 @@ impl Task {
                         .map(|participant| participant.profile.name.clone())
                         .unwrap_or_default()
                 };
-                let message = Message { from, name, text };
+                let at = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |since| since.as_millis() as u64);
+                let message = Message {
+                    from,
+                    name,
+                    text,
+                    at,
+                };
                 self.state.send_modify(|state| {
                     state.chat.push(message.clone());
                     let over = state.chat.len().saturating_sub(CHAT_KEPT);
