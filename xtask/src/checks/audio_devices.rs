@@ -74,7 +74,7 @@ pub fn audio_devices(checks: &mut Checks, the_box: &TestBox) -> Result<()> {
         play_into_microphone(the_box, "carol", &tone)?;
         alice.wait_to_hear(CAROLS, &[alices], PATIENCE)
     });
-    checks.record(
+    checks.measured(
         "with carol's speaker in her microphone, alice hears no echo",
         || {
             loopback(the_box, "carol", true)?;
@@ -101,7 +101,7 @@ pub fn audio_devices(checks: &mut Checks, the_box: &TestBox) -> Result<()> {
         },
     );
     let directory = checks.record_directory().to_owned();
-    checks.record(
+    checks.measured(
         "noise suppression raises carol's voice over her noise",
         || {
             let measured = measure_suppressors(the_box, &mut alice, &mut carol)?;

@@ -24,6 +24,25 @@ pub struct Record {
     checked: usize,
 }
 
+/// Takes each display in the midst of a check, as `moment-<what>.png`; nothing without
+/// `--screenshots`. Cheap to clone.
+#[derive(Clone)]
+pub struct Moments {
+    shots: Option<(PathBuf, Vec<String>, PathBuf)>,
+}
+
+impl Moments {
+    pub fn take(&self, what: &str) {
+        let Some((tool, displays, directory)) = &self.shots else {
+            return;
+        };
+        let label = format!("moment-{}", label(what));
+        if let Err(error) = view::shot(tool, directory, &label, displays) {
+            println!("screenshot {label}: {error}");
+        }
+    }
+}
+
 /// The screenshots: the tool, and the displays as it takes them (`<name>=<socket>`).
 struct Shots {
     tool: PathBuf,
@@ -77,8 +96,23 @@ impl Record {
         } else if failed {
             self.shoot_failure(the_box, &label);
         }
-        if failed {
+        // A passing check's snapshots too, with its screenshots: what it saw, beside what showed.
+        if failed || self.shots.is_some() {
             self.keep_snapshots(the_box, &label);
+        }
+    }
+
+    /// What takes each display in the midst of a check (`--screenshots`): what shows for a
+    /// moment, a prompt, a reaction, a banner, is gone by the check's end.
+    pub fn moments(&self) -> Moments {
+        Moments {
+            shots: self.shots.as_ref().map(|shots| {
+                (
+                    shots.tool.clone(),
+                    shots.displays.clone(),
+                    self.directory.clone(),
+                )
+            }),
         }
     }
 

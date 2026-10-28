@@ -97,8 +97,9 @@ flowchart LR
   a Unix socket only, in `target/testbox-view/<client>/` (the owner's only), with the viewer's
   input and the clipboard off. `cargo testbox vnc` shows the displays in a window, `cargo testbox
   web` as a page on loopback; `--interactive` lets keys and pointer through, where they race a
-  running check's. `test --screenshots` keeps each display after each check in the phase's
-  record. The probe pod's display shows the probe window, for the `box` phase. These tools are
+  running check's. `test --screenshots` (and `run --screenshots`) keeps each display after
+  each check in the phase's record, and in the midst of those whose moment passes (the link's
+  prompt, a clap, a relay redialled: `moment-<what>.png`). The probe pod's display shows the probe window, for the `box` phase. These tools are
   a workspace of their own in `testbox/view/`, Linux only, carried over from beep's testbox.
 - **Clients use the host's GPU**: each client pod gets the render node, `/dev/dri/renderD128`
   (rendering and video only, no mode setting), and the client image carries Mesa's userspace
@@ -133,11 +134,13 @@ the box says it's ready: the relay answers, the probe has drawn, and every clien
 on its harness. No fixed sleeps.
 
 Each check prints `check <what>: passed` or `failed: <why>` (or `skipped: <why>`, for a check
-that doesn't apply to this box); `test` fails if any failed. The last check of every phase is
+that doesn't apply to this box); `test` fails if any failed. A check that measures (a frame
+rate, CPU, a voice under loss) also says how many of the host's cores others used meanwhile, the
+box's own pods aside; when that's over a quarter, its failure is `unreliable` and not tallied. The last check of every phase is
 that no container crashed, or stopped. The phase's record is in `target/testbox-record/<phase>/`:
 every container's log, each line with its time, and all of them merged in time order in
 `timeline.log`; after a failed check, each client's harness snapshot (`<nn>-<check>-<client>.json`)
-and each display (`.png`), screenshots asked for or not. `cargo testbox down` stops the pods.
+and each display (`.png`), screenshots asked for or not; with `--screenshots`, after every check. `cargo testbox down` stops the pods.
 
 Phases don't need a fresh box: each check uses rooms and broadcasts of its own. So:
 

@@ -51,6 +51,7 @@ pub fn run(
     rounds: u32,
     jobs: usize,
     fresh: bool,
+    screenshots: bool,
 ) -> Result<()> {
     let phases = if phases.is_empty() {
         &Phase::ROUNDS[..]
@@ -80,7 +81,7 @@ pub fn run(
                         };
                         println!("== round {round}: {name}");
                         let record = format!("{run}/{round}-{name}");
-                        let outcome = test(the_box, phase, &record, false, &prefix);
+                        let outcome = test(the_box, phase, &record, screenshots, &prefix);
                         if let Err(reason) = &outcome {
                             println!("== round {round}: {name}: {reason}");
                         }

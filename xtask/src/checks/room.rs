@@ -207,6 +207,7 @@ pub fn room(checks: &mut Checks, the_box: &TestBox) -> Result<()> {
             Ok(())
         },
     );
+    let moments = checks.moments();
     checks.record(
         "bob's clap and dave's hand reach everyone, and show on their tiles",
         || {
@@ -237,6 +238,8 @@ pub fn room(checks: &mut Checks, the_box: &TestBox) -> Result<()> {
                     })
                 })?;
             }
+            // The clap's bubble is gone in a few seconds.
+            moments.take("clap");
             Ok(())
         },
     );

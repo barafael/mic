@@ -49,7 +49,7 @@ pub fn video(checks: &mut Checks, the_box: &TestBox) -> Result<()> {
         sees(&mut alice, &bob_key, bobs)?;
         sees(&mut bob, &alice_key, alices)
     });
-    checks.record("the frame rate holds", || {
+    checks.measured("the frame rate holds", || {
         for (viewer, whose) in [(&mut alice, &bob_key), (&mut bob, &alice_key)] {
             let rate = rate(viewer, whose)?;
             if rate < FPS * RATE_HELD {
@@ -99,7 +99,7 @@ pub fn video(checks: &mut Checks, the_box: &TestBox) -> Result<()> {
         Ok(())
     });
     let mut crowd = Vec::new();
-    checks.record("nine tiles: what drawing alice's costs", || {
+    checks.measured("nine tiles: what drawing alice's costs", || {
         crowd = join_crowd(the_box, &invite)?;
         alice.wait_for_snapshot(
             "showing nine tiles, seven with video",

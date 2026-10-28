@@ -88,6 +88,10 @@ enum Command {
         /// Restarts every client before each round.
         #[arg(long)]
         fresh: bool,
+        /// As for `test`: each display after each check, and each client's snapshot, in each
+        /// phase's record.
+        #[arg(long)]
+        screenshots: bool,
     },
     /// The inner loop: the box up, what it runs built, the clients restarted if that changed,
     /// then the phase; the box stays up.
@@ -170,7 +174,8 @@ fn main() -> ExitCode {
             rounds,
             jobs,
             fresh,
-        } => run::run(&the_box, &phases, rounds, jobs, fresh),
+            screenshots,
+        } => run::run(&the_box, &phases, rounds, jobs, fresh, screenshots),
         Command::Dev { phase } => run::dev(&the_box, phase),
         Command::Vnc { interactive } => view::vnc(&the_box, interactive),
         Command::Web { interactive } => view::web(&the_box, interactive),

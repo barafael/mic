@@ -97,7 +97,7 @@ pub fn room_40(checks: &mut Checks, the_box: &TestBox) -> Result<()> {
     })?;
     let mut samples = Vec::new();
     for minute in 1..=MINUTES {
-        checks.record(&format!("minute {minute} within the budget"), || {
+        checks.measured(&format!("minute {minute} within the budget"), || {
             let sample = measure(the_box, MINUTE)?;
             lines.push(format!("minute {minute}: {}", sample.line()));
             let within = sample.relay_mbps <= EGRESS_BUDGET

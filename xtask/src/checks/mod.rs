@@ -4,6 +4,7 @@ mod audio;
 mod audio_devices;
 mod crashed;
 mod e2ee;
+mod host;
 mod impersonation;
 mod links;
 mod network;
@@ -197,6 +198,34 @@ impl Checks<'_> {
     /// A check that doesn't apply to this box, and why: said, not tallied.
     pub fn skip(&mut self, name: &str, why: &str) {
         println!("{}check {name}: skipped: {why}", self.prefix);
+    }
+
+    /// What takes each display during a check, for what shows only for a moment
+    /// (`--screenshots`): taken before the checks, used in them.
+    pub fn moments(&self) -> record::Moments {
+        self.kept.moments()
+    }
+
+    /// A check that measures (a frame rate, CPU, a voice under loss), with what others did on
+    /// the host meanwhile: said, and if they loaded it, a failure is said to be unreliable and
+    /// isn't tallied.
+    pub fn measured(&mut self, name: &str, check: impl FnOnce() -> Result<()>) {
+        let host = host::Host::now(self.the_box);
+        let outcome = check();
+        let others = host.since();
+        println!("{}check {name}: {others}", self.prefix);
+        match outcome {
+            Err(reason) if others.busy() => {
+                self.kept.checked(self.the_box, name, true);
+                println!(
+                    "{}check {name}: unreliable, the host was busy: {reason}",
+                    self.prefix
+                );
+            }
+            outcome => {
+                self.report(name, outcome);
+            }
+        }
     }
 
     /// Where the phase's record is, for a check that keeps a file there.

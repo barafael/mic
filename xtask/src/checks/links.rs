@@ -58,6 +58,7 @@ pub fn links(checks: &mut Checks, the_box: &TestBox) -> Result<()> {
             Ok(())
         },
     );
+    let moments = checks.moments();
     checks.record(
         "a link opened in a call asks first: Escape stays, Enter leaves for it, still muted",
         || {
@@ -71,6 +72,7 @@ pub fn links(checks: &mut Checks, the_box: &TestBox) -> Result<()> {
             };
             open(&there)?;
             alice.wait_for_snapshot("asking about the link", PATIENCE, asks)?;
+            moments.take("asking");
             window::press(the_box, "alice", "Escape")?;
             alice.wait_for_snapshot("staying, asking no more", PATIENCE, |snapshot| {
                 snapshot.ui.as_ref().is_some_and(|ui| ui.asking.is_none())
