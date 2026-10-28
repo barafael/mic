@@ -88,18 +88,29 @@ fn proof_of(invite: &Invite, device: &DeviceSecret) -> Proof {
     mic_core::admission::proof(invite, &crypto, &device.room_key(&invite.room)).unwrap()
 }
 
-/// What a member of the room `invite` names hears announced for `listening`: paths relative to
-/// the room's prefix.
-async fn heard(relay: &TestRelay, invite: &Invite, listening: Duration) -> BTreeSet<String> {
+/// What a member of the room hears announced in it: until `member` is heard (the watcher's own
+/// session comes up first, through the auth server, slowly on a loaded machine), then `settle`
+/// more, for any who shouldn't be.
+async fn heard(
+    relay: &TestRelay,
+    invite: &Invite,
+    member: &str,
+    settle: Duration,
+) -> BTreeSet<String> {
     let watching = moq_tokio::origin::spawn();
-    let member = DeviceSecret::random();
-    let _session = session(relay, invite, Some(&proof_of(invite, &member)), &watching);
+    let watcher = DeviceSecret::random();
+    let _session = session(relay, invite, Some(&proof_of(invite, &watcher)), &watching);
     let mut announced = watching.consume().announced();
     let mut heard = BTreeSet::new();
-    let deadline = tokio::time::Instant::now() + listening;
+    let mut deadline = tokio::time::Instant::now() + PATIENCE;
+    let mut settling = false;
     while let Ok(Some(update)) = tokio::time::timeout_at(deadline, announced.next()).await {
         if update.kind.is_active() {
             heard.insert(update.prefix.as_str().to_owned());
+        }
+        if !settling && heard.contains(member) {
+            settling = true;
+            deadline = tokio::time::Instant::now() + settle;
         }
     }
     heard
@@ -145,7 +156,7 @@ async fn a_client_without_the_proof_is_not_let_in() {
     let _mallory = client_with(&relay, false, Duration::from_secs(2))
         .join(invite.clone(), Profile::new("Mallory"))
         .await;
-    let heard = heard(&relay, &invite, Duration::from_secs(3)).await;
+    let heard = heard(&relay, &invite, alice.path(), Duration::from_secs(3)).await;
     assert_eq!(heard.len(), 1, "{heard:?}");
     assert!(heard.iter().any(|path| path == alice.path()), "{heard:?}");
 }
@@ -171,7 +182,7 @@ async fn a_stranger_with_a_proof_of_her_own_is_not_let_into_a_room() {
     let origin = moq_tokio::origin::spawn();
     let (_, _kept) = announce(&origin, "strangers_path");
     let _stranger = session(&relay, &invite, Some(&proof), &origin);
-    let heard = heard(&relay, &invite, Duration::from_secs(3)).await;
+    let heard = heard(&relay, &invite, alice.path(), Duration::from_secs(3)).await;
     assert_eq!(heard.len(), 1, "{heard:?}");
     assert!(heard.iter().any(|path| path == alice.path()), "{heard:?}");
 }
@@ -198,7 +209,7 @@ async fn a_member_publishes_at_her_own_path_and_nowhere_else() {
     let (posing, _posing) = announce(&origin, &alices);
     let _mallory = session(&relay, &invite, Some(&proof_of(&invite, &mallory)), &origin);
 
-    let heard = heard(&relay, &invite, Duration::from_secs(4)).await;
+    let heard = heard(&relay, &invite, alice.path(), Duration::from_secs(4)).await;
     assert!(
         heard.contains(alice.path()),
         "Alice isn't heard of: {heard:?}"
@@ -224,6 +235,6 @@ async fn a_session_outlasts_its_grant() {
         .await
         .unwrap();
     tokio::time::sleep(Duration::from_secs(5)).await;
-    let heard = heard(&relay, &invite, Duration::from_secs(2)).await;
+    let heard = heard(&relay, &invite, alice.path(), Duration::from_secs(2)).await;
     assert!(heard.contains(alice.path()), "Alice is gone: {heard:?}");
 }
