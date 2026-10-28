@@ -424,8 +424,8 @@ struct VerificationState {
     /// By track and group: the chain at every frame read, from the first, and the frames before
     /// them, if the group was joined late.
     read: HashMap<(String, u64), Group>,
-    /// By track and group: the furthest a checkpoint said it got.
-    confirmed: HashMap<(String, u64), (u64, Link)>,
+    /// By track and group: the furthest a checkpoint said it got, and when it said so.
+    confirmed: HashMap<(String, u64), (u64, Link, Instant)>,
     /// The last checkpoint's number.
     last: Option<u64>,
     failed: Option<Forgery>,
@@ -461,7 +461,7 @@ impl Verification {
             .map_or_else(|| chain_start(track, group), |(link, _)| *link);
         read.links
             .push((chain_next(&previous, plaintext), Instant::now()));
-        if let Some((frames, hash)) = state.confirmed.get(&key).copied() {
+        if let Some((frames, hash, _)) = state.confirmed.get(&key).copied() {
             state.confirm(&key, frames, &hash);
         }
     }
@@ -473,13 +473,15 @@ impl Verification {
             return;
         }
         state.last = Some(checkpoint.seq);
+        let now = Instant::now();
         for entry in checkpoint.entries {
             let key = (entry.track, entry.group);
             state
                 .confirmed
-                .insert(key.clone(), (entry.frames, entry.hash));
+                .insert(key.clone(), (entry.frames, entry.hash, now));
             state.confirm(&key, entry.frames, &entry.hash);
         }
+        state.prune(now);
     }
 
     /// The broadcast's forgery, if one was found, frames left unconfirmed past the grace
@@ -531,6 +533,40 @@ impl Verification {
 
 impl VerificationState {
     /// The group `key` as a checkpoint says it got: `frames` frames, the chain `hash` after them.
+    /// Forgets the groups that are done with, as the publisher's ledger does: every frame read
+    /// confirmed, not its track's latest, and nothing read of it for longer than [`RECENT`], so
+    /// no checkpoint lists it again; and what checkpoints said of groups no longer kept. A
+    /// group not wholly confirmed is kept for [`Verification::check`] to find. Without this a
+    /// subscriber kept every frame's link of every group it ever read: half a MiB a minute in
+    /// a call of eight.
+    fn prune(&mut self, now: Instant) {
+        let mut latest: HashMap<&str, u64> = HashMap::new();
+        for (track, group) in self.read.keys() {
+            let newest = latest.entry(track.as_str()).or_insert(*group);
+            *newest = (*newest).max(*group);
+        }
+        let done: Vec<(String, u64)> = self
+            .read
+            .iter()
+            .filter(|((track, group), read)| {
+                latest.get(track.as_str()) != Some(group)
+                    && read.confirmed == read.links.len()
+                    && read
+                        .links
+                        .last()
+                        .is_none_or(|(_, when)| now.saturating_duration_since(*when) > RECENT)
+            })
+            .map(|(key, _)| key.clone())
+            .collect();
+        for key in done {
+            self.read.remove(&key);
+        }
+        let read = &self.read;
+        self.confirmed.retain(|key, (_, _, when)| {
+            read.contains_key(key) || now.saturating_duration_since(*when) <= RECENT * 2
+        });
+    }
+
     fn confirm(&mut self, key: &(String, u64), frames: u64, hash: &Link) {
         let Some(read) = self.read.get_mut(key) else {
             return;
@@ -685,6 +721,39 @@ mod tests {
             frames: frames.len() as u64,
             hash,
         }
+    }
+
+    #[test]
+    fn groups_done_with_are_forgotten_and_the_rest_kept() {
+        let verification = Verification::default();
+        // A call's worth of groups of a track, each read and wholly confirmed.
+        for group in 0..100 {
+            verification.read("camera", group, b"frame");
+            let hash = chain_next(&chain_start("camera", group), b"frame");
+            verification.checkpoint(checkpoint(
+                group + 1,
+                vec![Entry {
+                    track: "camera".to_owned(),
+                    group,
+                    frames: 1,
+                    hash,
+                }],
+            ));
+        }
+        // And one read that no checkpoint covers.
+        verification.read("voice", 0, b"unsigned");
+        let later = Instant::now() + RECENT * 3;
+        let mut state = verification.0.lock().unwrap();
+        state.prune(later);
+        // The camera's latest group stays, as more of it may come; the unconfirmed stays, for
+        // `check` to find; every other group, and what was said of it, is gone.
+        let mut kept: Vec<_> = state.read.keys().cloned().collect();
+        kept.sort();
+        assert_eq!(
+            kept,
+            [("camera".to_owned(), 99), ("voice".to_owned(), 0)],
+        );
+        assert_eq!(state.confirmed.len(), 1);
     }
 
     #[test]
