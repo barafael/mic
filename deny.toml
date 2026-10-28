@@ -52,4 +52,5 @@ unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 # moq's crates from a fork until moq-dev/moq releases its fixes (Cargo.toml's [patch.crates-io]).
-allow-git = ["https://github.com/barafael/moq"]
+# femtovg 0.27 with 0.28's pipeline fix, until Slint takes 0.28 (the same).
+allow-git = ["https://github.com/barafael/moq", "https://github.com/barafael/femtovg"]

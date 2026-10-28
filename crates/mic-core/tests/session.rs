@@ -72,6 +72,10 @@ async fn a_relay_with_another_certificate_is_refused() {
     let mut config = Config::new(relay.url());
     config.trust = Trust::Fingerprints(vec!["00".repeat(32)]);
     config.connect_timeout = Duration::from_secs(2);
+    // QUIC only: the test relay serves no TCP, and on Windows a connection to a closed port is
+    // retried for seconds before it's refused, where Linux refuses it at once; the fallback's
+    // timeout was what got said, not the certificate.
+    config.websocket = false;
     let client = Client::new(
         config,
         &InMemory::default(),

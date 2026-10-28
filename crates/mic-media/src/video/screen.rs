@@ -15,36 +15,34 @@ pub use moq_video::capture::{Camera, Display, Source, Window};
 
 /// The cameras there are: on Linux V4L2's, then PipeWire's.
 pub fn cameras() -> Result<Vec<Camera>, Error> {
-    blocking(moq_video::capture::cameras())
+    blocking(moq_video::capture::cameras)
 }
 
 /// The displays there are to share.
 pub fn displays() -> Result<Vec<Display>, Error> {
-    blocking(moq_video::capture::displays())
+    blocking(moq_video::capture::displays)
 }
 
 /// The windows there are to share.
 pub fn windows() -> Result<Vec<Window>, Error> {
-    blocking(moq_video::capture::windows())
+    blocking(moq_video::capture::windows)
 }
 
-/// `listing`, run to its end on the captures' runtime: a frontend asks from its own thread, and
-/// a join from a runtime's, where blocking isn't allowed, so it's asked from a thread of its own.
-fn blocking<T: Send>(
-    listing: impl std::future::Future<Output = Result<T, moq_video::Error>> + Send,
+/// What `listing` makes, run to its end on a thread of its own in the captures' runtime: a
+/// frontend asks from its own thread, a join from a runtime's, where blocking isn't allowed; and
+/// macOS's ScreenCaptureKit makes futures that can't move between threads, so each runs where
+/// it's made, its tasks (the portal's, on Linux) on the runtime.
+fn blocking<T: Send, F: std::future::Future<Output = Result<T, moq_video::Error>>>(
+    listing: impl FnOnce() -> F + Send,
 ) -> Result<T, Error> {
     let runtime = runtime()?;
-    let listed = if tokio::runtime::Handle::try_current().is_ok() {
-        std::thread::scope(|scope| {
-            scope
-                .spawn(|| runtime.block_on(listing))
-                .join()
-                .unwrap_or_else(|_| Err(moq_video::Error::Unsupported("a listing panicked".into())))
-        })
-    } else {
-        runtime.block_on(listing)
-    };
-    listed.map_err(|error| Error::Device(error.to_string()))
+    std::thread::scope(|scope| {
+        scope
+            .spawn(|| runtime.block_on(listing()))
+            .join()
+            .unwrap_or_else(|_| Err(moq_video::Error::Unsupported("a listing panicked".into())))
+    })
+    .map_err(|error| Error::Device(error.to_string()))
 }
 
 /// Every capture's runtime, one for the process: the desktop portal's D-Bus connection is made
@@ -123,10 +121,16 @@ impl ScreenCapture {
         let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
         let (opened, open) = std::sync::mpsc::channel::<Result<(), Error>>();
         let (ended, end) = std::sync::mpsc::channel::<()>();
-        runtime()?.spawn(async move {
-            self.run(pictures, opened, stopped).await;
-            let _told = ended.send(());
-        });
+        let runtime = runtime()?;
+        // On a thread of its own, in the runtime: a capture's future can't always move between
+        // threads (macOS's), so it's run where it's made.
+        std::thread::Builder::new()
+            .name("mic-capture".to_owned())
+            .spawn(move || {
+                runtime.block_on(self.run(pictures, opened, stopped));
+                let _told = ended.send(());
+            })
+            .map_err(Error::Thread)?;
         let opened = open
             .recv()
             .unwrap_or_else(|_| Err(Error::Device("the capture's task ended".to_owned())));

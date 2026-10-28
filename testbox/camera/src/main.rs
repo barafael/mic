@@ -120,7 +120,9 @@ mod camera {
                 eprintln!("box-camera: {error}");
             }
         });
-        timer.update_timer(Some(period), Some(period)).into_result()?;
+        timer
+            .update_timer(Some(period), Some(period))
+            .into_result()?;
         mainloop.run();
         Ok(())
     }

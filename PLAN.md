@@ -653,6 +653,11 @@ M11; pushing, and publishing the release, are the user's.
 71. `ci: the first run` (C): the repository on GitHub (the user creates it and pushes), and CI
     green on Linux, Windows and macOS, settling the unverified assumptions: the keyring on the
     runners, libvpx on Windows and macOS, lavapipe on Linux. What breaks is fixed here.
+    *Done:* barafael/mic on GitHub, public; every job green on all three (PR #1). The first
+    runs found macOS had never built (captures moved between threads), code built where it
+    isn't used, and tests whose timing held only on this host: a camera watched again taken for
+    a forger (stale groups, now passed over), a paced thread losing time to late wakings, a
+    certificate's refusal said as a timeout on Windows (docs/observations.md, M13).
 72. `docs: 0.1.0 as it is` (C): CHANGELOG.md and README.md with M11, M12 and 70 (the settings,
     the participants, the camera, the recording's names, admission, what the review fixed), the
     known limits as they stand, and the femtovg and moq forks said where they're used.
@@ -701,9 +706,9 @@ Each is checked by the commit named, which settles it in its body and in the des
 
 | Assumption | Checked in | If it's wrong |
 |---|---|---|
-| The keyring works on GitHub's Windows and macOS runners, and GNOME Keyring on its Linux one (it does in a container here) | 11 (CI) | The keyring test is skipped in CI where it can't run, and the box's clients cover Linux |
-| libvpx builds and links on the Windows and macOS CI runners | 32 | A vendored static build through the binding's build script |
-| lavapipe renders offscreen in GitHub's Linux runners | 34 | `mic-render`'s pixel tests run in the box only |
+| The keyring works on GitHub's Windows and macOS runners, and GNOME Keyring on its Linux one (it does in a container here) (*holds*, commit 71) | 11 (CI) | The keyring test is skipped in CI where it can't run, and the box's clients cover Linux |
+| libvpx builds and links on the Windows and macOS CI runners (*holds*, commit 71) | 32 | A vendored static build through the binding's build script |
+| lavapipe renders offscreen in GitHub's Linux runners (*holds*, commit 71) | 34 | `mic-render`'s pixel tests run in the box only |
 | `moq-vaapi` can take a VP9 decoder | 37 | VP9 decodes in software everywhere; the box's GPU is used for rendering |
 | A `NET_ADMIN` sidecar can shape traffic for one pod in rootless Podman (*holds*, commit 46) | 46 | Shaping on the relay's side, per client address |
 | The pinned `moq-relay` serves WebSocket, and `moq-tokio`'s fallback can be turned off (*holds*, commit 47) | 47 | The fallback waits for upstream; D9's opt-out is reported as missing |

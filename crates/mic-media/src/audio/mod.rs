@@ -93,6 +93,9 @@ impl Drop for Running {
 
 /// A thread that does `step` every `period`, on a schedule of absolute deadlines so it doesn't
 /// drift, as a device's callbacks come; it ends, and is joined, when the handle is dropped.
+/// How far behind a paced thread may fall before it gives up the time lost.
+const CATCH_UP: Duration = Duration::from_millis(200);
+
 pub(crate) fn paced(
     name: &str,
     period: Duration,
@@ -113,10 +116,14 @@ pub(crate) fn paced(
                     let now = std::time::Instant::now();
                     if next > now {
                         std::thread::sleep(next - now);
-                    } else {
-                        // Behind (a loaded machine): catch up from now, as a device would.
+                    } else if now - next > CATCH_UP {
+                        // Far behind (a loaded machine): on from now, as a device would.
                         next = now;
                     }
+                    // A little behind, as a sleep woken late leaves it (macOS's often are, by
+                    // more than a period): the next step at once, keeping the rate. Starting from
+                    // now each time lost what each late waking took: half the rate on CI's
+                    // macOS runner.
                 }
             }
         })

@@ -7,7 +7,9 @@
 //!   first, over a socket in the user's runtime directory, and exits: the room opens in the
 //!   window already there.
 
+#[cfg(unix)]
 use std::io::{BufRead, BufReader, Read, Write};
+#[cfg(unix)]
 use std::path::PathBuf;
 
 /// The longest link a hand-over reads.
@@ -194,6 +196,7 @@ pub fn register(_arguments: &[String]) -> Result<String, String> {
 /// spec reserves), since xdg-open's own reading of `Exec` takes a quoted path's quotes for part
 /// of it, and finds no such command. Inside quotes, `"`, `` ` ``, `$` and `\` are escaped, and
 /// that escape's backslash is escaped again, as a string value's; `%` is doubled either way.
+#[cfg(any(all(unix, not(target_os = "macos")), test))]
 fn exec_argument(argument: &str) -> String {
     let plain = argument
         .chars()
@@ -220,6 +223,7 @@ fn exec_argument(argument: &str) -> String {
 
 /// The desktop file for `exe`, given `arguments` before the link: an application that opens
 /// `mic://` links.
+#[cfg(any(all(unix, not(target_os = "macos")), test))]
 fn desktop_file(exe: &str, arguments: &[String]) -> String {
     let exec = std::iter::once(exe)
         .chain(arguments.iter().map(String::as_str))
@@ -235,6 +239,7 @@ fn desktop_file(exe: &str, arguments: &[String]) -> String {
 }
 
 /// `mimeapps.list` as `list` was, with mic the default for `mic://`: its other lines as they were.
+#[cfg(any(all(unix, not(target_os = "macos")), test))]
 fn with_default(list: &str) -> String {
     const SECTION: &str = "[Default Applications]";
     let entry = format!("x-scheme-handler/mic={}.desktop", crate::APP_ID);

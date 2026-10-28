@@ -127,7 +127,8 @@ fn cgroup_cpu(cgroup: &std::path::Path) -> Option<f64> {
     Some(usec / 1e6)
 }
 
-#[cfg(test)]
+/// Linux's /proc/stat, as the box is Linux's; xtask builds elsewhere too.
+#[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::*;
 

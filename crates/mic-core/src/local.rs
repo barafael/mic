@@ -1,6 +1,7 @@
 //! Sockets for the user's own processes: the box's harness, and the hand-over of `mic://` links
 //! to a running mic.
 
+#[cfg(unix)]
 use std::path::Path;
 
 /// A listener at `path`, bound by `bind`, never reachable by anyone but the owner: bound inside a
