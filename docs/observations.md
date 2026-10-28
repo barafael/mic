@@ -6,15 +6,18 @@ measurements, and things to revisit. Newest first within each milestone. Each sa
 
 ## M13: 0.1.0 out
 
-- **The leak fix took an honest sender for a forger on a slow machine** (settled, mic-core `sig`;
-  open, a stricter fix). CI's macOS runner, the first run off this host: a camera watched again
-  is read from a group's start, the relay handed back the camera's group 0, and the subscriber
-  had forgotten what checkpoints said of it six seconds after (leak-verification), while no
-  checkpoint lists a group done with: unconfirmed past the grace, so rejected. Here the new
-  subscription always started at the latest group. What's said of each track's newest 64 groups
-  is now kept, a few KiB a peer. Stricter, for later: on `resume`, skip the groups older than
-  the newest confirmed before `abandon`, so a camera watched again shows no stale frames and
-  nothing need be kept; it touches the reading of frames.
+- **A camera watched again took its honest sender for a forger, under load** (settled, mic-core
+  `sig`; open, a group cut short). On CI's runners, and here with every core busy (5 of 30): a
+  camera let go of and taken up again is handed a stale group by the relay, which cancels it a
+  few frames in once it's sent a newer one (2 to 4 of 15 read); a checkpoint confirms a group's
+  frames only by its chain at the count it lists, so those frames never were, and past the grace
+  the sender was rejected. Now a track taken up again passes over the groups up to the newest it
+  read before (`Verification::stale`): they're stale, nothing of them is shown, and the next
+  group, a second away for a camera, is read whole (0 of 30). What checkpoints said of each
+  track's newest 64 groups is kept too. **Open:** a group cut short in mid-call, which a relay
+  under load may do, has the same unconfirmable frames. Excusing a group cut short would let a
+  forger who keeps starting groups go unchecked; confirming the read prefix needs a checkpoint at
+  that count. A decision for the design (§5.x, the grace).
 - **macOS had never built** (settled, mic-media `screen`). ScreenCaptureKit's futures can't move
   between threads, and mic spawned captures onto a multi-threaded runtime: each capture, and
   each listing, now runs with `block_on` on a thread of its own, in that runtime. Windows built

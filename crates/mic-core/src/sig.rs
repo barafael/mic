@@ -436,6 +436,10 @@ struct VerificationState {
     /// Tracks the subscriber let go of mid-group, whose frames read since are ignored until it
     /// subscribes again.
     abandoned: std::collections::HashSet<String>,
+    /// By track let go of: the newest group read of it before. That group, or an older one, which
+    /// a relay hands a subscription that comes back, isn't read: it's stale, and the relay
+    /// cancels it once it's sent a newer one, so what was read of it could never be confirmed.
+    stale_below: HashMap<String, u64>,
 }
 
 /// One group as a subscriber read it.
@@ -516,6 +520,17 @@ impl Verification {
     /// then.
     pub(crate) fn abandon(&self, track: &str) {
         let mut state = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let newest = state
+            .read
+            .keys()
+            .chain(state.confirmed.keys())
+            .filter(|(read, _)| read == track)
+            .map(|(_, group)| *group)
+            .max();
+        if let Some(newest) = newest {
+            let below = state.stale_below.entry(track.to_owned()).or_insert(newest);
+            *below = (*below).max(newest);
+        }
         state.read.retain(|(read, _), _| read != track);
         state.abandoned.insert(track.to_owned());
     }
@@ -527,6 +542,21 @@ impl Verification {
             .unwrap_or_else(PoisonError::into_inner)
             .abandoned
             .remove(track);
+    }
+
+    /// Whether `group` of `track` is no newer than the newest read of it before it was let go:
+    /// stale, so not read; a camera's next group, a second away, is. Once a group that isn't
+    /// comes, none is.
+    fn stale(&self, track: &str, group: u64) -> bool {
+        let mut state = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        match state.stale_below.get(track) {
+            Some(below) if group <= *below => true,
+            Some(_) => {
+                state.stale_below.remove(track);
+                false
+            }
+            None => false,
+        }
     }
 
     fn fail(&self, forgery: Forgery) {
@@ -631,10 +661,16 @@ impl VerifiedTrack {
         }
     }
 
-    /// The next group, whose frames are confirmed as they're read.
+    /// The next group, whose frames are confirmed as they're read; a stale one, handed back
+    /// after the track was let go and taken up again, is passed over.
     pub async fn recv_group(&mut self) -> Result<Option<VerifiedGroup>, TrackError> {
-        let Some(group) = self.track.recv_group().await? else {
-            return Ok(None);
+        let group = loop {
+            let Some(group) = self.track.recv_group().await? else {
+                return Ok(None);
+            };
+            if !self.verification.stale(&self.semantic, group.sequence()) {
+                break group;
+            }
         };
         Ok(Some(VerifiedGroup {
             sequence: group.sequence(),
@@ -775,6 +811,25 @@ mod tests {
         let mut said: Vec<u64> = state.confirmed.keys().map(|(_, group)| *group).collect();
         said.sort_unstable();
         assert_eq!(said, (100 - KEPT_GROUPS..100).collect::<Vec<_>>());
+    }
+
+    /// A camera let go of and taken up again passes over the groups up to the newest it read
+    /// before: the relay cancels such a group once it's sent a newer one, and what was read
+    /// of it could never be confirmed (CI's runners, under load: two frames of 15).
+    #[test]
+    fn groups_older_than_before_a_camera_was_let_go_are_stale() {
+        let verification = Verification::default();
+        for group in 0..4 {
+            verification.read("camera", group, b"frame");
+        }
+        verification.abandon("camera");
+        verification.resume("camera");
+        assert!(verification.stale("camera", 0));
+        assert!(verification.stale("camera", 3));
+        assert!(!verification.stale("camera", 4));
+        // Once a group that isn't stale comes, none is.
+        assert!(!verification.stale("camera", 1));
+        assert!(!verification.stale("voice", 0));
     }
 
     /// A camera watched again is read from a group's start, and the relay may hand it a group
