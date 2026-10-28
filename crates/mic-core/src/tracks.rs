@@ -212,10 +212,13 @@ pub struct Publication {
     broadcast: moq_net::broadcast::Producer,
     key: RoomKey,
     catalog: Catalog,
-    catalog_track: moq_e2ee::track::Producer,
+    /// Until it's finished, at close.
+    catalog_track: Option<moq_e2ee::track::Producer>,
     ledger: Ledger,
-    /// Signs the checkpoints for as long as the broadcast is up.
-    _signing: Task,
+    /// Signs the checkpoints for as long as the broadcast is up, and what stops it, its last
+    /// checkpoint written.
+    signing: Task,
+    stop_signing: Option<tokio::sync::oneshot::Sender<()>>,
 }
 
 /// A task of the publication's, stopped with it.
@@ -255,6 +258,7 @@ impl Publication {
         let catalog_track = produce(&generation, &broadcast, CATALOG)?;
         let sig_track = produce(&generation, &broadcast, SIG)?;
         let ledger = Ledger::default();
+        let (stop_signing, stop) = tokio::sync::oneshot::channel();
         let signing = Task(tokio::spawn(sig::sign(
             ledger.clone(),
             sig_track,
@@ -266,15 +270,17 @@ impl Publication {
                 seq: 0,
                 entries: Vec::new(),
             },
+            stop,
         )));
         let mut publication = Self {
             generation,
             broadcast,
             key,
             catalog,
-            catalog_track,
+            catalog_track: Some(catalog_track),
             ledger,
-            _signing: signing,
+            signing,
+            stop_signing: Some(stop_signing),
         };
         publication.write_catalog()?;
         publication.broadcast.announce(Default::default())?;
@@ -307,14 +313,31 @@ impl Publication {
 
     /// The catalog, signed, as the track's latest group.
     fn write_catalog(&mut self) -> Result<(), TrackError> {
-        let mut group = self.catalog_track.append_group()?;
+        let Some(catalog_track) = self.catalog_track.as_mut() else {
+            return Ok(());
+        };
+        let mut group = catalog_track.append_group()?;
         group.write_frame(moq_net::Timestamp::now(), &self.catalog.sign(&self.key))?;
         group.finish()?;
         Ok(())
     }
 
-    /// Ends the broadcast: it's unannounced, and its tracks end.
-    pub fn close(&self) {
+    /// Ends the broadcast: its catalog finished, the checkpoints too once they've signed what's
+    /// left (for up to a second), then it's unannounced, and its tracks end.
+    pub async fn close(&mut self) {
+        if let Some(catalog_track) = self.catalog_track.take()
+            && let Err(error) = catalog_track.finish()
+        {
+            tracing::debug!(%error, "finishing the catalog");
+        }
+        if let Some(stop) = self.stop_signing.take() {
+            let _stopped: Result<(), ()> = stop.send(());
+            let signed =
+                tokio::time::timeout(std::time::Duration::from_secs(1), &mut self.signing.0);
+            if signed.await.is_err() {
+                tracing::debug!("the last checkpoint wasn't signed within a second");
+            }
+        }
         self.broadcast.close();
     }
 }

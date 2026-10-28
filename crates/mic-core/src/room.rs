@@ -1026,7 +1026,7 @@ impl Task {
         if let Some(saying) = self.saying.take() {
             saying.finish();
         }
-        self.publication.close();
+        self.publication.close().await;
         if let Err(error) = connection.close().await {
             tracing::debug!(%error, "the session didn't drain before it closed");
         }
