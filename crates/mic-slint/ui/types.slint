@@ -28,15 +28,21 @@ export struct Tile {
     reaction-seq: int,
     // A shared screen, not a camera: shown whole, never cropped.
     screen: bool,
+    // Kept while the room redials, or until it's back with them: greyed.
+    away: bool,
 }
 
 // A chat message, as the panel shows it.
 export struct ChatLine {
-    // Who said it, by key: a run of one sender's messages shows the name once.
+    // Who said it, by key.
     from: string,
     name: string,
     text: string,
     me: bool,
+    // When it was heard, `HH:MM` on the local clock.
+    time: string,
+    // It starts a run (another sender, or a pause): the name and time show above it.
+    first: bool,
 }
 
 // Someone in the room, as the participants panel lists them: everyone, shown or not.
@@ -50,6 +56,8 @@ export struct Person {
     sharing: bool,
     // Whether it has a tile; those without are behind the "+N".
     shown: bool,
+    // Kept while the room redials: greyed.
+    away: bool,
     initials: string,
     tint: color,
 }

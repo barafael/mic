@@ -23,6 +23,8 @@ export component RoomScreen inherits FocusScope {
     in property <string> invite;
     in property <string> status;
     in property <string> warning;
+    // Whether the call goes over the WebSocket fallback.
+    in property <bool> fallback;
     // Something to say a moment, as a share that stopped; shown each time `notice-seq` changes.
     in property <string> notice;
     in property <int> notice-seq;
@@ -46,6 +48,8 @@ export component RoomScreen inherits FocusScope {
     in property <bool> share-opening;
     callback toggle-share();
     callback toggle-recording();
+    // Leaves for a new room, as when the invite reached someone it shouldn't.
+    callback new-room();
     callback leave();
     callback toggle-mute();
     callback toggle-camera();
@@ -109,6 +113,7 @@ export component RoomScreen inherits FocusScope {
     property <bool> born;
     property <bool> copied;
     property <bool> noticing;
+    property <bool> fallback-seen;
     init => {
         self.fit();
         self.focus();
@@ -241,6 +246,19 @@ export component RoomScreen inherits FocusScope {
             if root.warning != "": Banner {
                 text: root.warning;
                 tint: Theme.danger;
+                action: "New room";
+                acted => {
+                    root.new-room();
+                }
+            }
+            // Once read, it stays away for the call.
+            if root.fallback && !root.fallback-seen: Banner {
+                text: "UDP doesn't get through here: the call goes over the slower fallback (WebSocket), and may lag.";
+                tint: Theme.text-dim;
+                action: "OK";
+                acted => {
+                    root.fallback-seen = true;
+                }
             }
             // Whoever records, everyone sees it (D7).
             if root.recording != "": Banner {

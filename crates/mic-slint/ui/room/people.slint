@@ -7,6 +7,7 @@ import { Icon } from "../widgets/icon.slint";
 export component PersonRow inherits Rectangle {
     in property <Person> person;
     height: 44px;
+    opacity: root.person.away ? 0.45 : 1;
     accessible-role: text;
     accessible-label: root.person.me ? root.person.name + " (you)" : root.person.name;
     HorizontalLayout {

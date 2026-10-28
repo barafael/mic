@@ -103,15 +103,19 @@ struct Cli {
 const SHOWN: &str = "the window shows";
 
 /// What the window says of how this build stands, if anything.
-fn notice_of(standing: &mic_core::version::Standing) -> Option<String> {
+/// What the window says of `standing`, and where the newer one is: nothing if this is the
+/// latest.
+fn notice_of(standing: &mic_core::version::Standing) -> Option<(String, String)> {
     use mic_core::version::{CURRENT, Standing};
     match standing {
         Standing::Latest => None,
-        Standing::Newer { latest, download } => Some(format!(
-            "mic {latest} is out; this is {CURRENT}. Download it: {download}"
+        Standing::Newer { latest, download } => Some((
+            format!("mic {latest} is out; this is {CURRENT}."),
+            download.clone(),
         )),
-        Standing::Incompatible { latest, download } => Some(format!(
-            "mic {latest} is out, and this {CURRENT} can't join rooms with it. Download it: {download}"
+        Standing::Incompatible { latest, download } => Some((
+            format!("mic {latest} is out, and this {CURRENT} can no longer join rooms with it."),
+            download.clone(),
         )),
     }
 }
@@ -309,11 +313,13 @@ fn run(cli: Cli) -> Result<(), String> {
             let invite = match invite.trim().parse::<Invite>() {
                 Ok(invite) => invite,
                 Err(error) => {
-                    shown.set_error(format!("That isn't an invite: {error}").into());
+                    shown.set_error("That isn't an invite.".into());
+                    shown.set_error_details(error.to_string().into());
                     return;
                 }
             };
             shown.set_error("".into());
+            shown.set_error_details("".into());
             shown.set_joining(true);
             join(&runtime, &app, window.clone(), invite, Profile::new(&name));
         }
@@ -415,6 +421,11 @@ fn run(cli: Cli) -> Result<(), String> {
                 window.set_invite(invite.clone());
                 window.invoke_join(window.get_name(), invite);
             }
+        }
+    });
+    window.on_open_link(|link| {
+        if let Err(error) = webbrowser::open(&link) {
+            tracing::warn!(%error, %link, "opening a link");
         }
     });
     window.on_columns_for(|count, width, height| {
@@ -693,9 +704,12 @@ fn run(cli: Cli) -> Result<(), String> {
                     }
                 }
             }
-            *noticed.lock().unwrap_or_else(PoisonError::into_inner) = said.clone();
+            *noticed.lock().unwrap_or_else(PoisonError::into_inner) =
+                said.as_ref().map(|(text, _)| text.clone());
             let _shown = window.upgrade_in_event_loop(move |window| {
-                window.set_notice(said.unwrap_or_default().into());
+                let (text, link) = said.unwrap_or_default();
+                window.set_notice(text.into());
+                window.set_notice_link(link.into());
             });
         });
     }
@@ -793,12 +807,22 @@ fn join(
     let app = app.clone();
     runtime.spawn(async move {
         let joined = app.join(invite, profile).await;
-        let error = joined.err().map(|error| error.to_string());
+        // A few words to read, and what happened behind them.
+        let error = joined.err().map(|error| {
+            let short = match &error {
+                mic_core::session::Error::Unreachable { .. } => {
+                    "Can't reach the relay. Check the connection, then try again."
+                }
+                _ => "Couldn't join the room.",
+            };
+            (short, error.to_string())
+        });
         // Joined: the room's view takes over the screen.
         let _shown = window.upgrade_in_event_loop(move |window| {
             window.set_joining(false);
-            if let Some(error) = error {
-                window.set_error(format!("Couldn't join: {error}").into());
+            if let Some((short, details)) = error {
+                window.set_error(short.into());
+                window.set_error_details(details.into());
             }
         });
     });
@@ -841,6 +865,7 @@ fn apply(
     window.set_camera_off(view.camera_off);
     window.set_has_camera(view.camera);
     window.set_overflow(i32::try_from(view.overflow).unwrap_or(i32::MAX));
+    window.set_fallback(view.fallback);
     let hidden: Vec<&str> = view
         .people
         .iter()
@@ -863,6 +888,7 @@ fn apply(
                     recording: person.recording,
                     sharing: person.sharing,
                     shown: person.shown,
+                    away: person.away,
                     initials: view::initials(&person.name).into(),
                     tint: slint::Color::from_rgb_u8(red, green, blue),
                 }
@@ -915,6 +941,8 @@ fn apply(
                     name: line.name.as_str().into(),
                     text: line.text.as_str().into(),
                     me: line.me,
+                    time: line.time.as_str().into(),
+                    first: line.first,
                 })
                 .collect::<Vec<_>>(),
         );
@@ -949,6 +977,7 @@ fn apply(
                 reaction_seq: tile
                     .reaction
                     .map_or(0, |(_, seq)| i32::try_from(seq + 1).unwrap_or(i32::MAX)),
+                away: tile.away,
                 ..Tile::default()
             }
         })
@@ -1212,6 +1241,8 @@ mod harness {
                 alone: view.screen == crate::view::Screen::Room
                     && view.tiles.len() <= 1
                     && view.screens.is_empty(),
+                away: keys(|tile| tile.away),
+                fallback: view.fallback,
                 people: view
                     .people
                     .iter()

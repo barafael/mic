@@ -79,8 +79,17 @@ export component AppWindow inherits Window {
     // Its answer: true to leave for the link's room.
     callback answer(bool);
     in property <string> version;
-    // What it says of the version check, if anything (D15).
+    // What it says of the version check, if anything (D15), and where to get the newer one.
     in property <string> notice;
+    in property <string> notice-link;
+    // Opens a link in the browser.
+    callback open-link(string);
+    // What a join's error was, behind the few words of `error`.
+    in property <string> error-details;
+    // Whether the call goes over the WebSocket fallback.
+    in property <bool> fallback;
+    // The notice dismissed, for this run.
+    property <bool> notice-dismissed;
 
     init => {
         Palette.color-scheme = ColorScheme.dark;
@@ -109,15 +118,55 @@ export component AppWindow inherits Window {
     }
 
     VerticalLayout {
-        if root.notice != "": Rectangle {
+        if root.notice != "" && !root.notice-dismissed: Rectangle {
             background: Theme.accent.transparentize(0.8);
-            height: notice-text.preferred-height + 14px;
-            notice-text := Text {
-                text: root.notice;
-                color: Theme.text;
-                font-size: 13px;
-                wrap: word-wrap;
-                width: parent.width - 24px;
+            height: notice-row.preferred-height;
+            notice-row := HorizontalLayout {
+                padding: 7px;
+                padding-left: 12px;
+                spacing: 12px;
+                Text {
+                    text: root.notice;
+                    color: Theme.text;
+                    font-size: 13px;
+                    wrap: word-wrap;
+                    vertical-alignment: center;
+                }
+                if root.notice-link != "": Text {
+                    horizontal-stretch: 0;
+                    text: "Download";
+                    color: download.has-hover ? Theme.text : Theme.accent-hover;
+                    font-size: 13px;
+                    font-weight: 600;
+                    vertical-alignment: center;
+                    accessible-role: button;
+                    accessible-action-default => {
+                        root.open-link(root.notice-link);
+                    }
+                    download := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => {
+                            root.open-link(root.notice-link);
+                        }
+                    }
+                }
+                Text {
+                    horizontal-stretch: 0;
+                    text: "Not now";
+                    color: later.has-hover ? Theme.text : Theme.text-dim;
+                    font-size: 13px;
+                    vertical-alignment: center;
+                    accessible-role: button;
+                    accessible-action-default => {
+                        root.notice-dismissed = true;
+                    }
+                    later := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => {
+                            root.notice-dismissed = true;
+                        }
+                    }
+                }
             }
         }
         if root.screen == "join": JoinScreen {
@@ -126,6 +175,7 @@ export component AppWindow inherits Window {
             invite <=> root.invite;
             joining: root.joining;
             error: root.error;
+            error-details: root.error-details;
             note: root.join-note;
             filled: root.filled;
             join(name, invite) => {
@@ -147,6 +197,10 @@ export component AppWindow inherits Window {
             invite: root.room-invite;
             status: root.status;
             warning: root.warning;
+            fallback: root.fallback;
+            new-room => {
+                root.new-room();
+            }
             muted: root.muted;
             camera-off: root.camera-off;
             has-camera: root.has-camera;

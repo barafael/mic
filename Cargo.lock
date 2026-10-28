@@ -4441,6 +4441,7 @@ name = "mic-slint"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "jiff",
  "mic-core",
  "mic-harness",
  "mic-media",
@@ -4454,6 +4455,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "url",
+ "webbrowser",
 ]
 
 [[package]]

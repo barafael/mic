@@ -230,6 +230,12 @@ pub struct Ui {
     /// Those the panel shows with a hand raised, by key, whether they have a tile or not.
     #[serde(default)]
     pub people_hands: Vec<String>,
+    /// The tiles shown greyed, away while the room redials, by key.
+    #[serde(default)]
+    pub away: Vec<String>,
+    /// Whether it says the call goes over the WebSocket fallback.
+    #[serde(default)]
+    pub fallback: bool,
 }
 
 /// What drawing a frontend's video tiles costs, over the last second: the others' cameras, not

@@ -15,6 +15,10 @@ path = "src/main.rs"
 harness = ["dep:mic-harness"]
 
 [dependencies]
+# Chat times on the local clock.
+jiff = "0.2.38"
+# The version notice's download link, in the browser.
+webbrowser = "1.2.5"
 clap = { version = "4.6.7", features = ["derive", "env"] }
 mic-core = { version = "0.1.0", path = "../mic-core" }
 mic-harness = { version = "0.1.0", path = "../mic-harness", optional = true }
