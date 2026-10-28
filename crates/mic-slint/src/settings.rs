@@ -19,6 +19,8 @@ pub struct Settings {
     /// if none.
     pub microphone: Option<String>,
     pub speaker: Option<String>,
+    /// The camera chosen, by id (moq-video's); the first there is if none.
+    pub camera: Option<String>,
     /// The noise suppression chosen; RNNoise if none (`devices::NOISE_SUPPRESSION`).
     pub noise: Option<NoiseSuppression>,
 }

@@ -9,6 +9,7 @@ members = [
     "crates/mic-render",
     "crates/mic-slint",
     "crates/mic-testrelay",
+    "testbox/camera",
     "testbox/forger",
     "testbox/probe",
     "xtask",

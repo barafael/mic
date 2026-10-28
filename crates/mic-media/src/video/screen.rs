@@ -1,7 +1,8 @@
-//! A screen or a window, captured as pictures for a screenshare: moq-video's capture (X11 on
-//! Linux, or on Wayland the desktop's portal and PipeWire; ScreenCaptureKit on macOS,
-//! Windows.Graphics.Capture on Windows), each picture scaled to fit a fixed size, the rest black,
-//! as a VP9 encoder of that size takes it.
+//! A screen or a window, captured as pictures for a screenshare, or a camera: moq-video's capture
+//! (for screens X11 on Linux, or on Wayland the desktop's portal and PipeWire; ScreenCaptureKit
+//! on macOS, Windows.Graphics.Capture on Windows; for cameras PipeWire and V4L2, AVFoundation,
+//! Media Foundation), each picture scaled to fit a fixed size, the rest black, as a VP9 encoder
+//! of that size takes it.
 
 use std::sync::Arc;
 
@@ -10,7 +11,12 @@ use tokio::sync::watch;
 use super::Picture;
 use crate::audio::{Error, Running};
 
-pub use moq_video::capture::{Display, Source, Window};
+pub use moq_video::capture::{Camera, Display, Source, Window};
+
+/// The cameras there are: on Linux V4L2's, then PipeWire's.
+pub fn cameras() -> Result<Vec<Camera>, Error> {
+    blocking(moq_video::capture::cameras())
+}
 
 /// The displays there are to share.
 pub fn displays() -> Result<Vec<Display>, Error> {
@@ -22,13 +28,23 @@ pub fn windows() -> Result<Vec<Window>, Error> {
     blocking(moq_video::capture::windows())
 }
 
-/// `listing`, run to its end on the captures' runtime: a frontend asks from its own thread.
-fn blocking<T>(
-    listing: impl std::future::Future<Output = Result<T, moq_video::Error>>,
+/// `listing`, run to its end on the captures' runtime: a frontend asks from its own thread, and
+/// a join from a runtime's, where blocking isn't allowed, so it's asked from a thread of its own.
+fn blocking<T: Send>(
+    listing: impl std::future::Future<Output = Result<T, moq_video::Error>> + Send,
 ) -> Result<T, Error> {
-    runtime()?
-        .block_on(listing)
-        .map_err(|error| Error::Device(error.to_string()))
+    let runtime = runtime()?;
+    let listed = if tokio::runtime::Handle::try_current().is_ok() {
+        std::thread::scope(|scope| {
+            scope
+                .spawn(|| runtime.block_on(listing))
+                .join()
+                .unwrap_or_else(|_| Err(moq_video::Error::Unsupported("a listing panicked".into())))
+        })
+    } else {
+        runtime.block_on(listing)
+    };
+    listed.map_err(|error| Error::Device(error.to_string()))
 }
 
 /// Every capture's runtime, one for the process: the desktop portal's D-Bus connection is made
@@ -87,7 +103,9 @@ async fn registered() {
     }
 }
 
-/// A screen capture: `source`, at most `fps` pictures a second, each `width` by `height`.
+/// A capture of a screen, a window or a camera: `source`, at most `fps` pictures a second, each
+/// `width` by `height`. It ends once nothing takes its pictures any more, so a room left lets
+/// its camera go.
 #[derive(Clone, Debug)]
 pub struct ScreenCapture {
     pub source: Source,
@@ -129,6 +147,11 @@ impl ScreenCapture {
         let mut config = moq_video::capture::Config::default();
         config.source = self.source.clone();
         config.framerate = moq_video::Rate::new(self.fps.max(1), 1).ok();
+        // A camera's nearest mode to what's sent; a screen is as large as it is.
+        if matches!(self.source, Source::Camera(_)) {
+            config.width = Some(self.width);
+            config.height = Some(self.height);
+        }
         // Every share asks the desktop which screen, as a share is chosen each time.
         config.restore = false;
         registered().await;
@@ -151,6 +174,7 @@ impl ScreenCapture {
             let frame = tokio::select! {
                 biased;
                 _ = &mut stopped => return,
+                () = pictures.closed() => return,
                 read = stream.read() => match read {
                     Ok(Some(frame)) => frame,
                     Ok(None) => return,

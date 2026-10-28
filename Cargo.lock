@@ -947,6 +947,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "box-camera"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "mic-media",
+ "pipewire",
+]
+
+[[package]]
 name = "bs58"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

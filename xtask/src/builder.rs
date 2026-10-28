@@ -32,6 +32,7 @@ const WORKSPACES: [(&str, &[Package]); 2] = [
     (
         "Cargo.toml",
         &[
+            package("box-camera"),
             package("forger"),
             package("mic-crowd"),
             Package {
