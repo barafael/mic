@@ -15,6 +15,7 @@ mod room;
 mod room_40;
 mod roster;
 mod screenshare;
+mod soak;
 mod testbox;
 mod version;
 mod video;
@@ -59,6 +60,9 @@ pub enum Phase {
     /// Forty in a room, measured each minute against the budget: not in a default round.
     #[value(name = "room-40")]
     Room40,
+    /// A long call, 30 minutes: still heard and seen, and what each window holds doesn't grow:
+    /// not in a default round.
+    Soak,
 }
 
 impl Phase {
@@ -104,6 +108,7 @@ impl Phase {
                 | Phase::Network
                 | Phase::Recording
                 | Phase::Room40
+                | Phase::Soak
         )
     }
 
@@ -120,6 +125,7 @@ impl Phase {
                 | Phase::Video
                 | Phase::Network
                 | Phase::Room40
+                | Phase::Soak
         )
     }
 
@@ -140,6 +146,7 @@ impl Phase {
             Phase::Network => network::network(checks, the_box),
             Phase::Room40 => room_40::room_40(checks, the_box),
             Phase::Recording => recording::recording(checks, the_box),
+            Phase::Soak => soak::soak(checks, the_box),
         }
     }
 }

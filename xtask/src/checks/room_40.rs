@@ -196,14 +196,14 @@ fn measure(the_box: &TestBox, stretch: Duration) -> Result<Sample> {
 }
 
 /// A process's CPU time so far, user and system, in seconds, and its resident memory in KiB.
-struct Process {
-    cpu: f64,
-    rss_kib: f64,
+pub(super) struct Process {
+    pub(super) cpu: f64,
+    pub(super) rss_kib: f64,
 }
 
 /// `name`'s process in `container`, from /proc: its stat's utime and stime, in Linux's clock
 /// ticks of a hundredth of a second, and its status's VmRSS.
-fn process(the_box: &TestBox, container: &str, name: &str) -> Result<Process> {
+pub(super) fn process(the_box: &TestBox, container: &str, name: &str) -> Result<Process> {
     let read = the_box.exec(
         container,
         &[
