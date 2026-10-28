@@ -19,8 +19,8 @@ use mic_media::audio::{SAMPLE_RATE, level};
 
 use crate::error::{Error, Result};
 use crate::harness::{LOUD, Participant, names};
-use crate::podman::{RUN, TestBox, tone};
-use crate::view;
+use crate::podman::{Pod, RUN, TestBox, tone};
+use crate::{process, ready, view};
 
 use super::Checks;
 
@@ -28,6 +28,12 @@ use super::Checks;
 const PATIENCE: Duration = Duration::from_secs(15);
 /// The tone played into carol's microphone, apart from alice's and bob's.
 const CAROLS: f64 = 770.0;
+/// The tone played into her default microphone while she's chosen another.
+const DEFAULTS: f64 = 990.0;
+/// The box's microphones, by the sinks that feed them (testbox/client/box-devices.conf): the
+/// default, and a headset's.
+const MICROPHONE: &str = "microphone";
+const HEADSET: &str = "headset";
 /// What a recording of the speaker leaves out at its start: the stream settling.
 const SETTLE: usize = SAMPLE_RATE as usize / 5;
 
@@ -63,15 +69,8 @@ pub fn audio_devices(checks: &mut Checks, the_box: &TestBox) -> Result<()> {
         }
     });
     checks.record("carol's microphone reaches alice", || {
-        let duration = PATIENCE + Duration::from_secs(5);
-        let count = (duration.as_secs_f64() * f64::from(SAMPLE_RATE)) as usize;
-        let tone: Vec<f32> = (0..count)
-            .map(|i| {
-                let at = i as f64 / f64::from(SAMPLE_RATE);
-                ((at * CAROLS * std::f64::consts::TAU).sin() * 0.5) as f32
-            })
-            .collect();
-        play_into_microphone(the_box, "carol", &tone)?;
+        let tone = sine(CAROLS, PATIENCE + Duration::from_secs(5));
+        play_into(the_box, "carol", MICROPHONE, &tone)?;
         alice.wait_to_hear(CAROLS, &[alices], PATIENCE)
     });
     checks.measured(
@@ -133,10 +132,96 @@ pub fn audio_devices(checks: &mut Checks, the_box: &TestBox) -> Result<()> {
             Ok(())
         },
     );
+    checks.record(
+        "a restarted carol keeps her name, and the microphone chosen is the one sent",
+        || kept(the_box, &invite, &mut alice, &mut carol, alices),
+    );
     for participant in [&mut alice, &mut carol] {
         participant.reset()?;
     }
     Ok(())
+}
+
+/// carol's name, typed into her join screen, and a microphone chosen, the box's headset, kept
+/// in her settings across a restart: her join screen has the name, and what's played into the
+/// headset reaches alice, what's played into her default microphone doesn't. The microphone is
+/// chosen in the file, as the settings panel writes it (`mic_slint::settings`), not in the
+/// panel; her settings are as they were after.
+fn kept(
+    the_box: &TestBox,
+    invite: &Invite,
+    alice: &mut Participant,
+    carol: &mut Participant,
+    alices: f64,
+) -> Result<()> {
+    let file = the_box
+        .repo()
+        .join(RUN)
+        .join("carol/home/.config/mic/settings.json");
+    let before = std::fs::read(&file).ok();
+    let outcome = (|| {
+        carol.reset()?;
+        super::window::type_join(the_box, "carol", "Carol K.", invite)?;
+        carol.wait_for("in the room as Carol K.", PATIENCE, |state| {
+            state.room == invite.room.to_string() && state.me.profile.name == "Carol K."
+        })?;
+        carol.reset()?;
+        let mut settings: serde_json::Value = std::fs::read(&file)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .ok_or_else(|| Error::Failed(format!("no settings at {}", file.display())))?;
+        settings["microphone"] = serde_json::Value::from(format!("pipewire:{HEADSET}"));
+        crate::error::write(&file, settings.to_string())?;
+        *carol = restarted(the_box)?;
+        carol.wait_for_snapshot("her name on the join screen", PATIENCE, |snapshot| {
+            snapshot.ui.as_ref().is_some_and(|ui| ui.name == "Carol K.")
+        })?;
+        carol.join(invite, "Carol K.")?;
+        alice.wait_for("with Carol K.", PATIENCE, |state| {
+            names(state) == ["Carol K."]
+        })?;
+        play_into(the_box, "carol", MICROPHONE, &sine(DEFAULTS, PATIENCE))?;
+        play_into(the_box, "carol", HEADSET, &sine(CAROLS, PATIENCE))?;
+        alice.wait_to_hear(CAROLS, &[alices, DEFAULTS], PATIENCE)
+    })();
+    // As they were, and the default microphone again, for the phases after.
+    match before {
+        Some(before) => crate::error::write(&file, before)?,
+        None => match std::fs::remove_file(&file) {
+            Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+                return Err(Error::Io {
+                    what: file.display().to_string(),
+                    source: error,
+                });
+            }
+            _ => {}
+        },
+    }
+    *carol = restarted(the_box)?;
+    outcome
+}
+
+/// carol's window restarted, and her harness once it answers.
+fn restarted(the_box: &TestBox) -> Result<Participant> {
+    process::run(crate::podman::podman(&[
+        "restart",
+        "--time",
+        "10",
+        &Pod::Client("carol").container("client"),
+    ]))?;
+    ready::client_up(the_box, "carol")?;
+    Participant::connect(the_box, "carol")
+}
+
+/// A sine at `frequency`, at half the full scale, for `duration`: mono, 48 kHz.
+fn sine(frequency: f64, duration: Duration) -> Vec<f32> {
+    let count = (duration.as_secs_f64() * f64::from(SAMPLE_RATE)) as usize;
+    (0..count)
+        .map(|i| {
+            let at = i as f64 / f64::from(SAMPLE_RATE);
+            ((at * frequency * std::f64::consts::TAU).sin() * 0.5) as f32
+        })
+        .collect()
 }
 
 /// The suppressor mic uses (crates/mic-slint, `devices::NOISE_SUPPRESSION`).
@@ -177,7 +262,7 @@ fn measure_suppressors(
     // seconds (AEC3 settles to transparent within 20 s with no echo). That isn't noise
     // suppression, so it's left out of what's measured.
     alice.act(Command::SetMuted { muted: true })?;
-    play_into_microphone(the_box, "carol", &voice)?;
+    play_into(the_box, "carol", MICROPHONE, &voice)?;
     let frequencies = measured_frequencies();
     let mut measured = Vec::new();
     for mode in modes {
@@ -262,18 +347,23 @@ fn record(the_box: &TestBox, client: &'static str, target: &str, sink: bool) -> 
         .collect())
 }
 
-/// Plays `samples` (mono, 48 kHz) into `client`'s microphone, in the background: a raw file
-/// written to its run directory, which `pw-play` plays into the sink that feeds it.
-fn play_into_microphone(the_box: &TestBox, client: &'static str, samples: &[f32]) -> Result<()> {
-    let file = "microphone.raw";
+/// Plays `samples` (mono, 48 kHz) into `client`'s microphone `microphone`, in the background: a
+/// raw file written to its run directory, which `pw-play` plays into the sink that feeds it.
+fn play_into(
+    the_box: &TestBox,
+    client: &'static str,
+    microphone: &str,
+    samples: &[f32],
+) -> Result<()> {
+    let file = format!("{microphone}.raw");
     let bytes: Vec<u8> = samples
         .iter()
         .flat_map(|sample| sample.to_le_bytes())
         .collect();
-    let path: &Path = &the_box.repo().join(RUN).join(client).join(file);
+    let path: &Path = &the_box.repo().join(RUN).join(client).join(&file);
     crate::error::write(path, bytes)?;
     let command = format!(
-        "pw-play --raw --target microphone-in --rate 48000 --channels 1 --format f32 \
+        "pw-play --raw --target {microphone}-in --rate 48000 --channels 1 --format f32 \
          /run/mic/{file} >/dev/null 2>&1 &"
     );
     let started = the_box.exec(&view::container(client), &["sh", "-c", &command])?;

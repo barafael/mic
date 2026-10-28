@@ -28,6 +28,8 @@ pub enum Action {
     Snapshot,
     /// Prints what the window decoded of each camera, as JSON.
     Seen,
+    /// Prints how loud each frequency (Hz) is in what it heard in the last second, as JSON.
+    Heard { frequencies: Vec<f64> },
     /// Leaves its room, as each check does at its end.
     Reset,
     /// Presses keys in the window, as xdotool names them: `Return`, `ctrl+d`, …
@@ -72,6 +74,9 @@ pub fn drive(the_box: &TestBox, client: &str, action: Action) -> Result<()> {
         }
         Action::Snapshot => print_json(&Participant::connect(the_box, client)?.snapshot()?)?,
         Action::Seen => print_json(&Participant::connect(the_box, client)?.seen()?)?,
+        Action::Heard { frequencies } => {
+            print_json(&Participant::connect(the_box, client)?.heard(&frequencies)?)?;
+        }
         Action::Reset => Participant::connect(the_box, client)?.reset()?,
         Action::Key { keys } => {
             for key in keys {

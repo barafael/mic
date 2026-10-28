@@ -6,6 +6,19 @@ measurements, and things to revisit. Newest first within each milestone. Each sa
 
 ## M11: After the review
 
+- **On PipeWire, every microphone came at half its voice** (settled, mic-media `device`): -6 dB
+  since commit 52 put cpal on its PipeWire host. That host offers every input as two channels:
+  the defaults hardcode it, and a node without `audio.channels` gets it. A mono microphone then
+  comes upmixed into one channel of the two, and mic's average of them halves it: 0.24 where
+  0.41 is heard. mic asks PipeWire for one channel instead (cpal requests what it's asked,
+  unchecked), and PipeWire mixes down what isn't mono. The box's `audio-devices` caught it, at
+  0.24 against the 0.25 wanted: commit 52 hadn't been through it, the box being the other
+  session's then.
+- **PipeWire's devices were listed by their names** (settled, mic-media `device`). Only
+  `alsa_input…`/`…_output…` counted, so the box's `microphone` and `speaker`, and any source
+  made by hand (a loopback, an echo canceller), weren't offered. Now by what cpal says: a
+  source is an input with a description of its own (an application's stream has none, "unknown"),
+  a sink a duplex, which is a speaker and not a microphone.
 - **femtovg's wgpu renderer rebuilds its pipelines every frame** (upstream, to report). This is
   what the window's cost since M6 was (docs/review-0.1.0.md). femtovg 0.27.0's `flush` ends by
   dropping every cached pipeline that flush didn't use
