@@ -123,6 +123,7 @@ pub fn e2ee(checks: &mut Checks, the_box: &TestBox) -> Result<()> {
         let forged = Invite {
             room: invite.room,
             secret: RoomSecret::random(),
+            name: None,
         };
         let lines = eavesdrop(the_box, &invite, &forged)?;
         // Refused for not opening (moq-e2ee's `Authentication`), not for anything else, such as

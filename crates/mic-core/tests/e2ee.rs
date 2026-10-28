@@ -91,6 +91,7 @@ async fn another_room_sees_nothing_of_it() {
     let forged = Invite {
         room: invite.room,
         secret: mic_core::RoomSecret::random(),
+        name: None,
     };
     let guessing = client(&relay)
         .join(forged, Profile::new("someone"))
@@ -168,6 +169,7 @@ async fn the_relay_sees_only_opaque_names_and_ciphertext() {
     let wrong = RoomCrypto::new(&Invite {
         room: invite.room,
         secret: mic_core::RoomSecret::random(),
+        name: None,
     })
     .unwrap();
     let raw = broadcast

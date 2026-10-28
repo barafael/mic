@@ -61,6 +61,7 @@ pub(crate) async fn publish(
     muted: tokio::sync::watch::Receiver<bool>,
     mut noise: tokio::sync::watch::Receiver<NoiseSuppression>,
     (tap, me): (crate::recording::Tap, crate::roster::ParticipantKey),
+    mut leaving: tokio::sync::watch::Receiver<bool>,
 ) {
     let mut suppressor = Suppressor::new(*noise.borrow_and_update());
     let mut encoder = match Encoder::new(&settings()) {
@@ -73,7 +74,15 @@ pub(crate) async fn publish(
     debug_assert_eq!(encoder.frame_size(), FRAME);
     let mut group = None;
     let mut packets: u64 = 0;
-    while let Some(mut frame) = capture.frame().await {
+    loop {
+        // Until the room is left: then the track is finished, not dropped.
+        let frame = tokio::select! {
+            frame = capture.frame() => frame,
+            _ = leaving.wait_for(|left| *left) => None,
+        };
+        let Some(mut frame) = frame else {
+            break;
+        };
         if noise.has_changed().unwrap_or(false) {
             suppressor = Suppressor::new(*noise.borrow_and_update());
         }
@@ -124,6 +133,9 @@ pub(crate) async fn publish(
         && let Err(error) = open.finish()
     {
         tracing::debug!(%error, "finishing the last voice group");
+    }
+    if let Err(error) = track.finish() {
+        tracing::debug!(%error, "finishing the voice track");
     }
 }
 

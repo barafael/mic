@@ -35,7 +35,7 @@
         ],
         env: [
           # Plain logs: the record merges them into one timeline.
-          { name: "RUST_LOG", value: "info" },
+          { name: "RUST_LOG", value: "info,moq_sock::bind=error" },
           { name: "NO_COLOR", value: "1" },
           { name: "HOME", value: "/run/mic/home" },
           # Vulkan's loader, Mesa and the keyring want a runtime directory.

@@ -265,6 +265,8 @@ impl Inner {
         // What a recording takes this participant's voice from, and the others'.
         let tap = crate::recording::Tap::default();
         let (muted, follows) = tokio::sync::watch::channel(false);
+        // Once the room is left: the senders finish their tracks.
+        let (leaving, _) = tokio::sync::watch::channel(false);
         let (noise, noise_follows) = tokio::sync::watch::channel(media.noise);
         let voice = match media.capture {
             Some(capture) => Some(tokio::spawn(crate::audio::publish(
@@ -273,6 +275,7 @@ impl Inner {
                 follows,
                 noise_follows,
                 (tap.clone(), participant),
+                leaving.subscribe(),
             ))),
             None => None,
         };
@@ -293,6 +296,7 @@ impl Inner {
                 camera,
                 publication.video_track(crate::video::CAMERA, codec)?,
                 camera_follows,
+                leaving.subscribe(),
             ))),
             _ => None,
         };
@@ -322,6 +326,7 @@ impl Inner {
             screen: media.screen,
             tap,
             recordings: self.config.recordings.clone(),
+            leaving,
             decoders: self
                 .config
                 .decoders

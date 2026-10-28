@@ -130,7 +130,24 @@ impl Recording {
             .map_or(0, |since| since.as_secs());
         std::fs::create_dir_all(recordings)
             .map_err(|error| Error::Recording(format!("{}: {error}", recordings.display())))?;
-        let path = recordings.join(format!("{}-{started}.webm", &room[..room.len().min(8)]));
+        // Named for the room, as its invite calls it, or by its id.
+        let called = state
+            .borrow()
+            .name
+            .clone()
+            .map(|name| {
+                name.chars()
+                    .map(|c| {
+                        if c.is_alphanumeric() || c == '-' {
+                            c
+                        } else {
+                            '_'
+                        }
+                    })
+                    .collect::<String>()
+            })
+            .unwrap_or_else(|| room[..room.len().min(8)].to_owned());
+        let path = recordings.join(format!("{called}-{started}.webm"));
         tracing::info!(path = %path.display(), "recording");
         let file = File::create(path, RECORDING_SETTINGS).await?;
         let (frames, written) = mpsc::unbounded_channel();
