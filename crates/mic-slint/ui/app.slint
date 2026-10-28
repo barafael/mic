@@ -11,6 +11,7 @@ import { JoinScreen } from "pages/join.slint";
 import { RoomScreen } from "pages/room.slint";
 import { SharePicker } from "overlays/share-picker.slint";
 import { LinkQuestion } from "overlays/link-question.slint";
+import { SettingsPanel } from "overlays/settings.slint";
 
 export { ChatLine, Person, Theme, Tile }
 
@@ -94,6 +95,26 @@ export component AppWindow inherits Window {
     in property <bool> fallback;
     // The notice dismissed, for this run.
     property <bool> notice-dismissed;
+    // The settings, while open: the devices by name and which are chosen (main.rs fills them in
+    // as it opens), the microphone's level for the meter.
+    in-out property <bool> settings-open;
+    in property <[string]> microphones;
+    in property <[string]> speakers;
+    in-out property <int> microphone;
+    in-out property <int> speaker;
+    in-out property <int> noise;
+    in property <float> mic-level;
+    in property <bool> has-devices: true;
+    callback open-settings();
+    callback choose-microphone(int);
+    callback choose-speaker(int);
+    callback choose-noise(int);
+    callback settings-closed();
+    // What the name field holds, as it's edited, for the harness.
+    callback name-edited(string);
+    changed name => {
+        root.name-edited(self.name);
+    }
 
     init => {
         Palette.color-scheme = ColorScheme.dark;
@@ -191,6 +212,9 @@ export component AppWindow inherits Window {
             about => {
                 about.show();
             }
+            open-settings => {
+                root.open-settings();
+            }
         }
         if root.screen == "room": RoomScreen {
             vertical-stretch: 1;
@@ -204,6 +228,9 @@ export component AppWindow inherits Window {
             fallback: root.fallback;
             new-room => {
                 root.new-room();
+            }
+            open-settings => {
+                root.open-settings();
             }
             muted: root.muted;
             camera-off: root.camera-off;
@@ -254,6 +281,31 @@ export component AppWindow inherits Window {
         choices: root.share-choices;
         share(index) => {
             root.share(index);
+        }
+    }
+    if root.settings-open: SettingsPanel {
+        width: root.width;
+        height: root.height;
+        name <=> root.name;
+        microphones: root.microphones;
+        speakers: root.speakers;
+        microphone <=> root.microphone;
+        speaker <=> root.speaker;
+        noise <=> root.noise;
+        level: root.mic-level;
+        has-devices: root.has-devices;
+        choose-microphone(index) => {
+            root.choose-microphone(index);
+        }
+        choose-speaker(index) => {
+            root.choose-speaker(index);
+        }
+        choose-noise(index) => {
+            root.choose-noise(index);
+        }
+        close => {
+            root.settings-open = false;
+            root.settings-closed();
         }
     }
     if root.asking != "": LinkQuestion {

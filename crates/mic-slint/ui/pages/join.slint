@@ -22,6 +22,7 @@ export component JoinScreen inherits Rectangle {
     in property <int> filled;
     callback new-room();
     callback about();
+    callback open-settings();
     property <bool> born;
     // A short window gets the card without its greeting, so Join stays in it.
     property <bool> compact: root.height < 480px;
@@ -185,6 +186,23 @@ export component JoinScreen inherits Rectangle {
         }
     }
     Text {
+        x: root.width - self.width - 14px - about-text.width - 16px;
+        y: root.height - self.height - 10px;
+        text: "Settings";
+        color: settings-touch.has-hover ? Theme.text : Theme.text-dim;
+        font-size: 12px;
+        accessible-role: button;
+        accessible-action-default => {
+            root.open-settings();
+        }
+        settings-touch := TouchArea {
+            mouse-cursor: pointer;
+            clicked => {
+                root.open-settings();
+            }
+        }
+    }
+    about-text := Text {
         x: root.width - self.width - 14px;
         y: root.height - self.height - 10px;
         text: "About mic";

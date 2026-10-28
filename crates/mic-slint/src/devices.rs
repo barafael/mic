@@ -27,10 +27,7 @@ pub struct Devices {
     /// The microphone of the room it's in, and the capture it writes into, which outlives a
     /// switch: a join opens a new one, which closes the last.
     microphone: Arc<Mutex<Option<Opened>>>,
-    #[expect(
-        dead_code,
-        reason = "read when the settings panel switches it (PLAN.md, commit 53)"
-    )]
+    /// The speaker playing, which a switch replaces.
     speaker: Mutex<Option<Running>>,
     /// Which microphone and speaker, by id; the system's defaults if none.
     chosen: Arc<Mutex<Chosen>>,
@@ -82,13 +79,11 @@ impl Devices {
     }
 
     /// How loud the microphone is now, 0 to 1: for a meter.
-    #[expect(dead_code, reason = "the settings panel calls it (PLAN.md, commit 53)")]
     pub fn level(&self) -> f32 {
         self.level.get()
     }
 
     /// The microphone `id` names from now on, the call's included; the default if none.
-    #[expect(dead_code, reason = "the settings panel calls it (PLAN.md, commit 53)")]
     pub fn switch_microphone(&self, id: Option<String>) {
         self.chosen
             .lock()
@@ -108,7 +103,6 @@ impl Devices {
 
     /// The speaker `id` names from now on; the default if none. The others go on playing into
     /// the same mixer, and its echo is still cancelled.
-    #[expect(dead_code, reason = "the settings panel calls it (PLAN.md, commit 53)")]
     pub fn switch_speaker(&self, id: Option<String>) {
         let Some(mixer) = &self.mixer else {
             tracing::warn!("no speaker opened at start: there's none to switch");
