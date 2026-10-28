@@ -1,0 +1,83 @@
+import { Theme } from "../theme.slint";
+import { Tile } from "../types.slint";
+import { TileView } from "tile.slint";
+
+// The tiles, at 16:9 as the cameras send, as large as the grid lets them be, the last row centred;
+// a last "+N" tile for those not shown.
+export component TileGrid inherits Rectangle {
+    in property <[Tile]> tiles;
+    // Participants not shown, as a last "+N" tile, when there are more than fit.
+    in property <int> overflow;
+    // How many columns fit `count` tiles best into a `width` by `height` grid (view.rs).
+    pure callback columns-for(int, length, length) -> int;
+    // Where the leftmost tile starts: what the bar's invite lines up with.
+    out property <length> first-left: root.rows > 1 ? root.left : root.left + (root.columns - root.count) * (root.tile-width + root.gap) / 2;
+    property <int> count: root.tiles.length + (root.overflow > 0 ? 1 : 0);
+    property <int> columns: Math.max(1, root.columns-for(self.count, self.width, self.height));
+    property <int> rows: Math.max(1, Math.ceil(self.count / self.columns));
+    property <length> gap: 8px;
+    property <length> cell-width: (self.width - self.gap * (self.columns - 1)) / self.columns;
+    property <length> cell-height: (self.height - self.gap * (self.rows - 1)) / self.rows;
+    property <length> tile-width: Math.max(0px, Math.min(self.cell-width, self.cell-height * 16 / 9));
+    property <length> tile-height: self.tile-width * 9 / 16;
+    property <length> left: (self.width - self.tile-width * self.columns - self.gap * (self.columns - 1)) / 2;
+    property <length> top: (self.height - self.tile-height * self.rows - self.gap * (self.rows - 1)) / 2;
+    // Moves are animated, but a window being resized is followed at once: the window says when
+    // it is (a chat opening or a screen shared moves the tiles, animated).
+    in property <bool> resizing;
+    for tile[i] in root.tiles: TileView {
+        property <int> line: Math.floor(i / root.columns);
+        property <int> in-row: self.line == root.rows - 1 ? root.count - self.line * root.columns : root.columns;
+        tile: tile;
+        x: root.left + (root.columns - self.in-row) * (root.tile-width + root.gap) / 2 + Math.mod(i, root.columns) * (root.tile-width + root.gap);
+        y: root.top + self.line * (root.tile-height + root.gap);
+        width: root.tile-width;
+        height: root.tile-height;
+        animate x, y, width, height {
+            duration: root.resizing ? 0ms : Theme.moving;
+            easing: ease-in-out;
+        }
+    }
+    if root.overflow > 0: Rectangle {
+        property <int> i: root.tiles.length;
+        property <int> line: Math.floor(self.i / root.columns);
+        property <int> in-row: root.count - self.line * root.columns;
+        x: root.left + (root.columns - self.in-row) * (root.tile-width + root.gap) / 2 + Math.mod(self.i, root.columns) * (root.tile-width + root.gap);
+        y: root.top + self.line * (root.tile-height + root.gap);
+        width: root.tile-width;
+        height: root.tile-height;
+        border-radius: 12px;
+        background: Theme.tile;
+        Text {
+            text: "+" + root.overflow;
+            color: Theme.text-dim;
+            font-size: 28px;
+            font-weight: 600;
+        }
+    }
+}
+
+// The grid with a few tiles and more than fit, for the preview.
+export component GridPreview inherits Rectangle {
+    background: Theme.canvas;
+    width: 720px;
+    height: 420px;
+    TileGrid {
+        x: 12px;
+        y: 12px;
+        width: parent.width - 24px;
+        height: parent.height - 24px;
+        tiles: [
+            { key: "a", name: "Ann Example", me: true, initials: "AE", tint: #2a8ca8 },
+            { key: "b", name: "Ben", initials: "B", tint: #8a5cd0, speaking: true },
+            { key: "c", name: "Cat", initials: "C", tint: #c0584a, hand: true },
+            { key: "d", name: "Dan", initials: "D", tint: #3f8f5a, muted: true },
+            { key: "e", name: "Eve", initials: "E", tint: #b07a2a },
+        ];
+        overflow: 7;
+        // As view.rs's `columns` answers for these sizes.
+        columns-for(count, width, height) => {
+            return count <= 1 ? 1 : count <= 4 ? 2 : 3;
+        }
+    }
+}

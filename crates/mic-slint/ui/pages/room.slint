@@ -1,0 +1,419 @@
+import { Palette } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { ChatLine, Tile } from "../types.slint";
+import { Banner } from "../widgets/banner.slint";
+import { TileView } from "../room/tile.slint";
+import { TileGrid } from "../room/grid.slint";
+import { ChatPanel } from "../room/chat.slint";
+import { Bar } from "../room/bar.slint";
+import { MoreMenu, ReactionPicker } from "../room/menus.slint";
+
+// The room: its tiles, a shared screen on the stage beside them, the chat, and a bar of its
+// controls. The keyboard stays with the room itself, so its shortcuts work whatever was clicked:
+// only the chat's field takes the focus, and the shortcuts are caught before it sees them.
+export component RoomScreen inherits FocusScope {
+    in property <[Tile]> tiles;
+    // Participants not shown, as a last "+N" tile, when there are more than fit.
+    in property <int> overflow;
+    in property <string> invite;
+    in property <string> status;
+    in property <string> warning;
+    // Something to say a moment, as a share that stopped; shown each time `notice-seq` changes.
+    in property <string> notice;
+    in property <int> notice-seq;
+    in property <bool> muted;
+    in property <bool> camera-off;
+    in property <bool> has-camera;
+    // While the window asks about a link: the keyboard comes back once it's answered.
+    in property <bool> asking;
+    in property <bool> hand;
+    in property <[ChatLine]> chat;
+    // The reactions offered, as emoji, in the order `react` numbers them.
+    in property <[string]> reactions;
+    // The others' shared screens: the first is on the stage.
+    in property <[Tile]> screens;
+    in property <bool> sharing;
+    // Who records the call, as the window says it, or nothing; and whether this participant does.
+    in property <string> recording;
+    in property <bool> recording-self;
+    // A share opening: the desktop's own dialog may be asking which screen, and may sit behind
+    // this window.
+    in property <bool> share-opening;
+    callback toggle-share();
+    callback toggle-recording();
+    callback leave();
+    callback toggle-mute();
+    callback toggle-camera();
+    callback toggle-hand();
+    callback react(int);
+    callback say(string);
+    // How many columns fit `count` tiles best into a `width` by `height` grid (view.rs).
+    pure callback columns-for(int, length, length) -> int;
+    property <bool> chat-open;
+    // A narrow window's chat, or one beside a shared screen, lies over the tiles instead.
+    property <bool> chat-over;
+    // A narrow window's bar: smaller buttons, and the rest in More.
+    property <bool> compact;
+    // Both follow the width, set as it changes: bound to it, the layouts they change would loop
+    // back into it.
+    property <int> screen-count: root.screens.length;
+    function fit() {
+        self.compact = self.width < 600px;
+        self.chat-over = self.width < 720px || (self.screen-count > 0 && self.width < 900px);
+    }
+    changed width => {
+        self.fit();
+        self.resized();
+    }
+    changed height => {
+        self.resized();
+    }
+    // The window being resized, till it rests: the tiles and the invite follow it at once.
+    property <bool> resizing;
+    function resized() {
+        self.resizing = true;
+        settled.running = false;
+        settled.running = true;
+    }
+    settled := Timer {
+        interval: 300ms;
+        running: false;
+        triggered => {
+            root.resizing = false;
+            self.running = false;
+        }
+    }
+    // A screen coming or going moves the grid itself, beside the stage or back: its tiles,
+    // placed within it, would fly in from where they were, so they follow at once, as for a
+    // resize, while the stage fades in.
+    changed screen-count => {
+        self.fit();
+        self.resized();
+    }
+    // The menu open over the bar: "react", "more", or none.
+    property <string> menu;
+    // The middle of the button the menu opened from, across the room.
+    property <length> menu-x;
+    // The messages seen while the chat was open: what's past them is unread.
+    property <int> read;
+    property <bool> born;
+    property <bool> copied;
+    property <bool> noticing;
+    init => {
+        self.fit();
+        self.focus();
+    }
+    // Set after the first frame: one set in `init` comes before it, and isn't animated.
+    Timer {
+        interval: 16ms;
+        running: !root.born;
+        triggered => {
+            root.born = true;
+        }
+    }
+    changed asking => {
+        if (!self.asking) {
+            self.focus();
+        }
+    }
+    // The shortcuts again, once the message field is gone; and no menu over the chat.
+    changed chat-open => {
+        self.menu = "";
+        if (!self.chat-open) {
+            self.focus();
+        }
+    }
+    changed compact => {
+        self.menu = "";
+    }
+    changed notice-seq => {
+        self.noticing = true;
+        noticed-for.running = false;
+        noticed-for.running = true;
+    }
+    noticed-for := Timer {
+        interval: 6s;
+        running: false;
+        triggered => {
+            root.noticing = false;
+            self.running = false;
+        }
+    }
+    // The shortcuts, as Google Meet has them: Ctrl+D the microphone, Ctrl+E the camera,
+    // Ctrl+Alt+C the chat, Ctrl+Alt+H a hand. Escape closes a menu, then the chat. Caught on the
+    // way to the focused element, so the chat's field doesn't keep them.
+    capture-key-pressed(event) => {
+        if (event.text == Key.Escape) {
+            if (root.menu != "") {
+                root.menu = "";
+                return accept;
+            }
+            if (root.chat-open) {
+                root.chat-open = false;
+                return accept;
+            }
+            return reject;
+        }
+        if (!event.modifiers.control) {
+            return reject;
+        }
+        if (event.modifiers.alt && event.text == "c") {
+            root.chat-open = !root.chat-open;
+            return accept;
+        }
+        if (event.modifiers.alt && event.text == "h") {
+            root.toggle-hand();
+            return accept;
+        }
+        if (event.text == "d") {
+            root.toggle-mute();
+            return accept;
+        }
+        if (event.text == "e") {
+            root.toggle-camera();
+            return accept;
+        }
+        reject
+    }
+    // The invite, for copying: never shown.
+    invite-text := TextInput {
+        text: root.invite;
+        read-only: true;
+        visible: false;
+    }
+    copied-for := Timer {
+        interval: 1600ms;
+        running: false;
+        triggered => {
+            root.copied = false;
+            self.running = false;
+        }
+    }
+    function copy-invite() {
+        invite-text.select-all();
+        invite-text.copy();
+        invite-text.clear-selection();
+        root.copied = true;
+        copied-for.running = false;
+        copied-for.running = true;
+    }
+    // Opens `menu` over the button whose middle is at `x` across the window, or closes it if
+    // it's open.
+    function open-menu(menu: string, x: length) {
+        root.menu-x = x - root.absolute-position.x;
+        root.menu = root.menu == menu ? "" : menu;
+    }
+    Rectangle {
+        background: Theme.canvas;
+        opacity: root.born ? 1 : 0;
+        animate opacity { duration: Theme.moving; }
+        VerticalLayout {
+            padding: 12px;
+            padding-bottom: 10px;
+            spacing: 10px;
+            if root.status != "": Banner {
+                text: root.status;
+                tint: Theme.warn;
+                pulsing: true;
+            }
+            if root.warning != "": Banner {
+                text: root.warning;
+                tint: Theme.danger;
+            }
+            // Whoever records, everyone sees it (D7).
+            if root.recording != "": Banner {
+                text: root.recording;
+                tint: Theme.danger;
+                pulsing: true;
+            }
+            if root.share-opening: Banner {
+                text: "Choose what to share in your desktop's dialog";
+                tint: Theme.accent;
+                pulsing: true;
+                action: "Cancel";
+                acted => {
+                    root.toggle-share();
+                }
+            }
+            if root.sharing: Banner {
+                text: "You're sharing your screen";
+                tint: Theme.accent;
+                action: "Stop";
+                acted => {
+                    root.toggle-share();
+                }
+            }
+            if root.noticing && root.notice != "": Banner {
+                text: root.notice;
+                tint: Theme.warn;
+            }
+            stage-row := HorizontalLayout {
+                vertical-stretch: 1;
+                spacing: 10px;
+                // A shared screen, as large as there's room for beside the tiles.
+                stage := Rectangle {
+                    horizontal-stretch: 1;
+                    min-width: 0;
+                    preferred-width: 0;
+                    max-width: root.screens.length > 0 ? 100000px : 0px;
+                    if root.screens.length > 0: TileView {
+                        tile: root.screens[0];
+                    }
+                }
+                grid := TileGrid {
+                    horizontal-stretch: 1;
+                    // Beside a shared screen, a strip no wider than 200px: the screen has the rest.
+                    min-width: root.screens.length > 0 ? 120px : 0;
+                    max-width: root.screens.length > 0 ? 200px : 100000px;
+                    preferred-width: 0;
+                    tiles: root.tiles;
+                    overflow: root.overflow;
+                    resizing: root.resizing;
+                    columns-for(count, width, height) => {
+                        return root.columns-for(count, width, height);
+                    }
+                }
+                if root.chat-open && !root.chat-over: ChatPanel {
+                    width: 300px;
+                    chat: root.chat;
+                    say(text) => {
+                        root.say(text);
+                    }
+                    seen(count) => {
+                        root.read = count;
+                    }
+                }
+            }
+            Bar {
+                compact: root.compact;
+                muted: root.muted;
+                camera-off: root.camera-off;
+                has-camera: root.has-camera;
+                hand: root.hand;
+                sharing: root.sharing;
+                share-opening: root.share-opening;
+                recording-self: root.recording-self;
+                chat-open: root.chat-open;
+                unread: !root.chat-open && root.chat.length > root.read;
+                menu: root.menu;
+                copied: root.copied;
+                // Both rows start at the room's padding: the invite goes under the leftmost tile,
+                // or the stage's edge beside a shared screen.
+                copy-x: root.screens.length > 0 ? 0px : grid.x + grid.first-left;
+                copy-follows: root.resizing;
+                copy-invite => {
+                    root.copy-invite();
+                }
+                toggle-mute => {
+                    root.toggle-mute();
+                }
+                toggle-camera => {
+                    root.toggle-camera();
+                }
+                toggle-hand => {
+                    root.toggle-hand();
+                }
+                toggle-share => {
+                    root.toggle-share();
+                }
+                toggle-recording => {
+                    root.toggle-recording();
+                }
+                toggle-chat => {
+                    root.chat-open = !root.chat-open;
+                }
+                open-menu(menu, x) => {
+                    root.open-menu(menu, x);
+                }
+                leave => {
+                    root.leave();
+                }
+            }
+        }
+        // A narrow window's chat, over the tiles.
+        if root.chat-open && root.chat-over: ChatPanel {
+            x: stage-row.x;
+            y: stage-row.y;
+            width: stage-row.width;
+            height: stage-row.height;
+            chat: root.chat;
+            say(text) => {
+                root.say(text);
+            }
+            seen(count) => {
+                root.read = count;
+            }
+        }
+    }
+    // A menu over the bar; a click anywhere else closes it.
+    if root.menu != "": TouchArea {
+        clicked => {
+            root.menu = "";
+        }
+    }
+    // Above the bar: 10px of padding, 56px of bar, 10px apart.
+    property <length> menu-bottom: root.height - 10px - 56px - 10px;
+    if root.menu == "react": ReactionPicker {
+        x: Math.clamp(root.menu-x - self.width / 2, 8px, root.width - self.width - 8px);
+        y: root.menu-bottom - self.height;
+        reactions: root.reactions;
+        react(index) => {
+            root.react(index);
+            root.menu = "";
+        }
+    }
+    if root.menu == "more": MoreMenu {
+        x: Math.clamp(root.menu-x - self.width / 2, 8px, root.width - self.width - 8px);
+        y: root.menu-bottom - self.height;
+        copied: root.copied;
+        hand: root.hand;
+        sharing: root.sharing;
+        share-opening: root.share-opening;
+        recording-self: root.recording-self;
+        copy-invite => {
+            root.copy-invite();
+        }
+        toggle-hand => {
+            root.menu = "";
+            root.toggle-hand();
+        }
+        toggle-share => {
+            root.menu = "";
+            root.toggle-share();
+        }
+        toggle-recording => {
+            root.menu = "";
+            root.toggle-recording();
+        }
+        pick-reaction => {
+            root.menu = "react";
+        }
+    }
+}
+
+// A room of five, one sharing a screen, someone recording, for the preview.
+export component RoomPreview inherits Rectangle {
+    // Dark, as the window sets it (app.slint).
+    init => {
+        Palette.color-scheme = ColorScheme.dark;
+    }
+    width: 1000px;
+    height: 620px;
+    RoomScreen {
+        tiles: [
+            { key: "a", name: "Ann Example", me: true, initials: "AE", tint: #2a8ca8 },
+            { key: "b", name: "Ben", initials: "B", tint: #8a5cd0, speaking: true },
+            { key: "c", name: "Cat", initials: "C", tint: #c0584a, hand: true },
+            { key: "d", name: "Dan", initials: "D", tint: #3f8f5a, muted: true },
+            { key: "e", name: "Eve", initials: "E", tint: #b07a2a },
+        ];
+        screens: [{ key: "b", name: "Ben's screen", screen: true }];
+        recording: "Cat is recording this call.";
+        has-camera: true;
+        reactions: ["👍", "👏", "😂", "😮", "❤️", "🎉"];
+        chat: [{ name: "Ben", text: "Here are the slides." }];
+        columns-for(count, width, height) => {
+            return 1;
+        }
+    }
+}

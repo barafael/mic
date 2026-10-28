@@ -1,0 +1,87 @@
+import { Theme } from "../theme.slint";
+import { Icon } from "icon.slint";
+
+// A line of a menu over the bar: an icon and what it does.
+export component MenuRow inherits Rectangle {
+    in property <string> icon;
+    in property <string> text;
+    in property <bool> lit;
+    in property <color> lit-tint: Theme.warn;
+    callback clicked;
+    height: 40px;
+    border-radius: 8px;
+    background: touch.has-hover ? Theme.raised-hover : transparent;
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-action-default => {
+        root.clicked();
+    }
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 12px;
+        spacing: 10px;
+        Icon {
+            kind: root.icon;
+            tint: root.lit ? root.lit-tint : Theme.text;
+            y: (parent.height - self.height) / 2;
+        }
+        Text {
+            text: root.text;
+            color: Theme.text;
+            font-size: 13px;
+            vertical-alignment: center;
+        }
+    }
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+// A panel over the bar, as the menus are: it pops in.
+export component MenuPanel inherits Rectangle {
+    property <bool> born;
+    // Set after the first frame: one set in `init` comes before it, and isn't animated.
+    Timer {
+        interval: 16ms;
+        running: !root.born;
+        triggered => {
+            root.born = true;
+        }
+    }
+    background: Theme.raised;
+    border-width: 1px;
+    border-color: Theme.line;
+    opacity: self.born ? 1 : 0;
+    animate opacity { duration: Theme.quick; }
+    transform-scale: self.born ? 1 : 0.95;
+    animate transform-scale {
+        duration: Theme.quick;
+        easing: ease-out;
+    }
+    // Clicks on it stay on it.
+    TouchArea { }
+    @children
+}
+
+export component MenuPreview inherits Rectangle {
+    background: Theme.canvas;
+    width: 280px;
+    height: 160px;
+    MenuPanel {
+        x: 20px;
+        y: 20px;
+        width: 240px;
+        height: rows.preferred-height;
+        border-radius: 12px;
+        rows := VerticalLayout {
+            padding: 6px;
+            spacing: 2px;
+            MenuRow { icon: "copy"; text: "Copy invite"; }
+            MenuRow { icon: "hand"; text: "Lower your hand"; lit: true; }
+            MenuRow { icon: "record"; text: "Stop recording"; lit: true; lit-tint: Theme.danger; }
+        }
+    }
+}

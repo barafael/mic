@@ -1,0 +1,38 @@
+// The data the window shows, as the Rust side fills it in (main.rs).
+
+// A participant's tile: by key, as the harness's `ui` section names it.
+export struct Tile {
+    key: string,
+    name: string,
+    me: bool,
+    muted: bool,
+    // The codec of its camera, when this client can't decode it; empty otherwise.
+    cant-decode: string,
+    // Its camera's latest picture, once there's one: its own camera's for this participant's.
+    video: image,
+    has-video: bool,
+    // Its camera is off: the name shows, not the last picture.
+    camera-off: bool,
+    // What stands for it without video: its initials on its colour.
+    initials: string,
+    tint: color,
+    // It's speaking: the tile is ringed.
+    speaking: bool,
+    // It left: the tile fades out, then goes.
+    leaving: bool,
+    // Its hand is raised.
+    hand: bool,
+    // Its latest reaction, as an emoji, and which of the room's it was (0: none yet): a new one
+    // shows on the tile a moment.
+    reaction: string,
+    reaction-seq: int,
+    // A shared screen, not a camera: shown whole, never cropped.
+    screen: bool,
+}
+
+// A chat message, as the panel shows it.
+export struct ChatLine {
+    name: string,
+    text: string,
+    me: bool,
+}

@@ -1,0 +1,91 @@
+import { Theme } from "../theme.slint";
+import { PillButton } from "../widgets/buttons.slint";
+
+// Over everything while a link opened during a call asks whether to leave it: Enter leaves for the
+// link's room, Escape stays.
+export component LinkQuestion inherits Rectangle {
+    // The link.
+    in property <string> link;
+    // True to leave for the link's room.
+    callback answer(bool);
+    property <bool> born;
+    // Set after the first frame: one set in `init` comes before it, and isn't animated.
+    Timer {
+        interval: 16ms;
+        running: !root.born;
+        triggered => {
+            root.born = true;
+        }
+    }
+    background: #000000a8;
+    opacity: self.born ? 1 : 0;
+    animate opacity { duration: 180ms; }
+    TouchArea { }
+    asked := FocusScope {
+        init => {
+            asked.focus();
+        }
+        key-pressed(event) => {
+            if (event.text == Key.Return) {
+                root.answer(true);
+                return accept;
+            }
+            if (event.text == Key.Escape) {
+                root.answer(false);
+                return accept;
+            }
+            reject
+        }
+        Rectangle {
+            width: Math.min(420px, root.width - 32px);
+            height: question.preferred-height;
+            background: Theme.surface;
+            border-radius: 14px;
+            border-width: 1px;
+            border-color: Theme.line;
+            question := VerticalLayout {
+                padding: 20px;
+                spacing: 10px;
+                Text {
+                    text: "Leave this call for the room the link names?";
+                    color: Theme.text;
+                    font-size: 16px;
+                    font-weight: 600;
+                    wrap: word-wrap;
+                }
+                Text {
+                    text: root.link;
+                    color: Theme.text-dim;
+                    font-size: 12px;
+                    overflow: elide;
+                }
+                HorizontalLayout {
+                    spacing: 10px;
+                    alignment: end;
+                    PillButton {
+                        text: "Stay";
+                        clicked => {
+                            root.answer(false);
+                        }
+                    }
+                    PillButton {
+                        text: "Leave and join";
+                        primary: true;
+                        clicked => {
+                            root.answer(true);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component LinkQuestionPreview inherits Rectangle {
+    width: 600px;
+    height: 300px;
+    background: Theme.canvas;
+    LinkQuestion {
+        link: "mic://join/1/GqO4S2TxIXlT6PjtOwWfpw#o0PK4AzaUFo8";
+    }
+}
