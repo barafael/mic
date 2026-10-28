@@ -258,7 +258,7 @@ impl Room {
             rejected: Vec::new(),
             connection: Connection::Connected,
             transport: transport(&joined.connection),
-            name: None,
+            name: joined.invite.name.clone(),
             speaker: None,
             speaking: Vec::new(),
             chat: Vec::new(),

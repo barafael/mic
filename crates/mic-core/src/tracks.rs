@@ -480,6 +480,7 @@ mod tests {
         Invite {
             room: RoomId::from_bytes([1; 16]),
             secret: RoomSecret::from_bytes([secret; 32]),
+            name: None,
         }
     }
 

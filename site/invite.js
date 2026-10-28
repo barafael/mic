@@ -1,5 +1,6 @@
-// The invite landing page's logic (D25): an `https://<host>/j/#1/<room>/<secret>` link opens
-// `mic://join/1/<room>#<secret>`. The invite is in the fragment, which a browser never sends to a
+// The invite landing page's logic (D25): an `https://<host>/j/#1/<room>/<secret>[/<name>]` link
+// opens `mic://join/1/<room>#<secret>[/<name>]`, the room's name as it was, and anything after it,
+// a later field, too. The invite is in the fragment, which a browser never sends to a
 // server, and it goes nowhere else: no request is made with it, and it's taken out of the address
 // bar once read. The forms are mic-core's (crates/mic-core/src/invite.rs); a test there and
 // invite.test.mjs here hold them to the same invite.
@@ -17,10 +18,10 @@ const BASE64URL = /^[A-Za-z0-9_-]+$/;
  */
 export function micLink(fragment) {
     const parts = fragment.replace(/^#/, "").split("/");
-    if (parts.length !== 3) {
+    if (parts.length < 3) {
         return { error: "This link holds no invite." };
     }
-    const [version, room, secret] = parts;
+    const [version, room, secret, ...after] = parts;
     if (version !== VERSION) {
         return { error: `This invite is of format ${version}; this page reads format ${VERSION}.` };
     }
@@ -31,7 +32,12 @@ export function micLink(fragment) {
     if (secret.length !== 43 || !BASE64URL.test(secret)) {
         return { error: "This invite's secret isn't one." };
     }
-    return { link: `mic://join/${version}/${room}#${secret}` };
+    // The name, and what comes after it, base64url each, as mic reads them.
+    if (after.some((part) => part !== "" && !BASE64URL.test(part))) {
+        return { error: "This invite's name isn't one." };
+    }
+    const rest = after.length > 0 ? `/${after.join("/")}` : "";
+    return { link: `mic://join/${version}/${room}#${secret}${rest}` };
 }
 
 /** Fills the landing page: the link to open, or why there's none; then forgets the fragment. */
