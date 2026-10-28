@@ -322,6 +322,7 @@ impl Room {
             },
             noise: joined.noise,
             roster: followed,
+            crypto: shared.crypto.clone(),
             state,
             events,
             voices,
@@ -484,6 +485,8 @@ struct Task {
     sources: crate::recording::Sources,
     noise: watch::Sender<mic_media::audio::noise::NoiseSuppression>,
     roster: watch::Receiver<Roster>,
+    /// The room's crypto: whose path a rejected broadcast is at.
+    crypto: RoomCrypto,
     state: watch::Sender<RoomState>,
     events: broadcast::Sender<Event>,
     /// When each voice was last loud.
@@ -832,8 +835,25 @@ impl Task {
         };
         let Roster {
             participants: roster,
-            rejected,
+            mut rejected,
         } = roster;
+        // Whom each poses as: someone in the room (this participant among them) whose path it
+        // took, or else whom its catalog names, as a forger with the invite does either.
+        let me = self.state.borrow().me.clone();
+        for rejected in &mut rejected {
+            let segment = rejected
+                .path
+                .rsplit_once('/')
+                .map_or(rejected.path.as_str(), |(segment, _)| segment);
+            let present = || std::iter::once(&me).chain(&roster).chain(&before);
+            let at_path = present().find(|them| {
+                self.crypto
+                    .participant_segment(them.key.as_bytes())
+                    .is_ok_and(|theirs| theirs == segment)
+            });
+            // Whom it names stands until whose path it is is known: the room may not have them yet.
+            rejected.posing_as = at_path.map(|them| them.key).or(rejected.posing_as);
+        }
         let known = |list: &[Participant], participant: &Participant| {
             list.iter().any(|other| other.key == participant.key)
         };

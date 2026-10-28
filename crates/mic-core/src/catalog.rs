@@ -148,6 +148,16 @@ impl Catalog {
         bytes
     }
 
+    /// Whom the catalog `bytes` names, whether it stands or not: who a broadcast that doesn't
+    /// claims to be.
+    pub fn claimed(bytes: &[u8]) -> Option<ParticipantKey> {
+        let at = DOMAIN.len() + 4 + 16;
+        let key: [u8; 32] = bytes.get(at..at + 32)?.try_into().ok()?;
+        bytes
+            .starts_with(DOMAIN)
+            .then_some(ParticipantKey::from_bytes(key))
+    }
+
     /// The catalog `bytes` are, if it stands for the broadcast `expected` describes.
     pub fn verify(bytes: &[u8], expected: &Expected<'_>) -> Result<Self, Rejection> {
         let malformed = |why: &str| Rejection::Malformed(why.to_owned());
