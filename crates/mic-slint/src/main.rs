@@ -328,6 +328,7 @@ fn run(cli: Cli) -> Result<(), String> {
         view: Box::new(|_| {}),
         asking: Box::new(|_| {}),
         named: Box::new(|_| {}),
+        noted: Box::new(|_| {}),
     });
     #[cfg(all(unix, feature = "harness"))]
     if let Some(socket) = cli.harness {
@@ -350,6 +351,7 @@ fn run(cli: Cli) -> Result<(), String> {
     window.on_join({
         let window = window.as_weak();
         let app = app.clone();
+        let tell = tell.clone();
         let preferences = preferences.clone();
         let runtime = runtime.handle().clone();
         move |name, invite| {
@@ -357,6 +359,7 @@ fn run(cli: Cli) -> Result<(), String> {
                 return;
             };
             shown.set_join_note(slint::SharedString::new());
+            (tell.noted)(None);
             let invite = match invite.trim().parse::<Invite>() {
                 Ok(invite) => invite,
                 Err(error) => {
@@ -490,6 +493,11 @@ fn run(cli: Cli) -> Result<(), String> {
         &preferences,
         &tell,
     );
+    // Not now: the harness sees it gone too.
+    window.on_notice_closed({
+        let notice = notice.clone();
+        move || *notice.lock().unwrap_or_else(PoisonError::into_inner) = None
+    });
     window.on_open_link(|link| {
         if let Err(error) = webbrowser::open(&link) {
             tracing::warn!(%error, %link, "opening a link");
@@ -656,9 +664,11 @@ fn run(cli: Cli) -> Result<(), String> {
         let app = app.clone();
         let runtime = runtime.handle().clone();
         let window = window.as_weak();
+        let tell = tell.clone();
         move || {
             if let Some(window) = window.upgrade() {
                 window.set_join_note("You left the room.".into());
+                (tell.noted)(Some("You left the room.".to_owned()));
                 if let Some(room) = app.current() {
                     window.set_invite(room.invite().to_mic_url().into());
                     window.set_name(room.state().borrow().me.profile.name.as_str().into());
@@ -1039,6 +1049,8 @@ struct Tell {
     asking: Box<dyn Fn(Option<String>)>,
     /// What the join screen's name field holds, as it's edited.
     named: Box<dyn Fn(String)>,
+    /// What the join screen says under its card after Leave.
+    noted: Box<dyn Fn(Option<String>)>,
 }
 
 /// Joins `invite` as `profile`, on `runtime`, and says on `window` if it couldn't.
@@ -1444,11 +1456,13 @@ mod harness {
         });
         let (asked, told) = (ui.clone(), harness.clone());
         let (named_ui, named_told) = (ui.clone(), harness.clone());
+        let (noted_ui, noted_told) = (ui.clone(), harness.clone());
         let view = Box::new(move |view: &View| {
             let mut ui = ui.lock().unwrap_or_else(PoisonError::into_inner);
             let asking = ui.asking.take();
             let asking_name = ui.asking_name.take();
             let name = std::mem::take(&mut ui.name);
+            let join_note = ui.join_note.take();
             let keys = |shows: fn(&crate::view::Tile) -> bool| {
                 view.tiles
                     .iter()
@@ -1464,6 +1478,9 @@ mod harness {
                 asking,
                 asking_name,
                 name,
+                join_note,
+                warning: (!view.warning.is_empty()).then(|| view.warning.clone()),
+                chat_times: view.chat.iter().map(|line| line.time.clone()).collect(),
                 room_name: (!view.room_name.is_empty()).then(|| view.room_name.clone()),
                 overflow: view.overflow,
                 speaking: keys(|tile| tile.speaking),
@@ -1525,10 +1542,18 @@ mod harness {
             named_ui.lock().unwrap_or_else(PoisonError::into_inner).name = name;
             named_told.ui_changed();
         });
+        let noted = Box::new(move |note: Option<String>| {
+            noted_ui
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .join_note = note;
+            noted_told.ui_changed();
+        });
         std::rc::Rc::new(Tell {
             view,
             asking,
             named,
+            noted,
         })
     }
 }

@@ -95,6 +95,7 @@ export component AppWindow inherits Window {
     in property <bool> fallback;
     // The notice dismissed, for this run.
     property <bool> notice-dismissed;
+    callback notice-closed();
     // The settings, while open: the devices by name and which are chosen (main.rs fills them in
     // as it opens), the microphone's level for the meter.
     in-out property <bool> settings-open;
@@ -184,11 +185,13 @@ export component AppWindow inherits Window {
                     accessible-role: button;
                     accessible-action-default => {
                         root.notice-dismissed = true;
+                        root.notice-closed();
                     }
                     later := TouchArea {
                         mouse-cursor: pointer;
                         clicked => {
                             root.notice-dismissed = true;
+                        root.notice-closed();
                         }
                     }
                 }
