@@ -24,6 +24,11 @@ measurements, and things to revisit. Newest first within each milestone. Each sa
   host, three windows in a room of nine (six synthetic senders), from minute 4 to 20: 2.4 MiB a
   minute before (1.8 decoding no video, 2.1 with `MALLOC_ARENA_MAX=2`, so not the allocator),
   0.25 after, flat over the last six minutes; 291 MiB at 20 minutes where it had been 367.
+  The box's hour-long soak with it and `recording`'s trim: alice 317 → 319 MiB and bob 380 →
+  382 MiB from minute 15 to 60, every stretch heard and seen. Its CPU dipped twice, to about
+  20 % from 48 % at minutes 30 and 60, with no reconnect or warning in any log and every camera
+  still counting: the soak doesn't correct for the host's other load, as `measured` checks do,
+  so a dip says little.
 - **Commit 61's clean leave left two tracks unfinished** (settled, mic-core `tracks`): the
   catalog's, and the checkpoints', whose signing task was aborted with the publication. The
   `roster` check of the log found them, two "dropped without finish()" a leave. Closing now
