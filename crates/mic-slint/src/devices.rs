@@ -4,8 +4,8 @@
 //! ([`Devices::switch_microphone`], [`Devices::switch_speaker`], [`Devices::switch_camera`]), and
 //! the microphone's level is there for a meter. A device that isn't there or won't open costs
 //! only its direction: without a microphone the app listens, without a speaker it speaks,
-//! without a camera its tile shows its name. The camera is closed while it's off
-//! ([`Devices::set_camera_on`]), and once the room it was opened for is left.
+//! without a camera its tile shows its name. The camera is closed while the room has it off,
+//! whoever turned it off, and once the room it was opened for is left.
 
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -138,25 +138,6 @@ impl Devices {
         }
     }
 
-    /// The camera opened, or closed, as the room's camera is turned on or off: a camera that's
-    /// off isn't filming, its light out.
-    pub fn set_camera_on(&self, on: bool) {
-        let id = {
-            let mut chosen = self.chosen.lock().unwrap_or_else(PoisonError::into_inner);
-            chosen.camera_on = on;
-            chosen.camera.clone()
-        };
-        let mut slot = self.camera.lock().unwrap_or_else(PoisonError::into_inner);
-        let Some(filmed) = slot.as_mut() else {
-            return;
-        };
-        if !on {
-            filmed.running = None;
-        } else if filmed.running.is_none() {
-            filmed.running = film(id, filmed.pictures.clone());
-        }
-    }
-
     /// How loud the microphone is now, 0 to 1: for a meter.
     pub fn level(&self) -> f32 {
         self.level.get()
@@ -221,6 +202,7 @@ impl Devices {
             self.level.clone(),
         );
         move || {
+            let chosen_shared = chosen.clone();
             let chosen = chosen
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
@@ -252,14 +234,46 @@ impl Devices {
                 .flatten();
             *slot = Some(Filmed { pictures, running });
             drop(slot);
+            // Whatever turns the room's camera off, the button or the harness, stops it filming.
+            let (camera_on, follows) = watch::channel(true);
+            if sends && let Ok(runtime) = tokio::runtime::Handle::try_current() {
+                runtime.spawn(follow(follows, camera.clone(), chosen_shared.clone()));
+            }
             Media {
                 capture: Some(captured),
                 mixer: mixer.clone(),
                 noise: chosen.noise.unwrap_or(NOISE_SUPPRESSION),
                 // The camera, if there is one; else the tile shows the name.
                 camera: sends.then_some(mic_core::video::Camera::Live(filmed)),
+                camera_on: sends.then_some(camera_on),
                 screen: Some(screen.clone()),
             }
+        }
+    }
+}
+
+/// The room's camera as `on` says, until the room lets it go: filming while it's on, closed
+/// while it's off.
+async fn follow(
+    mut on: watch::Receiver<bool>,
+    camera: Arc<Mutex<Option<Filmed>>>,
+    chosen: Arc<Mutex<Chosen>>,
+) {
+    while on.changed().await.is_ok() {
+        let on = *on.borrow_and_update();
+        let id = {
+            let mut chosen = chosen.lock().unwrap_or_else(PoisonError::into_inner);
+            chosen.camera_on = on;
+            chosen.camera.clone()
+        };
+        let mut slot = camera.lock().unwrap_or_else(PoisonError::into_inner);
+        let Some(filmed) = slot.as_mut() else {
+            return;
+        };
+        if !on {
+            filmed.running = None;
+        } else if filmed.running.is_none() {
+            filmed.running = film(id, filmed.pictures.clone());
         }
     }
 }

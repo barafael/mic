@@ -531,7 +531,6 @@ fn run(cli: Cli) -> Result<(), String> {
         let app = app.clone();
         let window = window.as_weak();
         let runtime = runtime.handle().clone();
-        let devices = devices.clone();
         move || {
             let Some(room) = app.current() else {
                 return;
@@ -539,10 +538,6 @@ fn run(cli: Cli) -> Result<(), String> {
             let off = window
                 .upgrade()
                 .is_some_and(|window| window.get_camera_off());
-            // Off, the camera isn't filming; on, it films again.
-            if let Some(devices) = &devices {
-                devices.set_camera_on(off);
-            }
             runtime.spawn(async move {
                 if let Err(error) = room.command(Command::SetCamera { on: off }).await {
                     tracing::warn!(%error, "the camera");

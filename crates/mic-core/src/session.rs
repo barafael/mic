@@ -216,6 +216,9 @@ pub struct Media {
     pub camera: Option<crate::video::Camera>,
     /// What a screenshare captures, if it can share one.
     pub screen: Option<crate::video::ScreenSource>,
+    /// Where the room says whether its camera's on, if a device wants to know: a camera that's
+    /// off can stop filming, its light out, whoever turned it off. The room's own if none.
+    pub camera_on: Option<tokio::sync::watch::Sender<bool>>,
 }
 
 impl Inner {
@@ -292,7 +295,14 @@ impl Inner {
         // The camera in the first codec everyone decodes. In v1 that's VP9 whatever the roster,
         // since one who decodes none of ours is left out; with a second codec, the choice follows
         // the roster as it changes.
-        let (camera_on, camera_follows) = tokio::sync::watch::channel(true);
+        let (camera_on, camera_follows) = match media.camera_on.clone() {
+            Some(camera_on) => {
+                camera_on.send_replace(true);
+                let follows = camera_on.subscribe();
+                (camera_on, follows)
+            }
+            None => tokio::sync::watch::channel(true),
+        };
         // A recorded camera has no pictures to preview.
         let preview = match &media.camera {
             Some(crate::video::Camera::Live(pictures)) => Some(pictures.clone()),
