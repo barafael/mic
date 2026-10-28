@@ -88,6 +88,23 @@ jobs:
         run: packaging/windows.sh dist
       - shell: bash
         run: rm -rf dist/AppDir
+      # Each package starts as a person would start it, from what they'd unpack: the AppImage
+      # extracted (the runner has no FUSE), the app out of the dmg, mic.exe out of the zip.
+      - if: runner.os == 'Linux'
+        run: |
+          ./dist/mic-*.AppImage --appimage-extract-and-run --version
+          mkdir -p "$RUNNER_TEMP/tar" && tar xzf dist/mic-*.tar.gz -C "$RUNNER_TEMP/tar"
+          "$RUNNER_TEMP"/tar/mic-*/mic --version
+      - if: runner.os == 'macOS'
+        run: |
+          mount=$(hdiutil attach -nobrowse -readonly dist/mic-*.dmg | awk -F'\t' '/\/Volumes\// { print $NF }')
+          "$mount/mic.app/Contents/MacOS/mic" --version
+          hdiutil detach "$mount"
+      - if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/zip" && 7z x -o"$RUNNER_TEMP/zip" dist/mic-*.zip >/dev/null
+          "$RUNNER_TEMP"/zip/mic-*/mic.exe --version
       - if: github.event_name == 'push'
         shell: bash
         env:
