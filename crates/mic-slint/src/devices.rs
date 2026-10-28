@@ -121,7 +121,6 @@ impl Devices {
     }
 
     /// The camera `id` names from now on, the call's included; the first there is if none.
-    #[expect(dead_code, reason = "the settings panel calls it (PLAN.md, commit 70)")]
     pub fn switch_camera(&self, id: Option<String>) {
         let on = {
             let mut chosen = self.chosen.lock().unwrap_or_else(PoisonError::into_inner);

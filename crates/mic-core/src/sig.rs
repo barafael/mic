@@ -749,10 +749,7 @@ mod tests {
         // `check` to find; every other group, and what was said of it, is gone.
         let mut kept: Vec<_> = state.read.keys().cloned().collect();
         kept.sort();
-        assert_eq!(
-            kept,
-            [("camera".to_owned(), 99), ("voice".to_owned(), 0)],
-        );
+        assert_eq!(kept, [("camera".to_owned(), 99), ("voice".to_owned(), 0)],);
         assert_eq!(state.confirmed.len(), 1);
     }
 
