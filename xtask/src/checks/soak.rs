@@ -3,7 +3,7 @@
 //! bob their tones, a message in the chat each minute. Every stretch, each window still hears
 //! and sees the others, and the record keeps each mic's memory and CPU; at the end, what each
 //! window holds may have grown only so much past what it held after the first stretch, once its
-//! buffers filled. 30 minutes, or `MIC_SOAK_MINUTES`; not in a default round:
+//! buffers filled. An hour, or `MIC_SOAK_MINUTES`; not in a default round:
 //! `cargo testbox run soak`.
 
 use std::time::{Duration, Instant};
@@ -19,7 +19,7 @@ use super::Checks;
 use super::room_40::process;
 
 /// How long, unless `MIC_SOAK_MINUTES` says.
-const MINUTES: u64 = 30;
+const MINUTES: u64 = 60;
 /// How often it looks, and says.
 const STRETCH: Duration = Duration::from_secs(5 * 60);
 /// How many of the crowd join.
@@ -27,7 +27,7 @@ const CROWD: u32 = 6;
 /// How long a join, a tone or a picture may take.
 const PATIENCE: Duration = Duration::from_secs(30);
 /// How much more a window may hold at the end than after the first stretch: a leak of a
-/// picture a second would pass a 30 minutes' soak by far.
+/// picture a second would pass it many times over within the hour.
 const GROWTH_MIB: f64 = 64.0;
 
 const WINDOWS: [&str; 2] = ["alice", "bob"];

@@ -60,7 +60,7 @@ pub enum Phase {
     /// Forty in a room, measured each minute against the budget: not in a default round.
     #[value(name = "room-40")]
     Room40,
-    /// A long call, 30 minutes: still heard and seen, and what each window holds doesn't grow:
+    /// A long call, an hour: still heard and seen, and what each window holds doesn't grow:
     /// not in a default round.
     Soak,
 }
