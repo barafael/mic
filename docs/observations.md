@@ -6,11 +6,16 @@ measurements, and things to revisit. Newest first within each milestone. Each sa
 
 ## M11: After the review
 
-- **An hour's call grows each window by about half a MiB a minute** (open). The first full
-  `soak`: alice 253 → 290 MiB, bob 325 → 352 MiB between minutes 5 and 60, steadily, at 54 % of
-  a core throughout, every stretch heard and seen. Under the 64 MiB the check allows, but not
-  flat: the chat's 60 messages are a few KiB, so something else keeps what it's given. Worth a
-  heap profile over a longer soak (`MIC_SOAK_MINUTES=180`).
+- **An hour's call grew each window by about half a MiB a minute** (settled, mic-core `sig`).
+  The first full `soak`: alice 253 → 290 MiB, bob 325 → 352 MiB between minutes 5 and 60,
+  steadily. A subscriber's verification kept every frame's link of every group it ever read,
+  and what every checkpoint said of every group, forgetting nothing but a camera let go of; the
+  publisher's ledger forgets a group once no checkpoint will list it, the subscriber never did.
+  Now it forgets a group wholly confirmed, not its track's latest, read nothing of for longer
+  than a checkpoint lists it (`RECENT`), and what was said of groups no longer kept. On the
+  host, three windows in a room of nine (six synthetic senders), from minute 4 to 20: 2.4 MiB a
+  minute before (1.8 decoding no video, 2.1 with `MALLOC_ARENA_MAX=2`, so not the allocator),
+  0.25 after, flat over the last six minutes; 291 MiB at 20 minutes where it had been 367.
 - **Commit 61's clean leave left two tracks unfinished** (settled, mic-core `tracks`): the
   catalog's, and the checkpoints', whose signing task was aborted with the publication. The
   `roster` check of the log found them, two "dropped without finish()" a leave. Closing now
