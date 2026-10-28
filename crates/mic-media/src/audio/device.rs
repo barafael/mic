@@ -28,10 +28,7 @@ pub fn microphones() -> Vec<Device> {
     let default = host
         .default_input_device()
         .and_then(|device| device.id().ok());
-    listed(host.input_devices().ok(), default)
-        .into_iter()
-        .filter(|device| pipewire_kind(&device.id).is_none_or(|kind| kind == Some(Kind::Input)))
-        .collect()
+    listed(host.input_devices().ok(), default, Kind::Input)
 }
 
 /// The speakers there are, the default first.
@@ -40,10 +37,7 @@ pub fn speakers() -> Vec<Device> {
     let default = host
         .default_output_device()
         .and_then(|device| device.id().ok());
-    listed(host.output_devices().ok(), default)
-        .into_iter()
-        .filter(|device| pipewire_kind(&device.id).is_none_or(|kind| kind == Some(Kind::Output)))
-        .collect()
+    listed(host.output_devices().ok(), default, Kind::Output)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -52,36 +46,54 @@ enum Kind {
     Output,
 }
 
-/// Which way a PipeWire device goes, by its id, if it's one: PipeWire offers every sink's monitor
-/// as an input too, and a card's input and output by one name, which a person picking a
-/// microphone shouldn't have to tell apart. The defaults are an input and an output; the sinks'
-/// default, a monitor, is neither.
-fn pipewire_kind(id: &str) -> Option<Option<Kind>> {
+/// Which way a PipeWire node goes, if it's PipeWire's: PipeWire offers every sink as an input
+/// too (its monitor), and other applications' streams as inputs and outputs, none of which a
+/// person picking a microphone or a speaker means. A source is an input with a description of its
+/// own (a stream has none: cpal calls it "unknown"), a sink a duplex; the defaults are an input
+/// and an output, and the sinks' default, a monitor, is neither. Not by name: a source made by
+/// hand (a loopback, an echo canceller) is called what its maker called it.
+fn pipewire_kind(
+    id: &str,
+    direction: Option<cpal::DeviceDirection>,
+    description: Option<&str>,
+) -> Option<Option<Kind>> {
     let node = id.strip_prefix("pipewire:")?;
-    Some(match node {
-        "input_default" => Some(Kind::Input),
-        "output_default" => Some(Kind::Output),
-        node if node.contains("_input") => Some(Kind::Input),
-        node if node.contains("_output") => Some(Kind::Output),
+    Some(match (node, direction) {
+        ("input_default", _) => Some(Kind::Input),
+        ("output_default", _) => Some(Kind::Output),
+        ("sink_default", _) => None,
+        (_, Some(cpal::DeviceDirection::Input)) if description.is_some_and(|d| d != "unknown") => {
+            Some(Kind::Input)
+        }
+        (_, Some(cpal::DeviceDirection::Duplex)) => Some(Kind::Output),
         _ => None,
     })
 }
 
+/// The devices of `kind` among `devices`, the default first.
 fn listed(
     devices: Option<impl Iterator<Item = cpal::Device>>,
     default: Option<cpal::DeviceId>,
+    kind: Kind,
 ) -> Vec<Device> {
     let mut listed: Vec<(bool, Device)> = devices
         .into_iter()
         .flatten()
         .filter_map(|device| {
             let id = device.id().ok()?;
+            let description = device.description().ok();
+            let described = description.as_ref().map(|description| description.name());
+            let direction = description
+                .as_ref()
+                .map(|description| description.direction());
+            if pipewire_kind(&id.to_string(), direction, described)
+                .is_some_and(|which| which != Some(kind))
+            {
+                return None;
+            }
             let name = match id.to_string().as_str() {
                 "pipewire:input_default" | "pipewire:output_default" => "System default".to_owned(),
-                _ => device
-                    .description()
-                    .map(|description| description.name().to_owned())
-                    .unwrap_or_else(|_| id.to_string()),
+                _ => described.map_or_else(|| id.to_string(), str::to_owned),
             };
             Some((
                 default.as_ref() == Some(&id),
@@ -193,7 +205,16 @@ impl Microphone {
         stream("mic-microphone", move || {
             let device = chosen(id.as_deref(), cpal::Host::default_input_device)
                 .ok_or_else(|| Error::Device("no microphone".to_owned()))?;
-            let config = config(device.supported_input_configs().map_err(device_error)?)?;
+            let mut config = config(device.supported_input_configs().map_err(device_error)?)?;
+            // PipeWire offers every input as stereo, a mono microphone too, which it then upmixes
+            // into one channel of two, so the average of them is half the voice. It converts
+            // what's asked for, so mono is asked for, and it mixes down what isn't.
+            if device
+                .id()
+                .is_ok_and(|id| id.to_string().starts_with("pipewire:"))
+            {
+                config.channels = 1;
+            }
             let channels = usize::from(config.channels);
             let mut mono = [0.0_f32; CHUNK];
             device
@@ -339,19 +360,40 @@ mod tests {
     use super::*;
 
     #[test]
-    fn pipewires_monitors_are_no_microphones_nor_its_inputs_speakers() {
-        let kind = |id| pipewire_kind(id);
-        assert_eq!(kind("pipewire:input_default"), Some(Some(Kind::Input)));
+    fn pipewires_monitors_and_streams_are_no_microphones_nor_its_sources_speakers() {
+        use cpal::DeviceDirection::{Duplex, Input, Output};
+        let kind = |id, direction, description| pipewire_kind(id, Some(direction), description);
         assert_eq!(
-            kind("pipewire:alsa_input.pci-0000.analog-stereo"),
+            kind("pipewire:input_default", Input, None),
             Some(Some(Kind::Input))
         );
         assert_eq!(
-            kind("pipewire:bluez_output.41_42.1"),
+            kind("pipewire:output_default", Output, None),
             Some(Some(Kind::Output))
         );
-        assert_eq!(kind("pipewire:sink_default"), Some(None));
+        assert_eq!(kind("pipewire:sink_default", Duplex, None), Some(None));
+        // A source, a card's or one made by hand, and a sink, by whatever name.
+        let card = Some("Built-in Audio Analog Stereo");
+        assert_eq!(
+            kind("pipewire:alsa_input.pci-0000.analog-stereo", Input, card),
+            Some(Some(Kind::Input))
+        );
+        let made = Some("The box's microphone");
+        assert_eq!(
+            kind("pipewire:microphone", Input, made),
+            Some(Some(Kind::Input))
+        );
+        assert_eq!(
+            kind("pipewire:speaker", Duplex, made),
+            Some(Some(Kind::Output))
+        );
+        // Another application's streams.
+        assert_eq!(kind("pipewire:firefox", Input, Some("unknown")), Some(None));
+        assert_eq!(
+            kind("pipewire:firefox", Output, Some("unknown")),
+            Some(None)
+        );
         // Not PipeWire's: whatever ALSA or another host lists.
-        assert_eq!(kind("alsa:hw:1,0"), None);
+        assert_eq!(kind("alsa:hw:1,0", Input, None), None);
     }
 }
