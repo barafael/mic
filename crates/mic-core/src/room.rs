@@ -17,6 +17,11 @@ use crate::tracks::{Peers, Publication, RoomCrypto};
 
 /// How many events a slow reader may fall behind by before it misses some.
 const EVENTS: usize = 256;
+/// How long a participant gone just before the room lost its session counts as lost with it: the
+/// relay's unannouncements can come before the session's end does.
+const LOST_WITH_IT: std::time::Duration = std::time::Duration::from_secs(3);
+/// How long, once the room is back, those it kept through a reconnect have to come back too.
+const AWAY_FOR: std::time::Duration = std::time::Duration::from_secs(10);
 /// How many messages the state keeps, the newest.
 pub const CHAT_KEPT: usize = 500;
 /// How many reactions the state keeps, the newest.
@@ -62,12 +67,16 @@ pub struct RoomState {
 }
 
 /// A chat message.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Message {
     pub from: ParticipantKey,
     /// Its sender's name when it came.
     pub name: String,
     pub text: String,
+    /// When this client heard it, or said it: Unix time in milliseconds, by this client's clock,
+    /// which a sender's can't be trusted to agree with.
+    #[serde(default)]
+    pub at: u64,
 }
 
 /// A reaction, as it came.
@@ -322,6 +331,10 @@ impl Room {
             },
             noise: joined.noise,
             roster: followed,
+            crypto: shared.crypto.clone(),
+            departed_lately: Vec::new(),
+            away: Vec::new(),
+            away_until: None,
             state,
             events,
             voices,
@@ -484,6 +497,13 @@ struct Task {
     sources: crate::recording::Sources,
     noise: watch::Sender<mic_media::audio::noise::NoiseSuppression>,
     roster: watch::Receiver<Roster>,
+    /// The room's crypto: whose path a rejected broadcast is at.
+    crypto: RoomCrypto,
+    /// Who left lately, and when: lost with the session, if it ends soon after.
+    departed_lately: Vec<(std::time::Instant, Participant)>,
+    /// Who the room keeps, greyed, through a reconnect, until they're back or `away_until`.
+    away: Vec<Participant>,
+    away_until: Option<std::time::Instant>,
     state: watch::Sender<RoomState>,
     events: broadcast::Sender<Event>,
     /// When each voice was last loud.
@@ -535,7 +555,10 @@ impl Task {
                     self.roster_changed(roster);
                 }
                 status = status(&mut self.connection) => self.status(status),
-                _ = looking.tick() => self.look_at_speakers(),
+                _ = looking.tick() => {
+                    self.look_at_speakers();
+                    self.give_up_on_away();
+                }
                 Some(heard) = self.hearing.recv() => self.heard(heard),
                 captured = captured(&mut self.screen) => match captured {
                     Captured::Opened(opened) => self.capture_opened(opened),
@@ -573,7 +596,15 @@ impl Task {
                         .map(|participant| participant.profile.name.clone())
                         .unwrap_or_default()
                 };
-                let message = Message { from, name, text };
+                let at = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |since| since.as_millis() as u64);
+                let message = Message {
+                    from,
+                    name,
+                    text,
+                    at,
+                };
                 self.state.send_modify(|state| {
                     state.chat.push(message.clone());
                     let over = state.chat.len().saturating_sub(CHAT_KEPT);
@@ -597,6 +628,49 @@ impl Task {
             }
         };
         let _unheard: Result<usize, _> = self.events.send(event);
+    }
+
+    /// The session lost: everyone in the room, and who left just before, kept away, greyed, until
+    /// the room is back and they are too.
+    fn lost(&mut self) {
+        let now = std::time::Instant::now();
+        let mut away: Vec<Participant> = self.state.borrow().participants.clone();
+        for (when, gone) in self.departed_lately.drain(..) {
+            if now.saturating_duration_since(when) < LOST_WITH_IT
+                && !away.iter().any(|kept| kept.key == gone.key)
+            {
+                away.push(gone);
+            }
+        }
+        for kept in &mut away {
+            kept.away = true;
+        }
+        self.away = away.clone();
+        self.away_until = None;
+        self.state.send_modify(|state| state.participants = away);
+    }
+
+    /// Those kept away who aren't back in time, gone.
+    fn give_up_on_away(&mut self) {
+        if self
+            .away_until
+            .is_none_or(|until| std::time::Instant::now() < until)
+        {
+            return;
+        }
+        self.away_until = None;
+        let gone = std::mem::take(&mut self.away);
+        if gone.is_empty() {
+            return;
+        }
+        self.state.send_modify(|state| {
+            state
+                .participants
+                .retain(|them| !(them.away && gone.iter().any(|kept| kept.key == them.key)));
+        });
+        for participant in gone {
+            let _unheard: Result<usize, _> = self.events.send(Event::Departed { participant });
+        }
     }
 
     /// Who speaks now, and who the active speaker is, into the state.
@@ -812,6 +886,14 @@ impl Task {
                 Connection::Reconnecting
             }
         };
+        let was = self.state.borrow().connection;
+        match (was, connection) {
+            (Connection::Connected, Connection::Reconnecting) => self.lost(),
+            (Connection::Reconnecting, Connection::Connected) => {
+                self.away_until = Some(std::time::Instant::now() + AWAY_FOR);
+            }
+            _ => {}
+        }
         let transport = match connection {
             Connection::Connected => self.connection.as_ref().and_then(transport),
             _ => None,
@@ -825,18 +907,50 @@ impl Task {
     }
 
     /// The new roster into the state, and who came and went, and what didn't stand, as events.
-    fn roster_changed(&self, roster: Roster) {
+    fn roster_changed(&mut self, roster: Roster) {
         let (before, rejected_before) = {
             let state = self.state.borrow();
             (state.participants.clone(), state.rejected.clone())
         };
         let Roster {
             participants: roster,
-            rejected,
+            mut rejected,
         } = roster;
+        // Whom each poses as: someone in the room (this participant among them) whose path it
+        // took, or else whom its catalog names, as a forger with the invite does either.
+        let me = self.state.borrow().me.clone();
+        for rejected in &mut rejected {
+            let segment = rejected
+                .path
+                .rsplit_once('/')
+                .map_or(rejected.path.as_str(), |(segment, _)| segment);
+            let present = || std::iter::once(&me).chain(&roster).chain(&before);
+            let at_path = present().find(|them| {
+                self.crypto
+                    .participant_segment(them.key.as_bytes())
+                    .is_ok_and(|theirs| theirs == segment)
+            });
+            // Whom it names stands until whose path it is is known: the room may not have them yet.
+            rejected.posing_as = at_path.map(|them| them.key).or(rejected.posing_as);
+        }
         let known = |list: &[Participant], participant: &Participant| {
             list.iter().any(|other| other.key == participant.key)
         };
+        // Who left, in case the session ends next; who's kept away and is back, no longer away.
+        let now = std::time::Instant::now();
+        for gone in before
+            .iter()
+            .filter(|then| !then.away && !known(&roster, then))
+        {
+            self.departed_lately.push((now, gone.clone()));
+        }
+        self.departed_lately
+            .retain(|(when, _)| now.saturating_duration_since(*when) < LOST_WITH_IT);
+        self.away.retain(|kept| !known(&roster, kept));
+        let roster: Vec<Participant> = roster
+            .into_iter()
+            .chain(self.away.iter().cloned())
+            .collect();
         let arrived = roster.iter().filter(|now| !known(&before, now)).cloned();
         let departed = before.iter().filter(|then| !known(&roster, then)).cloned();
         // Nobody listening to events is fine: the state has it all.
