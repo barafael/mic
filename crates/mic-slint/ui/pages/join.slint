@@ -107,7 +107,8 @@ export component JoinScreen inherits Rectangle {
                 }
             }
             PillButton {
-                text: root.joining ? "Joining…" : "Join";
+                // After leaving, the room's invite is still there: it joins it again.
+                text: root.joining ? "Joining…" : root.note != "" ? "Rejoin" : "Join";
                 primary: true;
                 busy: root.joining;
                 enabled: !root.joining && root.name != "" && root.invite != "";

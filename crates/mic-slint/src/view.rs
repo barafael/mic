@@ -51,6 +51,8 @@ pub struct Tile {
 /// A chat message, as the panel shows it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Line {
+    /// Who said it, by key, hex: a run of one sender's messages shows the name once.
+    pub from: String,
     pub name: String,
     pub text: String,
     pub me: bool,
@@ -198,6 +200,7 @@ pub fn view_of(state: &RoomState, invite: String, shown: &[ParticipantKey]) -> V
         .chat
         .iter()
         .map(|message| Line {
+            from: message.from.to_string(),
             name: message.name.clone(),
             text: message.text.clone(),
             me: message.from == state.me.key,

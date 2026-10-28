@@ -221,6 +221,9 @@ pub struct Ui {
     /// Who it shows as recording, by key, itself among them if it does.
     #[serde(default)]
     pub recorders: Vec<String>,
+    /// Whether it shows itself alone in the room: the invite offered, its own tile small.
+    #[serde(default)]
+    pub alone: bool,
 }
 
 /// What drawing a frontend's video tiles costs, over the last second: the others' cameras, not

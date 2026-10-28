@@ -32,6 +32,8 @@ export struct Tile {
 
 // A chat message, as the panel shows it.
 export struct ChatLine {
+    // Who said it, by key: a run of one sender's messages shows the name once.
+    from: string,
     name: string,
     text: string,
     me: bool,

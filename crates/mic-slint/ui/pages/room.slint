@@ -7,6 +7,7 @@ import { TileGrid } from "../room/grid.slint";
 import { ChatPanel } from "../room/chat.slint";
 import { Bar } from "../room/bar.slint";
 import { MoreMenu, ReactionPicker } from "../room/menus.slint";
+import { AloneCard } from "../room/alone.slint";
 
 // The room: its tiles, a shared screen on the stage beside them, the chat, and a bar of its
 // controls. The keyboard stays with the room itself, so its shortcuts work whatever was clicked:
@@ -50,6 +51,8 @@ export component RoomScreen inherits FocusScope {
     // How many columns fit `count` tiles best into a `width` by `height` grid (view.rs).
     pure callback columns-for(int, length, length) -> int;
     property <bool> chat-open;
+    // Nobody else here: the invite to send, and this participant's own tile small in a corner.
+    property <bool> alone: root.tiles.length <= 1 && root.screens.length == 0;
     // A narrow window's chat, or one beside a shared screen, lies over the tiles instead.
     property <bool> chat-over;
     // A narrow window's bar: smaller buttons, and the rest in More.
@@ -266,6 +269,7 @@ export component RoomScreen inherits FocusScope {
                     min-width: root.screens.length > 0 ? 120px : 0;
                     max-width: root.screens.length > 0 ? 200px : 100000px;
                     preferred-width: 0;
+                    visible: !root.alone;
                     tiles: root.tiles;
                     overflow: root.overflow;
                     resizing: root.resizing;
@@ -299,7 +303,7 @@ export component RoomScreen inherits FocusScope {
                 copied: root.copied;
                 // Both rows start at the room's padding: the invite goes under the leftmost tile,
                 // or the stage's edge beside a shared screen.
-                copy-x: root.screens.length > 0 ? 0px : grid.x + grid.first-left;
+                copy-x: root.screens.length > 0 || root.alone ? 0px : grid.x + grid.first-left;
                 copy-follows: root.resizing;
                 copy-invite => {
                     root.copy-invite();
@@ -328,6 +332,26 @@ export component RoomScreen inherits FocusScope {
                 leave => {
                     root.leave();
                 }
+            }
+        }
+        if root.alone: Rectangle {
+            x: stage-row.x;
+            y: stage-row.y;
+            width: root.chat-open && !root.chat-over ? stage-row.width - 310px : stage-row.width;
+            height: stage-row.height;
+            AloneCard {
+                invite: root.invite;
+                copied: root.copied;
+                copy-invite => {
+                    root.copy-invite();
+                }
+            }
+            if root.tiles.length > 0: TileView {
+                width: Math.min(240px, parent.width / 3);
+                height: self.width * 9 / 16;
+                x: parent.width - self.width;
+                y: parent.height - self.height;
+                tile: root.tiles[0];
             }
         }
         // A narrow window's chat, over the tiles.

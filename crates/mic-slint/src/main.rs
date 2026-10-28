@@ -581,6 +581,10 @@ fn run(cli: Cli) -> Result<(), String> {
         move || {
             if let Some(window) = window.upgrade() {
                 window.set_join_note("You left the room.".into());
+                if let Some(room) = app.current() {
+                    window.set_invite(room.invite().to_mic_url().into());
+                    window.set_name(room.state().borrow().me.profile.name.as_str().into());
+                }
             }
             let app = app.clone();
             runtime.spawn(async move { app.leave().await });
@@ -878,6 +882,7 @@ fn apply(
             view.chat
                 .iter()
                 .map(|line| ChatLine {
+                    from: line.from.as_str().into(),
                     name: line.name.as_str().into(),
                     text: line.text.as_str().into(),
                     me: line.me,
@@ -1175,6 +1180,9 @@ mod harness {
                 recording: (!view.recording_notice.is_empty())
                     .then(|| view.recording_notice.clone()),
                 recorders: view.recording.clone(),
+                alone: view.screen == crate::view::Screen::Room
+                    && view.tiles.len() <= 1
+                    && view.screens.is_empty(),
                 ..Ui::default()
             };
             drop(ui);

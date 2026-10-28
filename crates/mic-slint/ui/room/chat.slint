@@ -63,10 +63,12 @@ export component ChatPanel inherits Rectangle {
                 changed count => {
                     root.seen(self.count);
                 }
-                for line in root.chat: VerticalLayout {
-                    padding-top: 4px;
-                    padding-bottom: 4px;
-                    Text {
+                for line[i] in root.chat: VerticalLayout {
+                    // A run of one sender's messages: the name once, the run close together.
+                    property <bool> first: i == 0 || root.chat[i - 1].from != line.from;
+                    padding-top: self.first ? 6px : 1px;
+                    padding-bottom: 1px;
+                    if self.first: Text {
                         text: line.me ? "You" : line.name;
                         color: line.me ? Theme.accent-hover : Theme.text-dim;
                         font-size: 12px;
@@ -108,17 +110,17 @@ export component ChatPreview inherits Rectangle {
         width: 300px;
         height: 400px;
         chat: [
-            { name: "Ben", text: "hello all, can you hear me?" },
-            { name: "Ann Example", text: "Loud and clear.", me: true },
-            { name: "Cat", text: "Sharing my screen in a second, the slides are nearly done." },
-            { name: "Dan", text: "Can everyone see the second slide?" },
-            { name: "Ben", text: "Yes, the chart with the three bars." },
-            { name: "Eve", text: "Joining late, sorry. What did I miss?" },
-            { name: "Ann Example", text: "Just the intro, Cat is on slide two.", me: true },
-            { name: "Cat", text: "Questions at the end, please." },
-            { name: "Dan", text: "One for the end: where's the recording going?" },
-            { name: "Ben", text: "Into everyone's Videos folder, mic says so in the banner." },
-            { name: "Eve", text: "Thanks." },
+            { from: "b", name: "Ben", text: "hello all, can you hear me?" },
+            { from: "a", name: "Ann Example", text: "Loud and clear.", me: true },
+            { from: "c", name: "Cat", text: "Sharing my screen in a second, the slides are nearly done." },
+            { from: "d", name: "Dan", text: "Can everyone see the second slide?" },
+            { from: "b", name: "Ben", text: "Yes, the chart with the three bars." },
+            { from: "e", name: "Eve", text: "Joining late, sorry. What did I miss?" },
+            { from: "a", name: "Ann Example", text: "Just the intro, Cat is on slide two.", me: true },
+            { from: "c", name: "Cat", text: "Questions at the end, please." },
+            { from: "d", name: "Dan", text: "One for the end: where's the recording going?" },
+            { from: "b", name: "Ben", text: "Into everyone's Videos folder, mic says so in the banner." },
+            { from: "e", name: "Eve", text: "Thanks." },
         ];
     }
 }
