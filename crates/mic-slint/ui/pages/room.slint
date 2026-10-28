@@ -164,7 +164,8 @@ export component RoomScreen inherits FocusScope {
         }
     }
     // The shortcuts, as Google Meet has them: Ctrl+D the microphone, Ctrl+E the camera,
-    // Ctrl+Alt+C the chat, Ctrl+Alt+H a hand. Escape closes a menu, then the chat. Caught on the
+    // Ctrl+Alt+C the chat, Ctrl+Alt+H a hand; and Ctrl+Shift+H leaves. Escape closes a menu, then
+    // the chat or the people; with none open it goes on, to the window's notice. Caught on the
     // way to the focused element, so the chat's field doesn't keep them.
     capture-key-pressed(event) => {
         if (event.text == Key.Escape) {
@@ -191,6 +192,11 @@ export component RoomScreen inherits FocusScope {
         }
         if (event.modifiers.alt && event.text == "h") {
             root.toggle-hand();
+            return accept;
+        }
+        // Ctrl+Shift+H leaves, as the button does (Teams has it so).
+        if (event.modifiers.shift && (event.text == "h" || event.text == "H")) {
+            root.leave();
             return accept;
         }
         if (event.text == "d") {
