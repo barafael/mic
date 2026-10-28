@@ -1,0 +1,28 @@
+[package]
+name = "mic-admit"
+description = "Who a relay lets into a room: the proof a client presents, and the auth server that checks it"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+default = []
+# The auth server a self-hosted `moq-relay` asks (`--auth-url`), and its binary.
+server = ["dep:axum", "dep:tokio", "dep:tracing", "dep:moq-auth"]
+
+[dependencies]
+axum = { version = "0.8.9", optional = true }
+base64 = "0.23.1"
+derive_more = { version = "2.1.1", features = ["display", "error"] }
+ed25519-dalek = "3.0.0"
+moq-auth = { version = "=0.2.2", default-features = false, optional = true }
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "net", "macros"], optional = true }
+tracing = { version = "0.1.44", optional = true }
+
+[dev-dependencies]
+ed25519-dalek = { version = "3.0.0", features = ["rand_core"] }
+
+[[bin]]
+name = "mic-admit"
+required-features = ["server"]

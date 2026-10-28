@@ -48,6 +48,9 @@ pub enum TrackError {
     /// A codec refused: its settings, or a packet.
     #[display("a codec: {_0}")]
     Codec(#[error(not(source))] String),
+    /// The proof of admission couldn't be made: a path it can't carry.
+    #[display("admission: {_0}")]
+    Admission(#[error(not(source))] String),
 }
 
 impl From<moq_e2ee::Error> for TrackError {

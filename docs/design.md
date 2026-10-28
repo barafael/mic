@@ -509,7 +509,7 @@ how this one handles them:**
 | P3 | **Slow detection.** Per-group signatures are checked when the group ends (~1 s). | **Resolved** by 250 ms checkpoints. |
 | P4 | **Missing or stripped signatures.** | Fail closed (step 5 below). |
 | P5 | **Epoch hijack.** The draft's "greatest epoch" rule lets an insider mint a newer epoch, even a far-future UUIDv7, under the victim's prefix. | Epoch rule (step 3). |
-| P6 | **Duplicate announcements.** Signatures detect a substituted stream but can't make the relay route the real one: denial of service, not forgery. | **Open, and it now affects every room** (relay only). Needs per-participant publish rights from a token service (step 7). |
+| P6 | **Duplicate announcements.** Signatures detect a substituted stream but can't make the relay route the real one: denial of service, not forgery. | **Closed for a relay of one's own** by `mic-admit` (§5.11): a session may publish only under the path it was admitted for. Open for moq.pro, until it has a minting front end (§5.11). |
 | P7 | **Replay** of an old catalog or group into a new epoch or room. | Bind room, `kid`, epoch, track, group and a sequence number. |
 | P8 | **Audio granularity.** Per-frame signatures on 20 ms Opus frames cost ~25.6 kbit/s. | **Resolved** by checkpoints (a few kbit/s). |
 | P9 | **Non-repudiation and linkability.** | Linkability **resolved** by per-room identities. Within a room, signed recordings still provably come from a participant key. |
@@ -1046,15 +1046,43 @@ Everything is a configuration value:
   - It leaves the duplicate-announcement attack (§5.3.2, P6) open, now in
     every room.
   - Watch the moq.pro usage dashboard; move to (b) before any wide release.
-- **(b) A tiny token service** that mints short-lived, prefix-scoped JWTs from
-  a moq.pro project key.
-  - Per-room keys prove nothing about a person, so rate-limit by IP and per
-    room.
-  - Scope publish rights per participant key, which fixes P6. With per-room
-    keys it learns little.
-  - It never sees media.
-  - **Open:** how it authenticates clients, and where it runs. Proposed: the
-    same server as the identity system (§5.15, §8.1 question 1).
+- **(b) A token service.** Built for a relay of one's own as `mic-admit` (M12), below; for
+  moq.pro it's still to do.
+  - **Self-hosted `moq-relay`:** the relay holds no key. It asks an auth server (`--auth-url`)
+    on every `connect` and `revalidate` for a grant, handing it the dialed path, the raw query
+    and the peer's address. `mic-admit` is that server, so there's no minting step and no
+    token: a client puts a **proof** in its URL (`?admit=…`), and the grant answers it.
+  - **The proof** (`mic-admit`'s `proof.rs`): the room's prefix, the participant's path, and two
+    public keys, each signing them: a **room admission key** derived from the room's secret
+    (`HKDF(secret, "mic/v1/room-admission" || room id)`), and a **participant admission key**
+    derived from the participant's key in the room, but not that key, so the relay is shown
+    nothing it could link to a catalog or a signature. No time in it: a connection redials
+    with the URL it has, and a client's clock isn't believed. A leaked proof grants what the
+    invite does.
+  - **The grant:** subscribe to everything under the room's prefix, publish under the
+    participant's path only (`<path>/**`), for twice the cadence it's asked again at (5 min by
+    default); a server that's gone, or forgot, ends the session at the next question.
+  - **First come, not verified.** The server never holds the room's secret, so it can't check
+    that a path belongs to a key. The first proof for a room fixes its room key; the first for
+    a path fixes its participant's. After that an outsider (a valid proof of a room key of her
+    own) and a member claiming another's path (his own participant key) are refused. What
+    stays open is racing a participant to its path before it joins: a denial of service on
+    that path, and the squatter isn't believed anyway, since a catalog must derive the path it
+    stands at (§5.3.2). A restart forgets who came first; memory and sizes are bounded
+    (`Policy`).
+  - **What the relay still learns:** which paths form a room, as before, and now two
+    admission keys per participant, which are not identities. It can count participants.
+    It could before.
+  - **What the join says:** the relay lets a connection come up and refuses it after, so a
+    client without a proof is "joined" for a moment, and never heard of. A refusal should show
+    as one in the window (open).
+  - **moq.pro (to do):** its relay takes JWTs signed with a project key (the first path
+    segment must be the project's name, hang.live's PR #29), so it wants a front end that
+    checks the same proof and mints `Claims { root: prefix, publish: [path/**], subscribe:
+    [**] }`. The checking is `Admission`; the key is moq.pro's, held by whoever runs the
+    service. Where it runs is open (§8.1).
+  - Per-IP and per-room rate limits, and a kick (a refused `revalidate`), fit in `Admission`
+    and aren't built.
 - **(c) A signing key embedded in the client.** Insecure: anyone can extract
   it.
 
