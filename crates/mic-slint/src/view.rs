@@ -113,8 +113,8 @@ pub struct View {
     pub people: Vec<Person>,
 }
 
-/// Which of the others have a tile, when there are more than fit: the active speaker, and those
-/// who spoke most recently, then those who joined first. Kept from one view to the next, as it
+/// Which of the others have a tile, when there are more than fit: the active speaker, those with a
+/// hand raised, and those who spoke most recently, then those who joined first. Kept from one view to the next, as it
 /// remembers who spoke when.
 #[derive(Default)]
 pub struct Shown {
@@ -140,9 +140,19 @@ impl Shown {
             .enumerate()
             .collect();
         if ranked.len() > room {
+            // The speaker first, then raised hands, which want to be seen as much, then who
+            // spoke last.
+            let hands: Vec<ParticipantKey> = state
+                .participants
+                .iter()
+                .filter(|them| them.profile.hand)
+                .map(|them| them.key)
+                .collect();
             ranked.sort_by_key(|(joined, key)| {
                 let last = if state.speaker == Some(*key) {
                     u64::MAX
+                } else if hands.contains(key) {
+                    u64::MAX - 1
                 } else {
                     self.spoke.get(key).copied().unwrap_or(0)
                 };
@@ -541,6 +551,19 @@ mod tests {
     }
 
     #[test]
+    fn a_raised_hand_comes_into_view() {
+        let mut state = state();
+        state.participants = (2..=13)
+            .map(|byte| participant(byte, &format!("P{byte}")))
+            .collect();
+        let key = |byte: u8| ParticipantKey::from_bytes([byte; 32]);
+        let mut shown = Shown::default();
+        assert!(!shown.choose(&state).contains(&key(13)));
+        state.participants[11].profile.hand = true;
+        assert!(shown.choose(&state).contains(&key(13)));
+    }
+
+    #[test]
     fn hands_reactions_and_the_chat_show() {
         let mut state = state();
         let bob = ParticipantKey::from_bytes([2; 32]);
@@ -554,6 +577,7 @@ mod tests {
             from: state.me.key,
             name: "Alice".to_owned(),
             text: "hi".to_owned(),
+            ..Default::default()
         }];
         let shown = view(Some((&state, String::new())));
         let bobs = &shown.tiles[1];

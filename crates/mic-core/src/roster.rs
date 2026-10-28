@@ -217,7 +217,8 @@ enum Found {
     /// Its catalog stands: whose the broadcast is, and what it decodes and sends.
     Verified(Box<Catalog>),
     Profile(Profile),
-    Rejected(String),
+    /// It doesn't stand: why, and whom its catalog named, if it had one.
+    Rejected(String, Option<ParticipantKey>),
 }
 
 /// What `follow` knows of a broadcast.
@@ -319,7 +320,7 @@ pub(crate) async fn follow(
                         entry.renditions = catalog.renditions;
                     }
                     Found::Profile(profile) => entry.profile = Some(profile),
-                    Found::Rejected(reason) => {
+                    Found::Rejected(reason, claims) => {
                         tracing::warn!(%path, %reason, "a broadcast in the room doesn't stand");
                         known.remove(&path);
                         if let Some(reader) = readers.remove(&path) {
@@ -328,7 +329,7 @@ pub(crate) async fn follow(
                         rejected.push(Rejected {
                             path,
                             reason,
-                            posing_as: None,
+                            posing_as: claims,
                         });
                     }
                 }
@@ -413,7 +414,7 @@ async fn read_peer(
     let mut catalogs = match peer.track(CATALOG).await {
         Ok(track) => track,
         Err(error) => {
-            send(Found::Rejected(format!("no catalog: {error}")));
+            send(Found::Rejected(format!("no catalog: {error}"), None));
             return;
         }
     };
@@ -444,7 +445,7 @@ async fn read_peer(
                 }
             } => {
                 if let Some(forgery) = forgery {
-                    send(Found::Rejected(forgery.to_string()));
+                    send(Found::Rejected(forgery.to_string(), None));
                 }
                 return;
             }
@@ -464,9 +465,10 @@ async fn read_peer(
                 Ok(Some(group)) => group,
                 Ok(None) => return,
                 Err(error) => {
-                    send(Found::Rejected(format!(
-                        "its catalog track failed: {error}"
-                    )));
+                    send(Found::Rejected(
+                        format!("its catalog track failed: {error}"),
+                        None,
+                    ));
                     return;
                 }
             };
@@ -484,7 +486,10 @@ async fn read_peer(
             let catalog = match Catalog::verify(&frame.plaintext, &expected) {
                 Ok(catalog) => catalog,
                 Err(rejection) => {
-                    send(Found::Rejected(rejection.to_string()));
+                    send(Found::Rejected(
+                        rejection.to_string(),
+                        Catalog::claimed(&frame.plaintext),
+                    ));
                     return;
                 }
             };
@@ -496,7 +501,7 @@ async fn read_peer(
                 let checkpoints = match peer.track(SIG).await {
                     Ok(track) => track,
                     Err(error) => {
-                        send(Found::Rejected(format!("no checkpoints: {error}")));
+                        send(Found::Rejected(format!("no checkpoints: {error}"), None));
                         return;
                     }
                 };

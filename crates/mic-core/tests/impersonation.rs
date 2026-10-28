@@ -130,11 +130,23 @@ async fn a_member_posing_as_another_is_rejected() {
         bytes
     });
 
-    let mut reasons: Vec<String> = rejected(&bob, 2)
-        .await
-        .into_iter()
-        .map(|rejected| rejected.reason)
-        .collect();
+    let both = rejected(&bob, 2).await;
+    // Each poses as Alice: one at her path, one naming her, once Bob has her.
+    let mut state = bob.state();
+    let alices = alice.participant();
+    let posing = tokio::time::timeout(
+        PATIENCE,
+        state.wait_for(|state| {
+            state
+                .rejected
+                .iter()
+                .all(|rejected| rejected.posing_as == Some(alices))
+        }),
+    )
+    .await
+    .is_ok();
+    assert!(posing, "{:?}", bob.state().borrow().rejected);
+    let mut reasons: Vec<String> = both.into_iter().map(|rejected| rejected.reason).collect();
     reasons.sort();
     assert!(
         reasons[0].contains("naming a participant whose path this isn't"),
