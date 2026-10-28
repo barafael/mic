@@ -1,0 +1,77 @@
+import { Theme } from "../theme.slint";
+
+// What to share, over the window while it's asked: a click outside or Escape cancels.
+export component SharePicker inherits Rectangle {
+    // What there is to share.
+    in property <[string]> choices;
+    // The choice at this index; none (-1) cancels.
+    callback share(int);
+    background: #000000a8;
+    TouchArea {
+        clicked => {
+            root.share(-1);
+        }
+    }
+    picker := FocusScope {
+        init => {
+            picker.focus();
+        }
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.share(-1);
+                return accept;
+            }
+            reject
+        }
+        Rectangle {
+            width: Math.min(460px, root.width - 32px);
+            height: Math.min(list.preferred-height, root.height - 32px);
+            background: Theme.surface;
+            border-radius: 14px;
+            TouchArea { }
+            list := VerticalLayout {
+                padding: 16px;
+                spacing: 6px;
+                Text {
+                    text: "Share your screen";
+                    color: Theme.text;
+                    font-size: 16px;
+                    font-weight: 600;
+                }
+                for choice[i] in root.choices: Rectangle {
+                    height: 36px;
+                    border-radius: 8px;
+                    background: pick.has-hover ? Theme.raised-hover : Theme.raised;
+                    accessible-role: button;
+                    accessible-label: choice;
+                    accessible-action-default => {
+                        root.share(i);
+                    }
+                    Text {
+                        x: 12px;
+                        width: parent.width - 24px;
+                        text: choice;
+                        color: Theme.text;
+                        font-size: 13px;
+                        overflow: elide;
+                    }
+                    pick := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => {
+                            root.share(i);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component SharePickerPreview inherits Rectangle {
+    width: 600px;
+    height: 300px;
+    background: Theme.canvas;
+    SharePicker {
+        choices: ["Entire screen: DP-3 (3840×2160)", "Window: Steam (steam)"];
+    }
+}

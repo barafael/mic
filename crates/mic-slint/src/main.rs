@@ -70,6 +70,11 @@ struct Cli {
     #[cfg(all(unix, feature = "harness"))]
     #[arg(long)]
     harness: Option<PathBuf>,
+    /// A device secret for this run alone, in memory: no keyring is asked, for windows by the
+    /// dozen on one machine.
+    #[cfg(all(unix, feature = "harness"))]
+    #[arg(long, hide = true, conflicts_with = "keyring")]
+    ephemeral: bool,
     /// Sends a tone at this many Hz for a voice, and plays the others into an analyzer the
     /// harness reads, instead of devices: the box's synthetic microphone and speaker.
     #[cfg(all(unix, feature = "harness"))]
@@ -210,8 +215,15 @@ fn run(cli: Cli) -> Result<(), String> {
         config.decoders = decoders;
     }
     // Before the window: the keyring may ask to be unlocked.
-    let keyring = Keyring::named(&cli.keyring).map_err(|error| error.to_string())?;
-    let client = Client::new(config, &keyring, runtime.handle().clone())
+    #[cfg(all(unix, feature = "harness"))]
+    let store: Box<dyn mic_core::secrets::SecretStore> = if cli.ephemeral {
+        Box::new(mic_core::secrets::InMemory::default())
+    } else {
+        Box::new(Keyring::named(&cli.keyring).map_err(|error| error.to_string())?)
+    };
+    #[cfg(not(all(unix, feature = "harness")))]
+    let store = Box::new(Keyring::named(&cli.keyring).map_err(|error| error.to_string())?);
+    let client = Client::new(config, store.as_ref(), runtime.handle().clone())
         .map_err(|error| error.to_string())?;
     // The system's microphone and speaker; with the harness and `--tone` or `--camera-pattern`,
     // the box's synthetic ones instead.
@@ -244,6 +256,11 @@ fn run(cli: Cli) -> Result<(), String> {
     slint::set_xdg_app_id(APP_ID).map_err(|error| format!("the app id: {error}"))?;
     mic_media::video::screen::set_app_id(APP_ID);
     let window = AppWindow::new().map_err(|error| format!("the window: {error}"))?;
+    if gpu.is_none() {
+        window
+            .global::<ui::Theme>()
+            .set_emoji_font(slint::SharedString::new());
+    }
     window.set_version(env!("CARGO_PKG_VERSION").into());
     let tiles = Rc::new(VecModel::<Tile>::default());
     window.set_tiles(ModelRc::from(tiles.clone()));
@@ -288,6 +305,7 @@ fn run(cli: Cli) -> Result<(), String> {
             let Some(shown) = window.upgrade() else {
                 return;
             };
+            shown.set_join_note(slint::SharedString::new());
             let invite = match invite.trim().parse::<Invite>() {
                 Ok(invite) => invite,
                 Err(error) => {
@@ -555,10 +573,15 @@ fn run(cli: Cli) -> Result<(), String> {
             text: text.to_string(),
         });
     });
+    // Leaving with the button: the join screen says so, the invite still filled in to rejoin.
     window.on_leave({
         let app = app.clone();
         let runtime = runtime.handle().clone();
+        let window = window.as_weak();
         move || {
+            if let Some(window) = window.upgrade() {
+                window.set_join_note("You left the room.".into());
+            }
             let app = app.clone();
             runtime.spawn(async move { app.leave().await });
         }
