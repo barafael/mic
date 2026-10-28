@@ -47,6 +47,10 @@ pub const GRACE: Duration = Duration::from_secs(2);
 const HEARTBEAT: Duration = Duration::from_secs(1);
 /// How long a group stays in checkpoints after it last changed.
 const RECENT: Duration = Duration::from_secs(3);
+
+/// How many of a track's newest groups a subscriber keeps what checkpoints said of, read or
+/// not: more than a relay hands a subscription that comes back (it keeps seconds of them).
+const KEPT_GROUPS: u64 = 64;
 const FRAMES: &[u8] = b"mic/v1/frames\0";
 const DOMAIN: &[u8] = b"mic/v1/checkpoint\0";
 const FORMAT: u32 = 1;
@@ -560,9 +564,26 @@ impl VerificationState {
         for key in done {
             self.read.remove(&key);
         }
+        // What checkpoints said of a track's newest groups is kept whatever's read: a camera
+        // watched again is read from its group's start, and a relay may hand over a group done
+        // with, which no checkpoint lists any more. A few bytes a group, as many as a relay
+        // keeps.
+        let mut newest: HashMap<&str, u64> = HashMap::new();
+        for (track, group) in self.confirmed.keys() {
+            let most = newest.entry(track.as_str()).or_insert(*group);
+            *most = (*most).max(*group);
+        }
+        let newest: HashMap<String, u64> = newest
+            .into_iter()
+            .map(|(track, group)| (track.to_owned(), group))
+            .collect();
         let read = &self.read;
         self.confirmed.retain(|key, (_, _, when)| {
-            read.contains_key(key) || now.saturating_duration_since(*when) <= RECENT * 2
+            read.contains_key(key)
+                || now.saturating_duration_since(*when) <= RECENT * 2
+                || newest
+                    .get(&key.0)
+                    .is_some_and(|most| most - key.1 < KEPT_GROUPS)
         });
     }
 
@@ -750,7 +771,46 @@ mod tests {
         let mut kept: Vec<_> = state.read.keys().cloned().collect();
         kept.sort();
         assert_eq!(kept, [("camera".to_owned(), 99), ("voice".to_owned(), 0)],);
-        assert_eq!(state.confirmed.len(), 1);
+        // What was said of the camera's newest groups stays, read or not.
+        let mut said: Vec<u64> = state.confirmed.keys().map(|(_, group)| *group).collect();
+        said.sort_unstable();
+        assert_eq!(said, (100 - KEPT_GROUPS..100).collect::<Vec<_>>());
+    }
+
+    /// A camera watched again is read from a group's start, and the relay may hand it a group
+    /// done with, which checkpoints no longer list: what they said of it before still confirms
+    /// it, so the sender isn't taken for a forger (CI's macOS runner, PLAN.md commit 71).
+    #[test]
+    fn a_group_read_again_after_a_camera_comes_back_is_confirmed() {
+        let verification = Verification::default();
+        for group in 0..10 {
+            verification.read("camera", group, b"frame");
+            let hash = chain_next(&chain_start("camera", group), b"frame");
+            verification.checkpoint(checkpoint(
+                group + 1,
+                vec![Entry {
+                    track: "camera".to_owned(),
+                    group,
+                    frames: 1,
+                    hash,
+                }],
+            ));
+        }
+        verification
+            .0
+            .lock()
+            .unwrap()
+            .prune(Instant::now() + RECENT * 3);
+        verification.abandon("camera");
+        verification.resume("camera");
+        verification.read("camera", 0, b"frame");
+        let state = verification.0.lock().unwrap();
+        let read = &state.read[&("camera".to_owned(), 0)];
+        assert_eq!(
+            read.confirmed,
+            read.links.len(),
+            "group 0 read again, unconfirmed"
+        );
     }
 
     #[test]
