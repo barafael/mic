@@ -188,7 +188,8 @@ pub struct Ui {
     /// not its own camera's preview.
     #[serde(default)]
     pub video: Vec<String>,
-    /// What the window says of the version, if anything: a newer one is out.
+    /// What the window says of the version, if anything: a newer one is out. None once
+    /// dismissed (Not now).
     #[serde(default)]
     pub notice: Option<String>,
     /// The link the window asks whether to leave the call for, while it asks.
@@ -245,6 +246,16 @@ pub struct Ui {
     /// What the join screen's name field holds: the name it joins with next.
     #[serde(default)]
     pub name: String,
+    /// What the room's warning says, if it warns: who's posed as, and what to do.
+    #[serde(default)]
+    pub warning: Option<String>,
+    /// The chat's times, `HH:MM`, in step with `chat`.
+    #[serde(default)]
+    pub chat_times: Vec<String>,
+    /// What the join screen says under its card after Leave, as "You left the room.", with
+    /// Rejoin; none otherwise.
+    #[serde(default)]
+    pub join_note: Option<String>,
 }
 
 /// What drawing a frontend's video tiles costs, over the last second: the others' cameras, not
