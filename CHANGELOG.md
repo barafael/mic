@@ -62,6 +62,12 @@ Linux, Windows and macOS.
 - Over the WebSocket fallback, a client sees about ten others: the relay's stream limit there.
 - Under heavy loss, a voice clicks: there's no jitter buffer with loss concealment yet.
 - Unsigned packages: Windows and macOS warn on first start.
+- A recording's WebM has no duration in its header (it's written as a live stream): a player may
+  show no length or seek bar.
+- Where PipeWire has no default microphone, "System default" opens none, and the window doesn't
+  say so: choose the microphone by name in the settings.
+- Screen sharing as an X11 client of a Wayland desktop (Xwayland) fails: under Wayland, mic shares
+  through the desktop's portal.
 - A camera that's plugged in during a call is offered from the next join; one there at the join
   can be switched in the settings at any time.
 - Admission is tested against the test suite's relay, not yet in the box with a real
