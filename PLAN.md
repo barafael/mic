@@ -664,7 +664,10 @@ M11; pushing, and publishing the release, are the user's.
 73. `release: a draft` (C): a tag `v0.1.0` runs the release workflow; the draft's packages are
     downloaded and started: the AppImage and the tarball in a clean container, the dmg and the
     zip on CI's runners where a start can be checked. What doesn't start is fixed, and tagged
-    again.
+    again. *Done:* a dry run by hand first (the same packages as artifacts, no release), each
+    package started from what's unpacked on its runner; the AppImage's window on a clean
+    Ubuntu 24.04 with a keyring. Then `v0.1.0` at 61d6615: the draft "mic 0.1.0" has the
+    AppImage, the tarball, the dmg and the zip, none of them needing a second tag.
 74. `testplan: 0.1.0 by hand` (W on this host's desktop, the user on macOS and Windows):
     TESTPLAN.md's steps with the draft's packages, the results in its table; what doesn't hold
     is fixed or goes into the changelog's known limits. Then the user publishes the release.
