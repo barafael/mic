@@ -81,5 +81,50 @@ Write down, for each step: the platform and its version, the package, and what h
 
 | Step | Linux (X11) | Linux (Wayland) | macOS | Windows |
 |---|---|---|---|---|
-| 1–12 | | | | |
-| Platform's own | | | | |
+| 1. First start | Holds (a) | Starts and keeps its secret (a); window not seen (c) | | |
+| 2. A call | Tiles and mute hold; hearing not checked (b) | Not run (c) | | |
+| 3. Devices | Not run (d) | Not run (d) | | |
+| 4. Camera | No webcam: button off, initials, settings say "No camera" | Not run (c) | | |
+| 5. Screen sharing | Fails under Xwayland (e) | Not run on 0.1.0 (c) | | |
+| 6. Chat, reactions, hand | Holds | Not run (c) | | |
+| 7. Recording | Holds, but no screen and no voices (f) | Not run (c) | | |
+| 8. Links | Holds, after a fix (g) | Not run (c) | | |
+| 9. A newer version | Holds (h) | Not run (c) | | |
+| 10. UDP blocked | Not run (i) | Not run (i) | | |
+| 11. A narrow window | Holds | Not run (c) | | |
+| 12. Leaving | Holds (j) | Not run (c) | | |
+| Platform's own | AppImage holds; tarball fails (k) | AppImage starts, renders on the GPU | | |
+
+**Linux, 2026-10-29:** CachyOS (rolling), KDE Plasma 6.8.1 on Wayland, Radeon 8060S, the draft's
+AppImage and tarball (v0.1.0 at 61d6615), a local test relay, and two windows on one machine with
+their own keyring services. Screenshots of the real desktop failed that night (KWin refused every
+capture), so the X11 column is mic as an X11 client of a nested `kwin_wayland --virtual`'s
+Xwayland, driven with xdotool; the Wayland column is only what the real desktop showed in logs.
+This host has no X11 session and no webcam.
+
+- (a) Kept in the Secret Service (KWallet, unlocked, so nothing asked); a second start is the same
+  participant, the same tile colour at the other end.
+- (b) Both windows on one machine, at night. The host has no default audio source (WirePlumber's
+  is unset; `pw-record` fails the same way), so "System default" didn't open, and the window
+  doesn't say so: only the settings' level meter stays empty. Choosing the device by name worked.
+- (c) To walk with the user once the desktop takes screenshots again; the Wayland portal share
+  held on dev builds on 2026-10-28.
+- (d) Needs a person in the room.
+- (e) Xwayland's root window refuses `GetImage` (BadMatch), as on the real desktop; a real X11
+  server is needed. The failure shows as "Your screen share stopped."
+- (f) 68 s of VP9 and Opus at 1280×720, the grid with names and the recording badge; both banners
+  showed. No screen (e), and the voices are near silence (b). The WebM has no duration in its
+  header: players may show no length or seek bar.
+- (g) `--register` writes `io.github.barafael.mic.desktop` naming the AppImage itself, and its
+  icon. `xdg-open` stood in for the browser: a link while in a call asks first, and "Leave and
+  join" joins. The raised hand came along into the new room (and a share or recording would
+  have): fixed on this branch. A link with mic not running wasn't tried: `--register` doesn't keep
+  `--fingerprint`, which the local relay needs.
+- (h) Both notices: a newer version ("Download", "Not now"), and one this version can't join rooms
+  with. The second doesn't stop a join.
+- (i) Needs root for the firewall; the box's network phase covers the fallback.
+- (j) Closed politely, the other end drops it at once, with no warning. A window destroyed from
+  outside (`XDestroyWindow`) panics in wgpu (`Surface::configure`), and the other end then logs
+  its audio as unsigned, though it shows no warning.
+- (k) It needed `libvpx.so.9` (this host has `.so.12`); libvpx is linked statically on main since,
+  and the packages are to be made again.

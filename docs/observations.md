@@ -6,6 +6,26 @@ measurements, and things to revisit. Newest first within each milestone. Each sa
 
 ## M13: 0.1.0 out
 
+- **A link's "Leave and join" carried the hand into the next room** (settled, mic-slint
+  `on_answer`). It took the whole profile of the call it left, so a share or a recording would
+  have shown in the next room too; now only the name, mute and camera carry over. (TESTPLAN
+  step 8)
+- **"System default" fails silently where the desktop has no default source** (open, mic-media
+  `audio::device`). PipeWire's `no target node available` is only logged; the window looks like a
+  call with a working microphone. Falling back to the first source, or a notice, would do.
+  (TESTPLAN step 2, this host)
+- **A recording's WebM has no duration** (open, mic-core `recording`). moq-mux's exporter writes
+  it as a live stream, so ffprobe says `N/A` and players may show no length or seek bar. Writing
+  Duration and Cues when it ends (or a remux) would fix it.
+- **A window destroyed from outside panics** (open). `XDestroyWindow` while mic draws: wgpu's
+  `Surface::configure` validation error is fatal. A polite close is clean.
+- **xdotool on a nested Xwayland reads stale pixels** (settled, how to drive it). `x11grab -window_id`
+  shows a window as it was one update before, so a window looks frozen: move the pointer over it
+  and grab again. A window placed partly under another shows old pixels too.
+- **The real desktop refused screenshots at night** (observed). Spectacle's KWin request failed
+  without a reason and `kscreen-doctor` hung, with the session unlocked; a nested
+  `kwin_wayland --virtual` stood in.
+
 - **A camera watched again took its honest sender for a forger, under load** (settled, mic-core
   `sig`; open, a group cut short). On CI's runners, and here with every core busy (5 of 30): a
   camera let go of and taken up again is handed a stale group by the relay, which cancels it a

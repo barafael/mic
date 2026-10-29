@@ -439,9 +439,14 @@ fn run(cli: Cli) -> Result<(), String> {
                 .current()
                 .map(|room| room.state().borrow().me.profile.clone())
                 .or_else(|| app.last_profile());
-            let Some(profile) = profile else {
+            let Some(mut profile) = profile else {
                 return;
             };
+            // The rest was this call's: the next room doesn't see a hand, a share or a recording
+            // it never had.
+            profile.hand = false;
+            profile.sharing = false;
+            profile.recording = false;
             shown.set_joining(true);
             join(&runtime, &app, window.clone(), invite, profile);
         }
