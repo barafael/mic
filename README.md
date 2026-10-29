@@ -33,7 +33,7 @@ platform. They aren't signed yet, so the first start asks to be let through.
 
 - **Linux:** `mic-<version>-x86_64.AppImage`, made executable, or the tarball. Either wants what
   a desktop has: glibc 2.39 or newer, ALSA, fontconfig and freetype, PipeWire, and Vulkan for
-  drawing video on the GPU (without it mic draws in software). The tarball also wants libvpx.
+  drawing video on the GPU (without it mic draws in software).
   `mic --register` (or `mic.AppImage --register`) makes mic what opens `mic://` links, with the
   options it's given, such as `--relay`.
 - **macOS:** open the dmg and drag mic into Applications. It's signed ad hoc only: the first

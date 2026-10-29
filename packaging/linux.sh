@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # mic's Linux release into $1: a tarball of the binary, its desktop file and icon, and an AppImage
-# of the same. The binary links libvpx statically where VPX_STATIC=1 finds a static one (CI);
-# otherwise the AppImage carries the libvpx it links, and the tarball wants the system's. The rest
+# of the same. The binary links libvpx statically where it's told where libvpx.a is
+# (VPX_LIB_DIR, VPX_INCLUDE_DIR, VPX_VERSION and VPX_STATIC=1, as CI's release does: through
+# pkg-config alone, VPX_STATIC links the shared one); otherwise the AppImage carries the libvpx it
+# links, and the tarball wants the system's, of that soname. The rest
 # (Vulkan, X11 or Wayland, ALSA, fontconfig) is the system's, as a desktop has them.
 #
 # The AppImage takes appimagetool and its runtime from $APPIMAGETOOL and $APPIMAGE_RUNTIME

@@ -62,10 +62,23 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libfontconfig1-dev libxkbcommon-dev libasound2-dev libvpx-dev libpipewire-0.3-dev
+          # libvpx's binding links statically only where it's told where libvpx is: through
+          # pkg-config, a system library is linked as the shared one, libvpx.so.9, which only
+          # Ubuntu 24.04 and Debian 13 have (the tarball didn't start on Arch or Fedora).
+          # Where libvpx.a is: Ubuntu's vpx.pc says /usr/lib, which hasn't it.
+          echo "VPX_LIB_DIR=$(dirname "$(dpkg -L libvpx-dev | grep 'libvpx\.a$')")" >> "$GITHUB_ENV"
+          echo "VPX_INCLUDE_DIR=$(pkg-config --variable=includedir vpx)" >> "$GITHUB_ENV"
+          echo "VPX_VERSION=$(pkg-config --modversion vpx)" >> "$GITHUB_ENV"
           echo "VPX_STATIC=1" >> "$GITHUB_ENV"
       - if: runner.os == 'macOS'
         run: |
           brew install libvpx pkg-config librsvg
+          # As on Linux: told where Homebrew's libvpx is, the binding links its libvpx.a, and
+          # a Mac without Homebrew starts mic.
+          vpx=$(brew --prefix libvpx)
+          echo "VPX_LIB_DIR=$vpx/lib" >> "$GITHUB_ENV"
+          echo "VPX_INCLUDE_DIR=$vpx/include" >> "$GITHUB_ENV"
+          echo "VPX_VERSION=$(pkg-config --modversion vpx)" >> "$GITHUB_ENV"
           echo "VPX_STATIC=1" >> "$GITHUB_ENV"
       - if: runner.os == 'Windows'
         shell: bash
@@ -95,10 +108,18 @@ jobs:
           ./dist/mic-*.AppImage --appimage-extract-and-run --version
           mkdir -p "$RUNNER_TEMP/tar" && tar xzf dist/mic-*.tar.gz -C "$RUNNER_TEMP/tar"
           "$RUNNER_TEMP"/tar/mic-*/mic --version
+          # libvpx in the binary, not beside it: a distribution's is another soname.
+          if ldd "$RUNNER_TEMP"/tar/mic-*/mic | grep -q libvpx; then
+            echo "mic links libvpx dynamically"; exit 1
+          fi
       - if: runner.os == 'macOS'
         run: |
           mount=$(hdiutil attach -nobrowse -readonly dist/mic-*.dmg | awk -F'\t' '/\/Volumes\// { print $NF }')
           "$mount/mic.app/Contents/MacOS/mic" --version
+          # libvpx in the binary: a Mac hasn't Homebrew's.
+          if otool -L "$mount/mic.app/Contents/MacOS/mic" | grep -q libvpx; then
+            echo "mic links libvpx dynamically"; exit 1
+          fi
           hdiutil detach "$mount"
       - if: runner.os == 'Windows'
         shell: bash
