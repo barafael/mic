@@ -93,7 +93,7 @@ Write down, for each step: the platform and its version, the package, and what h
 | 10. UDP blocked | Not run (i) | Not run (i) | | |
 | 11. A narrow window | Holds | Not run (c) | | |
 | 12. Leaving | Holds (j) | Not run (c) | | |
-| Platform's own | AppImage holds; tarball fails (k) | AppImage starts, renders on the GPU | | |
+| Platform's own | AppImage and tarball hold (k) | AppImage starts, renders on the GPU | | |
 
 **Linux, 2026-10-29:** CachyOS (rolling), KDE Plasma 6.8.1 on Wayland, Radeon 8060S, the draft's
 AppImage and tarball (v0.1.0 at 61d6615), a local test relay, and two windows on one machine with
@@ -118,7 +118,7 @@ This host has no X11 session and no webcam.
 - (g) `--register` writes `io.github.barafael.mic.desktop` naming the AppImage itself, and its
   icon. `xdg-open` stood in for the browser: a link while in a call asks first, and "Leave and
   join" joins. The raised hand came along into the new room (and a share or recording would
-  have): fixed on this branch. A link with mic not running wasn't tried: `--register` doesn't keep
+  have): fixed in bc18b97, in the re-tagged draft. A link with mic not running wasn't tried: `--register` doesn't keep
   `--fingerprint`, which the local relay needs.
 - (h) Both notices: a newer version ("Download", "Not now"), and one this version can't join rooms
   with. The second doesn't stop a join.
@@ -126,5 +126,8 @@ This host has no X11 session and no webcam.
 - (j) Closed politely, the other end drops it at once, with no warning. A window destroyed from
   outside (`XDestroyWindow`) panics in wgpu (`Surface::configure`), and the other end then logs
   its audio as unsigned, though it shows no warning.
-- (k) It needed `libvpx.so.9` (this host has `.so.12`); libvpx is linked statically on main since,
-  and the packages are to be made again.
+- (k) The first draft's tarball needed `libvpx.so.9` (this host has `.so.12`). The re-tagged
+  draft (v0.1.0 at 88769e6) links libvpx statically: its tarball starts with no libvpx in `ldd`,
+  holds a call with the AppImage (tiles, the hand), and `./mic --register` writes the desktop
+  file naming the unpacked binary, and its icon; a link while in a call asks first. Its AppImage
+  starts too.
