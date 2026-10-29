@@ -667,10 +667,17 @@ M11; pushing, and publishing the release, are the user's.
     again. *Done:* a dry run by hand first (the same packages as artifacts, no release), each
     package started from what's unpacked on its runner; the AppImage's window on a clean
     Ubuntu 24.04 with a keyring. Then `v0.1.0` at 61d6615: the draft "mic 0.1.0" has the
-    AppImage, the tarball, the dmg and the zip, none of them needing a second tag.
+    AppImage, the tarball, the dmg and the zip. A second tag after all: the TESTPLAN walk found
+    the tarball wanted libvpx.so.9 and the dmg Homebrew's libvpx (VPX_STATIC was ignored without
+    VPX_LIB_DIR); both link it statically now, the start check fails one that doesn't, and
+    `v0.1.0` moved, unpublished, to 88769e6.
 74. `testplan: 0.1.0 by hand` (W on this host's desktop, the user on macOS and Windows):
     TESTPLAN.md's steps with the draft's packages, the results in its table; what doesn't hold
     is fixed or goes into the changelog's known limits. Then the user publishes the release.
+    *Linux done* (W, KDE Plasma 6.8.1 on CachyOS, the AppImage): steps 1, 6, 8, 9, 11, 12 hold;
+    5 fails under Xwayland; 7 holds without a duration in the WebM's header; 2 and 4 partly;
+    3 and 10 not run. Its fix: a room a link switches to starts without the last call's hand,
+    share or recording. **Left for the user:** macOS and Windows, the Wayland column, publishing.
 
 ### After v1
 
