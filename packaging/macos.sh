@@ -2,7 +2,8 @@
 # mic's macOS release into $1: mic.app in a dmg, beside a link to Applications. The bundle's
 # Info.plist makes it what opens mic:// links once it's in Applications, and asks for the
 # microphone and the camera; screen sharing asks on its own. Signed ad hoc only: Gatekeeper warns
-# on first start (right-click, Open). libvpx is linked statically (VPX_STATIC=1, Homebrew's).
+# on first start (right-click, Open). libvpx is linked statically (Homebrew's
+# libvpx.a, by VPX_LIB_DIR and VPX_STATIC=1, as CI's release sets them).
 #
 # Needs rsvg-convert (Homebrew's librsvg) for the icon; iconutil and hdiutil are macOS's.
 set -euo pipefail
