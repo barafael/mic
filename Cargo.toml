@@ -37,24 +37,24 @@ debug = "line-tables-only"
 # from that one commit, the 0.1.16 release plus the two, so they stay one copy each. Drop once
 # moq-dev/moq releases them.
 [patch.crates-io]
-hang = { git = "https://github.com/barafael/moq", rev = "ceda4e39f4462b2f6b089598b526a9f03deb21dd" }
-kio = { git = "https://github.com/barafael/moq", rev = "ceda4e39f4462b2f6b089598b526a9f03deb21dd" }
-moq-audio = { git = "https://github.com/barafael/moq", rev = "ceda4e39f4462b2f6b089598b526a9f03deb21dd" }
-moq-auth = { git = "https://github.com/barafael/moq", rev = "ceda4e39f4462b2f6b089598b526a9f03deb21dd" }
-moq-binary = { git = "https://github.com/barafael/moq", rev = "ceda4e39f4462b2f6b089598b526a9f03deb21dd" }
-moq-e2ee = { git = "https://github.com/barafael/moq", rev = "ceda4e39f4462b2f6b089598b526a9f03deb21dd" }
-moq-flate = { git = "https://github.com/barafael/moq", rev = "ceda4e39f4462b2f6b089598b526a9f03deb21dd" }
-moq-json = { git = "https://github.com/barafael/moq", rev = "ceda4e39f4462b2f6b089598b526a9f03deb21dd" }
-moq-loc = { git = "https://github.com/barafael/moq", rev = "ceda4e39f4462b2f6b089598b526a9f03deb21dd" }
-moq-msf = { git = "https://github.com/barafael/moq", rev = "ceda4e39f4462b2f6b089598b526a9f03deb21dd" }
-moq-mux = { git = "https://github.com/barafael/moq", rev = "ceda4e39f4462b2f6b089598b526a9f03deb21dd" }
-moq-net = { git = "https://github.com/barafael/moq", rev = "ceda4e39f4462b2f6b089598b526a9f03deb21dd" }
-moq-pattern = { git = "https://github.com/barafael/moq", rev = "ceda4e39f4462b2f6b089598b526a9f03deb21dd" }
-moq-relay = { git = "https://github.com/barafael/moq", rev = "ceda4e39f4462b2f6b089598b526a9f03deb21dd" }
-moq-sock = { git = "https://github.com/barafael/moq", rev = "ceda4e39f4462b2f6b089598b526a9f03deb21dd" }
-moq-stats = { git = "https://github.com/barafael/moq", rev = "ceda4e39f4462b2f6b089598b526a9f03deb21dd" }
-moq-tokio = { git = "https://github.com/barafael/moq", rev = "ceda4e39f4462b2f6b089598b526a9f03deb21dd" }
-moq-video = { git = "https://github.com/barafael/moq", rev = "ceda4e39f4462b2f6b089598b526a9f03deb21dd" }
+hang = { git = "https://github.com/barafael/moq", rev = "89729fe4695697f98196d46c7cbde84fa5713602" }
+kio = { git = "https://github.com/barafael/moq", rev = "89729fe4695697f98196d46c7cbde84fa5713602" }
+moq-audio = { git = "https://github.com/barafael/moq", rev = "89729fe4695697f98196d46c7cbde84fa5713602" }
+moq-auth = { git = "https://github.com/barafael/moq", rev = "89729fe4695697f98196d46c7cbde84fa5713602" }
+moq-binary = { git = "https://github.com/barafael/moq", rev = "89729fe4695697f98196d46c7cbde84fa5713602" }
+moq-e2ee = { git = "https://github.com/barafael/moq", rev = "89729fe4695697f98196d46c7cbde84fa5713602" }
+moq-flate = { git = "https://github.com/barafael/moq", rev = "89729fe4695697f98196d46c7cbde84fa5713602" }
+moq-json = { git = "https://github.com/barafael/moq", rev = "89729fe4695697f98196d46c7cbde84fa5713602" }
+moq-loc = { git = "https://github.com/barafael/moq", rev = "89729fe4695697f98196d46c7cbde84fa5713602" }
+moq-msf = { git = "https://github.com/barafael/moq", rev = "89729fe4695697f98196d46c7cbde84fa5713602" }
+moq-mux = { git = "https://github.com/barafael/moq", rev = "89729fe4695697f98196d46c7cbde84fa5713602" }
+moq-net = { git = "https://github.com/barafael/moq", rev = "89729fe4695697f98196d46c7cbde84fa5713602" }
+moq-pattern = { git = "https://github.com/barafael/moq", rev = "89729fe4695697f98196d46c7cbde84fa5713602" }
+moq-relay = { git = "https://github.com/barafael/moq", rev = "89729fe4695697f98196d46c7cbde84fa5713602" }
+moq-sock = { git = "https://github.com/barafael/moq", rev = "89729fe4695697f98196d46c7cbde84fa5713602" }
+moq-stats = { git = "https://github.com/barafael/moq", rev = "89729fe4695697f98196d46c7cbde84fa5713602" }
+moq-tokio = { git = "https://github.com/barafael/moq", rev = "89729fe4695697f98196d46c7cbde84fa5713602" }
+moq-video = { git = "https://github.com/barafael/moq", rev = "89729fe4695697f98196d46c7cbde84fa5713602" }
 # femtovg 0.27, which Slint 1.18's wgpu renderer takes, with 0.28's fix (#366) backported:
 # 0.27 drops every cached pipeline a flush didn't use, and Slint flushes once a layer, so every
 # frame rebuilt them (41 % of a core for a call of two, 12 % with it; docs/observations.md). Drop

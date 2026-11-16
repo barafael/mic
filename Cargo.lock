@@ -2837,7 +2837,7 @@ dependencies = [
 [[package]]
 name = "hang"
 version = "0.21.17"
-source = "git+https://github.com/barafael/moq?rev=ceda4e39f4462b2f6b089598b526a9f03deb21dd#ceda4e39f4462b2f6b089598b526a9f03deb21dd"
+source = "git+https://github.com/barafael/moq?rev=89729fe4695697f98196d46c7cbde84fa5713602#89729fe4695697f98196d46c7cbde84fa5713602"
 dependencies = [
  "bytes",
  "derive_more",
@@ -4107,7 +4107,7 @@ dependencies = [
 [[package]]
 name = "kio"
 version = "0.6.3"
-source = "git+https://github.com/barafael/moq?rev=ceda4e39f4462b2f6b089598b526a9f03deb21dd#ceda4e39f4462b2f6b089598b526a9f03deb21dd"
+source = "git+https://github.com/barafael/moq?rev=89729fe4695697f98196d46c7cbde84fa5713602#89729fe4695697f98196d46c7cbde84fa5713602"
 dependencies = [
  "loom",
  "smallvec",
@@ -4620,7 +4620,7 @@ dependencies = [
 [[package]]
 name = "moq-audio"
 version = "0.1.16"
-source = "git+https://github.com/barafael/moq?rev=ceda4e39f4462b2f6b089598b526a9f03deb21dd#ceda4e39f4462b2f6b089598b526a9f03deb21dd"
+source = "git+https://github.com/barafael/moq?rev=89729fe4695697f98196d46c7cbde84fa5713602#89729fe4695697f98196d46c7cbde84fa5713602"
 dependencies = [
  "bytes",
  "hang",
@@ -4635,7 +4635,7 @@ dependencies = [
 [[package]]
 name = "moq-auth"
 version = "0.2.2"
-source = "git+https://github.com/barafael/moq?rev=ceda4e39f4462b2f6b089598b526a9f03deb21dd#ceda4e39f4462b2f6b089598b526a9f03deb21dd"
+source = "git+https://github.com/barafael/moq?rev=89729fe4695697f98196d46c7cbde84fa5713602#89729fe4695697f98196d46c7cbde84fa5713602"
 dependencies = [
  "aws-lc-rs",
  "base64 0.23.1",
@@ -4660,7 +4660,7 @@ dependencies = [
 [[package]]
 name = "moq-binary"
 version = "0.1.16"
-source = "git+https://github.com/barafael/moq?rev=ceda4e39f4462b2f6b089598b526a9f03deb21dd#ceda4e39f4462b2f6b089598b526a9f03deb21dd"
+source = "git+https://github.com/barafael/moq?rev=89729fe4695697f98196d46c7cbde84fa5713602#89729fe4695697f98196d46c7cbde84fa5713602"
 dependencies = [
  "bytes",
  "kio 0.6.3",
@@ -4673,7 +4673,7 @@ dependencies = [
 [[package]]
 name = "moq-e2ee"
 version = "0.0.17"
-source = "git+https://github.com/barafael/moq?rev=ceda4e39f4462b2f6b089598b526a9f03deb21dd#ceda4e39f4462b2f6b089598b526a9f03deb21dd"
+source = "git+https://github.com/barafael/moq?rev=89729fe4695697f98196d46c7cbde84fa5713602#89729fe4695697f98196d46c7cbde84fa5713602"
 dependencies = [
  "aws-lc-rs",
  "base64 0.23.1",
@@ -4688,7 +4688,7 @@ dependencies = [
 [[package]]
 name = "moq-flate"
 version = "0.2.0"
-source = "git+https://github.com/barafael/moq?rev=ceda4e39f4462b2f6b089598b526a9f03deb21dd#ceda4e39f4462b2f6b089598b526a9f03deb21dd"
+source = "git+https://github.com/barafael/moq?rev=89729fe4695697f98196d46c7cbde84fa5713602#89729fe4695697f98196d46c7cbde84fa5713602"
 dependencies = [
  "bytes",
  "flate2",
@@ -4698,7 +4698,7 @@ dependencies = [
 [[package]]
 name = "moq-json"
 version = "0.5.14"
-source = "git+https://github.com/barafael/moq?rev=ceda4e39f4462b2f6b089598b526a9f03deb21dd#ceda4e39f4462b2f6b089598b526a9f03deb21dd"
+source = "git+https://github.com/barafael/moq?rev=89729fe4695697f98196d46c7cbde84fa5713602#89729fe4695697f98196d46c7cbde84fa5713602"
 dependencies = [
  "bytes",
  "kio 0.6.3",
@@ -4714,7 +4714,7 @@ dependencies = [
 [[package]]
 name = "moq-loc"
 version = "0.2.25"
-source = "git+https://github.com/barafael/moq?rev=ceda4e39f4462b2f6b089598b526a9f03deb21dd#ceda4e39f4462b2f6b089598b526a9f03deb21dd"
+source = "git+https://github.com/barafael/moq?rev=89729fe4695697f98196d46c7cbde84fa5713602#89729fe4695697f98196d46c7cbde84fa5713602"
 dependencies = [
  "bytes",
  "moq-net",
@@ -4724,7 +4724,7 @@ dependencies = [
 [[package]]
 name = "moq-msf"
 version = "0.5.1"
-source = "git+https://github.com/barafael/moq?rev=ceda4e39f4462b2f6b089598b526a9f03deb21dd#ceda4e39f4462b2f6b089598b526a9f03deb21dd"
+source = "git+https://github.com/barafael/moq?rev=89729fe4695697f98196d46c7cbde84fa5713602#89729fe4695697f98196d46c7cbde84fa5713602"
 dependencies = [
  "serde",
  "serde_json",
@@ -4734,7 +4734,7 @@ dependencies = [
 [[package]]
 name = "moq-mux"
 version = "0.10.17"
-source = "git+https://github.com/barafael/moq?rev=ceda4e39f4462b2f6b089598b526a9f03deb21dd#ceda4e39f4462b2f6b089598b526a9f03deb21dd"
+source = "git+https://github.com/barafael/moq?rev=89729fe4695697f98196d46c7cbde84fa5713602#89729fe4695697f98196d46c7cbde84fa5713602"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
@@ -4768,7 +4768,7 @@ dependencies = [
 [[package]]
 name = "moq-net"
 version = "0.3.16"
-source = "git+https://github.com/barafael/moq?rev=ceda4e39f4462b2f6b089598b526a9f03deb21dd#ceda4e39f4462b2f6b089598b526a9f03deb21dd"
+source = "git+https://github.com/barafael/moq?rev=89729fe4695697f98196d46c7cbde84fa5713602#89729fe4695697f98196d46c7cbde84fa5713602"
 dependencies = [
  "arrayvec",
  "bytes",
@@ -4852,7 +4852,7 @@ dependencies = [
 [[package]]
 name = "moq-pattern"
 version = "0.1.3"
-source = "git+https://github.com/barafael/moq?rev=ceda4e39f4462b2f6b089598b526a9f03deb21dd#ceda4e39f4462b2f6b089598b526a9f03deb21dd"
+source = "git+https://github.com/barafael/moq?rev=89729fe4695697f98196d46c7cbde84fa5713602#89729fe4695697f98196d46c7cbde84fa5713602"
 dependencies = [
  "serde",
 ]
@@ -4860,7 +4860,7 @@ dependencies = [
 [[package]]
 name = "moq-relay"
 version = "0.17.8"
-source = "git+https://github.com/barafael/moq?rev=ceda4e39f4462b2f6b089598b526a9f03deb21dd#ceda4e39f4462b2f6b089598b526a9f03deb21dd"
+source = "git+https://github.com/barafael/moq?rev=89729fe4695697f98196d46c7cbde84fa5713602#89729fe4695697f98196d46c7cbde84fa5713602"
 dependencies = [
  "anyhow",
  "axum",
@@ -4897,7 +4897,7 @@ dependencies = [
 [[package]]
 name = "moq-sock"
 version = "0.2.0"
-source = "git+https://github.com/barafael/moq?rev=ceda4e39f4462b2f6b089598b526a9f03deb21dd#ceda4e39f4462b2f6b089598b526a9f03deb21dd"
+source = "git+https://github.com/barafael/moq?rev=89729fe4695697f98196d46c7cbde84fa5713602#89729fe4695697f98196d46c7cbde84fa5713602"
 dependencies = [
  "core_affinity",
  "libc",
@@ -4910,7 +4910,7 @@ dependencies = [
 [[package]]
 name = "moq-stats"
 version = "0.2.18"
-source = "git+https://github.com/barafael/moq?rev=ceda4e39f4462b2f6b089598b526a9f03deb21dd#ceda4e39f4462b2f6b089598b526a9f03deb21dd"
+source = "git+https://github.com/barafael/moq?rev=89729fe4695697f98196d46c7cbde84fa5713602#89729fe4695697f98196d46c7cbde84fa5713602"
 dependencies = [
  "moq-json",
  "moq-net",
@@ -4924,7 +4924,7 @@ dependencies = [
 [[package]]
 name = "moq-tokio"
 version = "0.19.29"
-source = "git+https://github.com/barafael/moq?rev=ceda4e39f4462b2f6b089598b526a9f03deb21dd#ceda4e39f4462b2f6b089598b526a9f03deb21dd"
+source = "git+https://github.com/barafael/moq?rev=89729fe4695697f98196d46c7cbde84fa5713602#89729fe4695697f98196d46c7cbde84fa5713602"
 dependencies = [
  "bytes",
  "dns-lookup",
@@ -4962,7 +4962,7 @@ dependencies = [
 [[package]]
 name = "moq-v4l"
 version = "0.1.0"
-source = "git+https://github.com/barafael/moq?rev=ceda4e39f4462b2f6b089598b526a9f03deb21dd#ceda4e39f4462b2f6b089598b526a9f03deb21dd"
+source = "git+https://github.com/barafael/moq?rev=89729fe4695697f98196d46c7cbde84fa5713602#89729fe4695697f98196d46c7cbde84fa5713602"
 dependencies = [
  "bitflags 2.13.2",
  "libc",
@@ -4971,7 +4971,7 @@ dependencies = [
 [[package]]
 name = "moq-video"
 version = "0.1.16"
-source = "git+https://github.com/barafael/moq?rev=ceda4e39f4462b2f6b089598b526a9f03deb21dd#ceda4e39f4462b2f6b089598b526a9f03deb21dd"
+source = "git+https://github.com/barafael/moq?rev=89729fe4695697f98196d46c7cbde84fa5713602#89729fe4695697f98196d46c7cbde84fa5713602"
 dependencies = [
  "anyhow",
  "ashpd",
