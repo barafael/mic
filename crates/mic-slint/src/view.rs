@@ -91,7 +91,7 @@ pub fn clock(at: u64) -> String {
         .ok()
         .and_then(|at| jiff::Timestamp::from_millisecond(at).ok())
         .map(|at| {
-            at.to_zoned(jiff::tz::TimeZone::system())
+            at.to_zoned_datetime(jiff::tz::TimeZone::system())
                 .strftime("%H:%M")
                 .to_string()
         })
